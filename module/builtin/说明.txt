@@ -1,3 +1,0 @@
-字体不放在仓库里（网页上传单文件上限 25MB，字体 44MB）。
-CI 打包时会从 Release 附件 fonts-v1 下载三合一 zip，拆出 none/colon/flair.ttf 放进来。
-详见 D:\ds2\接手文档.md
