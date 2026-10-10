@@ -33,7 +33,14 @@
 # 本脚本永远返回 0，避免影响安装流程。
 
 MODDIR=${0%/*}
-[ -n "$MODDIR" ] || MODDIR=/data/adb/modules/custom_font_switcher
+# 兜底：直接执行且 $0 没有目录部分时，找本机实际装着的配色包（不要写死主项目的 id）
+if [ -z "$MODDIR" ] || [ ! -f "$MODDIR/module.prop" ]; then
+  for _d in /data/adb/modules/porsche_font_*; do
+    [ -f "$_d/module.prop" ] || continue
+    MODDIR=$_d
+    break
+  done
+fi
 . "$MODDIR/common.sh" 2>/dev/null
 . "$MODDIR/slots.sh" 2>/dev/null
 . "$MODDIR/mount.sh" 2>/dev/null
@@ -42,7 +49,7 @@ LIB=${LIB:-/data/adb/custom_font_lib}
 SETTINGS=${SETTINGS:-$LIB/settings.conf}
 
 ID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
-[ -n "$ID" ] || ID=custom_font_switcher
+[ -n "$ID" ] || ID=${MODDIR##*/}
 M="/data/adb/modules/$ID"
 [ -d "$M" ] || M="$MODDIR"
 UPD="/data/adb/modules_update/$ID"
@@ -519,7 +526,7 @@ fi
 [ -n "$APPLIED_TTC" ] || APPLIED_TTC=0
 
 # 字体库清单
-LIB_FONTS=$(ls -1 "$LIB"/f*.ttf 2>/dev/null)
+LIB_FONTS=$(lib_font_files 2>/dev/null)      # 定义在 common.sh（本文件已 source）
 LIB_N=$(printf '%s\n' "$LIB_FONTS" | grep -c . )
 
 # ---------------------------------------------------------------------------
@@ -1119,7 +1126,7 @@ sec8() {
   ls -lZ /system/fonts 2>/dev/null | head -n 250 | while IFS= read -r L; do echo "      $L"; done
   echo "  /system/fonts 总占用: $(du -sk /system/fonts 2>/dev/null | cut -f1) KB"
   echo "  字体库文件（$(printf '%s\n' "$LIB_FONTS" | grep -c . ) 个）:"
-  ls -lZ "$LIB"/f*.ttf 2>/dev/null | head -n 30 | while IFS= read -r L; do echo "      $L"; done
+  ls -lZ "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf 2>/dev/null | head -n 30 | while IFS= read -r L; do echo "      $L"; done
   echo "  字体库名称/元数据:"
   for f in $LIB_FONTS; do
     i=${f##*/}; i=${i%.ttf}

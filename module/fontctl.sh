@@ -5,7 +5,7 @@
 #   sh fontctl.sh list                        列出字体库：id|名称|字节数|元数据
 #   sh fontctl.sh ls <base64(目录)>           列出手机存储目录（文件夹 + ttf/otf）
 #   sh fontctl.sh import <路径> [名称]         从手机存储导入字体（直接 cp，速度快）
-#   sh fontctl.sh upload-start                开始分块上传（WebUI 文件选择器用）
+#   sh fontctl.sh upload-start                开始分块上传（界面已移除导入功能，保留给命令行/以后用）
 #   sh fontctl.sh upload-finish <大小> [名称]  结束分块上传并入库
 #   sh fontctl.sh rename <id> <新名称>
 #   sh fontctl.sh delete <id> [id...]         删除（可多个；使用中的会跳过）
@@ -40,7 +40,15 @@ export TMPDIR="$LIB"
 
 APPLIED="$MODDIR/slots.applied"
 MODID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
-[ -n "$MODID" ] || MODID=custom_font_switcher
+# 兜底：module.prop 读不到时（异常情况）扫一下本机装的是哪个配色包。
+# 注意不要写死成主项目的 custom_font_switcher —— 换皮成保时捷后那个 id 根本不存在。
+if [ -z "$MODID" ]; then
+  for _d in /data/adb/modules/porsche_font_*; do
+    [ -f "$_d/module.prop" ] || continue
+    MODID=${_d##*/}
+    break
+  done
+fi
 
 # 旧版把设置放在模块目录（升级会被覆盖），迁移到字体库目录
 [ -f "$SETTINGS" ] || { [ -f "$MODDIR/settings.conf" ] && cp -f "$MODDIR/settings.conf" "$SETTINGS" 2>/dev/null; }
@@ -143,6 +151,9 @@ id_ok() {
   case "$1" in ""|*[!A-Za-z0-9_]*) return 1 ;; esac
   [ -f "$LIB/$1.ttf" ]
 }
+
+# 字体库枚举（lib_font_ids / lib_font_files）定义在 common.sh 里 ——
+# diag.sh 也要用它，而 diag.sh **不 source 本文件**，所以不能放这儿。
 
 check_id() {
   case "$1" in
@@ -268,10 +279,11 @@ refresh_prop() {
   A=$(cur_active); P=$(cur_pending)
   ROM_NAME=$(rom_name "$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')")
   [ -n "$(list_conflicts | head -n1)" ] && warn=" ⚠ 检测到其他字体模块，可能互相覆盖。"
+  # 内置配色版的描述：不说"导入自己的字体"（这一版不给导入），只说当前生效的是哪套配色
   if [ "$A" = "$P" ]; then
-    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")] 在 WebUI 导入自己的字体并切换，默认不替换任何字体。$warn"
+    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")] 内置配色版：素装(无色)/一点红/烈焰 三套一键切换，含在线更新与诊断报告。$warn"
   else
-    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")，待重启后生效：$(label_of "$P")] 在 WebUI 导入自己的字体并切换，默认不替换任何字体。$warn"
+    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")，待重启后生效：$(label_of "$P")] 内置配色版：素装(无色)/一点红/烈焰 三套一键切换，含在线更新与诊断报告。$warn"
   fi
   PROP_FILE="$MODDIR/module.prop"
   [ -f "$PROP_FILE" ] || return 0
@@ -345,8 +357,25 @@ commit_payload() {
   fi
   rm -rf "$stage" 2>/dev/null
 
-  if [ -f "$stage.list" ]; then mv -f "$stage.list" "$APPLIED"; else : > "$APPLIED"; fi
-  if [ -f "$stage.map" ]; then mv -f "$stage.map" "$MODDIR/slots.map"; else : > "$MODDIR/slots.map"; fi
+  # 写清单时按**完整路径**去一次重（保序）：
+  #   · slots.applied 只存路径 → 同一路径只该有一行；
+  #   · slots.map 一行是 "id 角色 路径"（或 "id 路径"）→ 用第 2 字段（路径）判重，
+  #     不能只看整行：同一个路径配上不同 id 也是错的（那会挂两次）。
+  # 为什么要在写入端再保一道：计划生成端已经去过重了，但那是"多来源合并"的地方
+  # （XML ∪ 静态清单 ∪ OEM 规则 ∪ 小米主题字体），真机上出现过同一个路径计两遍，
+  # 界面显示「已替换槽位 62」而设备上只有 31 个槽位存在。这里再兜一次最稳。
+  if [ -f "$stage.list" ]; then
+    awk '!seen[$0]++' "$stage.list" > "$stage.list.d" 2>/dev/null && mv -f "$stage.list.d" "$stage.list"
+    mv -f "$stage.list" "$APPLIED"
+  else
+    : > "$APPLIED"
+  fi
+  if [ -f "$stage.map" ]; then
+    awk '{ p = (NF >= 3 ? $3 : $2); if (seen[p]++) next; print }' "$stage.map" > "$stage.map.d" 2>/dev/null && mv -f "$stage.map.d" "$stage.map"
+    mv -f "$stage.map" "$MODDIR/slots.map"
+  else
+    : > "$MODDIR/slots.map"
+  fi
   echo "$mode" > "$MODDIR/payload.mode"
 }
 
@@ -376,8 +405,17 @@ do_apply() {
     mkdir -p "$stage"
     : > "$stage.list"
     : > "$stage.map"
+    # 目标不存在时跳过：计划生成端理论上只输出"设备上真实存在"的文件，
+    # 但真机上出现过计划里混进一批不存在路径的情况（挂载时 skip=31、
+    # 界面显示「已替换槽位 62」而实际只有 31 个槽位真实存在），
+    # 所以在这里按真实存在性再过滤一遍 —— 清单只记录真正会被替换的槽位。
+    : > "$stage.skipped"
     while read -r role rel; do
       [ -n "$rel" ] || continue
+      if [ ! -f "/$rel" ]; then
+        echo "$role $rel" >> "$stage.skipped"
+        continue
+      fi
       id=$(font_for_role "$sel" "$role")
       src="$LIB/$id.ttf"
       if [ "$mode" = manager ]; then
@@ -397,6 +435,9 @@ do_apply() {
       COUNT=$((COUNT+1))
     done < "$plan"
     rm -f "$plan"
+    # "计划里有、但设备上不存在"的槽位数量，供安装日志/诊断报告定位
+    SKIPPED=$(wc -l < "$stage.skipped" 2>/dev/null | tr -d ' ')
+    rm -f "$stage.skipped" 2>/dev/null
 
     if [ "$fail" = 1 ] || [ "$COUNT" = 0 ]; then
       rm -rf "$stage" "$stage.list" "$stage.map"
@@ -411,7 +452,10 @@ do_apply() {
   echo "$sel" > "$LIB/last_selection"
   [ -f "$MODDIR/active_font" ] || echo none > "$MODDIR/active_font"
   refresh_prop
-  echo "OK:$(label_of "$sel"):$COUNT:$scope"
+  # 第 4 段（可选）= 计划里"设备上不存在"因而被跳过的槽位数。
+  # 正常情况应该是 0；不是 0 就说明计划生成端多算了槽位（真机出现过 31 个），
+  # 界面上的「已替换槽位」也因此虚高。打印出来便于定位。
+  echo "OK:$(label_of "$sel"):$COUNT:$scope:${SKIPPED:-0}"
 }
 
 do_report() {
@@ -434,7 +478,7 @@ do_report() {
     echo "  $(name_of "$id"): $(( $(wc -c < "$LIB/$id.ttf") / 1024 )) KB | 范围 $(effective_scope "$id") | 元数据 $(meta_compact "$id")"
   done
   echo "设置: keep_lang=$(cfg_get keep_lang 1) keep_special=$(cfg_get keep_special 1) mount_mode=$(mount_mode)"
-  echo "字体库: $(ls "$LIB"/f*.ttf 2>/dev/null | wc -l) 个，占用 $(du -sk "$LIB" 2>/dev/null | cut -f1) KB"
+  echo "字体库: $(lib_font_ids | grep -c . ) 个，占用 $(du -sk "$LIB" 2>/dev/null | cut -f1) KB"
   echo "---- 槽位 ----"
   echo "字体目录: $(slot_dirs | tr '\n' ' ')"
   echo "字体配置: $(slot_xml_files | tr '\n' ' ')"
@@ -498,9 +542,11 @@ case "${1:-}" in
     done
     ;;
   list)
-    for f in "$LIB"/f*.ttf; do
+    # 注意：这里必须用 lib_font_ids（同时认 f<时间戳> 和 builtin_*），
+    # 直接写 f*.ttf 会把内置配色全漏掉 → 界面一张配色卡片都没有。
+    lib_font_ids | while IFS= read -r id; do
+      f="$LIB/$id.ttf"
       [ -f "$f" ] || continue
-      id=$(basename "$f" .ttf)
       echo "$id|$(name_of "$id")|$(wc -c < "$f" | tr -d ' ')|$(meta_compact "$id")"
     done
     ;;

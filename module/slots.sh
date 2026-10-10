@@ -290,8 +290,15 @@ slot_plan() {
            printf '%s %s/%s\n' "$role" "${d#/}" "$name"
          done | sort -u -k2,2)
   [ -n "$base" ] || return 0
-  printf '%s\n' "$base"
-  theme_slots "$base"
+  # ⚠️ 最后按**整行**（= 完整目标路径）去一次重。
+  #    为什么不能沿用上面那个 sort -u -k2,2：它的键是"目录/文件名"，
+  #    而同一个文件名出现在不同分区（/product/fonts/X 与 /system/fonts/X）是
+  #    **两条合法的不同槽位** —— 真机报告里就有这种成对槽位（挂载结果里的 same=N 就是它）。
+  #    按文件名去重会把它们误删；按整行去重才既不重复、也不丢合法槽位。
+  #    theme_slots 是"追加"的（小米主题字体），不参与上面那次去重，所以必须在这里
+  #    对 base+theme 的整体再做一次 —— 真机出现过同一个路径计两遍、
+  #    界面显示「已替换槽位 62」而实际只有 31 个槽位存在的问题。
+  { printf '%s\n' "$base"; theme_slots "$base"; } | awk '!seen[$0]++'
 }
 
 # 诊断：按角色统计设备上"候选且存在"的槽位数量

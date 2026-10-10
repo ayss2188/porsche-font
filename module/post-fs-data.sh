@@ -66,9 +66,13 @@ shutting_down && exit 0
 boot_id > "$MODDIR/.booting" 2>/dev/null
 [ -s "$MODDIR/.booting" ] || touch "$MODDIR/.booting"
 
-# 自带挂载：Magisk 在这里挂；KernelSU / APatch 交给 post-mount.sh
+# 自带挂载：这里就是主挂载点，**所有管理器都在这里挂**。
+#
+# 为什么不再"KSU 让位给 post-mount"：post-mount 不是所有管理器都有。
+# 实测 KernelSU Ultra 就不执行 post-mount 阶段（用户的机器上 post-fs-data 和 service
+# 都跑了、唯独没人挂载），结果字体一个槽位都没替换。post-fs-data 是唯一保证会跑的
+# 阶段（Magisk / KernelSU / APatch / 各种分支都有），所以把它作为权威挂载点。
+# post-mount.sh 仍然保留，作用是「二次修补」：如果元模块的目录级挂载盖住了我们的
+# per-file 挂载，那一遍会（靠 inode 比对发现的）补回来；它幂等，不会叠挂载。
 [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" = manager ] && exit 0
-case "$(root_manager)" in
-  ksu|apatch) exit 0 ;;
-esac
 payload_mount "$MODDIR" post-fs-data

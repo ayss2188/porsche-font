@@ -3,10 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>自定义字体切换模块</title>
+<title>保时捷字体 · 配色切换</title>
 <style>
   :root {
-    --accent: #7C5CFF;
+    /* 保时捷卫红（Guards Red）—— 沿用旧版界面配色，不要换成主模块的紫色 */
+    --accent: #D5001C;
+    --guards-red: #D5001C;
     --pending-blue: #3a8bff;
     --ok: #22c55e;
     --bg: #0e0e10;
@@ -18,7 +20,7 @@
     --border: #2c2c2f;
     --shadow: 0 10px 30px -22px rgba(0,0,0,.7);
     --toast-bg: #2a2a2d;
-    --glow: rgba(124,92,255,.18);
+    --glow: rgba(213,0,28,.16);
     --warn: #f59e0b;
     --danger: #ef4444;
     color-scheme: dark;
@@ -35,8 +37,8 @@
     --border: #e4e4e9;
     --shadow: 0 10px 26px -22px rgba(0,0,0,.35);
     --toast-bg: #1c1c1e;
-    --accent: #6A48F5;
-    --glow: rgba(106,72,245,.10);
+    --accent: #A3001A;
+    --glow: rgba(213,0,28,.10);
     --warn: #d97706;
     --danger: #dc2626;
     color-scheme: light;
@@ -327,8 +329,8 @@ try {
 
   <div class="header fade">
     <div>
-      <h1>自定义字体切换模块</h1>
-      <div class="subtitle">默认不替换字体 · 重启生效</div>
+      <h1>保时捷字体</h1>
+      <div class="subtitle">内置配色版 · 素装(无色) / 一点红 / 烈焰</div>
     </div>
     <button class="theme-btn" id="themeBtn" onclick="cycleTheme()" aria-label="切换主题">🌓 自动</button>
   </div>
@@ -361,7 +363,7 @@ try {
   </div>
 
   <div class="banner" id="rescueBanner">
-    ⚠ 检测到上次选字体后没能正常开机，已自动恢复为「无字体」。建议换一个字体再试。
+    ⚠ 检测到上次选配色后没能正常开机，已自动恢复为「无字体」。建议换一个配色再试。
     <br><button onclick="ackRescue()">知道了</button>
   </div>
   <div class="banner warn" id="conflictBanner">
@@ -375,35 +377,23 @@ try {
   </div>
 
   <div class="section-title fade" style="--d:.05s">
-    <span>字体库（点击卡片切换）</span>
-    <button class="manage-btn" id="manageBtn" onclick="toggleManage()">多选</button>
+    <span>内置配色（点击卡片切换）</span>
   </div>
   <div id="fontList"></div>
-  <button class="batch-btn" id="batchBtn" style="display:none" onclick="batchDelete()">删除选中 (0)</button>
-
-
-  <div class="section-title fade" style="--d:.08s"><span>导入字体</span></div>
-  <button class="import-main fade" style="--d:.1s" id="importBtn" onclick="openBrowser()">📂 选择字体文件（可多选）</button>
-  <input type="file" id="fileInput" accept=".ttf,.otf" multiple style="display:none" onchange="onFilePicked(this)">
-  <div class="progress" id="progress">
-    <div class="t" id="progressText">准备中...</div>
-    <div class="bar"><i id="progressBar"></i></div>
-  </div>
-  <div class="g-hint fade" style="--d:.12s">
-    在内置浏览器里勾选一个或多个 .ttf/.otf，一次导入，直接复制，速度很快。TTC 合集请先用刷机包 tools 里的 optimize_font.py 拆出单个字体（电脑或手机 Termux 均可）。
-    <button class="link-btn" id="sysPickBtn" onclick="document.getElementById('fileInput').click()">改用系统选择器（很慢，不推荐）</button><br>
-    所选字体会套用到所有字重槽位：静态字体各字重外观相同，可变字体(VF)可保留粗细变化。字体需含中文字形，否则中文会回退到系统字体。
+  <div class="g-hint fade" id="libHint">
+    这些配色是刷机时随模块装进来的，重启后生效。
+    <b>不支持导入外部字体</b>——这是内置配色版，只在本模块自带的几套之间切换。
   </div>
 
   <div class="divider"></div>
 
   <div class="section-title fade"><span>替换范围（高级）</span></div>
   <div class="switch-row fade" onclick="toggleSetting('keep_lang')">
-    <div><div class="t">保留繁体 / 日文 / 韩文字体槽</div><div class="d">开着（推荐）：繁体、日文、韩文继续用系统字体，显示正常。<b>想让繁体也用你的字体，就关掉它</b> —— 但你的字体缺哪个字，哪个字就会变方块（简体字库常缺「靉」「鶚」这类冷门繁体）。</div></div>
+    <div><div class="t">保留繁体 / 日文 / 韩文字体槽</div><div class="d">开着（推荐）：繁体、日文、韩文继续用系统字体，显示正常。<b>想让繁体也用本模块的配色，就关掉它</b> —— 但配色缺哪个字，哪个字就会变方块（简体字库常缺「靉」「鶚」这类冷门繁体）。</div></div>
     <div class="sw on" id="sw_keep_lang"></div>
   </div>
   <div class="switch-row fade" onclick="toggleSetting('keep_special')">
-    <div><div class="t">保留衬线 / 等宽 / 时钟 / 斜体等特殊槽</div><div class="d">开着（推荐）：终端等宽字、锁屏时钟、衬线、斜体继续用系统字体，避免全文都变成一个样。<b>想让这些也用你的字体，就关掉它。</b></div></div>
+    <div><div class="t">保留衬线 / 等宽 / 时钟 / 斜体等特殊槽</div><div class="d">开着（推荐）：终端等宽字、锁屏时钟、衬线、斜体继续用系统字体，避免全文都变成一个样。<b>想让这些也用本模块的配色，就关掉它。</b></div></div>
     <div class="sw on" id="sw_keep_special"></div>
   </div>
   <div class="switch-row fade" onclick="toggleSetting('mount_mode')">
@@ -458,28 +448,9 @@ try {
   <div class="divider"></div>
 
   <button class="reboot-btn fade" id="rebootBtn" onclick="doReboot()">立即重启生效</button>
-  <div class="hint fade" id="rebootHint">切换字体后不会立刻改变，需要重启手机</div>
+  <div class="hint fade" id="rebootHint">切换配色后不会立刻变化，需要重启手机</div>
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">自定义字体切换模块 · 作者 暗影双生</div>
-
-  <div class="sheet" id="sheet">
-    <div class="sheet-head">
-      <div class="sheet-title">选择字体（可多选）</div>
-      <button class="sheet-x" onclick="closeBrowser()" aria-label="关闭">✕</button>
-    </div>
-    <div class="sheet-path" id="fbPath"></div>
-    <div class="sheet-tools">
-      <button class="chip" onclick="fbLoad(FB_ROOT)">🏠 根目录</button>
-      <button class="chip" onclick="fbLoad(FB_ROOT + '/Download')">⬇ Download</button>
-      <button class="chip" onclick="fbUp()">↩ 上一级</button>
-      <button class="chip" id="fbAllBtn" onclick="fbSelectAll()">全选本页</button>
-      <button class="chip" onclick="fbClear()">清空已选</button>
-    </div>
-    <div class="sheet-list" id="fbList"></div>
-    <div class="sheet-foot">
-      <button class="g-btn primary-blue" id="fbImport" onclick="fbImport()">导入选中 (0)</button>
-    </div>
-  </div>
+  <div class="foot">保时捷字体（内置配色版）· 作者 暗影双生</div>
 
   <div class="modal-mask" id="reportMask">
     <div class="modal">
@@ -556,9 +527,51 @@ try {
   </div>
 
 <script>
-const MODDIR = "/data/adb/modules/custom_font_switcher";
+/* ---------- 模块目录：运行时自动探测，不要写死 ----------
+   这份界面是 4 个配色包（三合一 / 718 / 911 / GT3）共用的**同一份模板**，各包 id 不同，
+   而打包脚本 build-multi.sh 只改 module.prop、不会改 HTML —— 所以路径必须运行时自己找。
+   （曾经写死成主项目的 custom_font_switcher，结果保时捷这边整个界面所有命令都调不到脚本。） */
+let MODDIR = "";
+let MODID = "";                              // 本模块自己的 id（探测时一并读回）
+let DIAGWEB = "";                            // 诊断状态/正文的镜像目录（fetch 直接读，不起 shell）
+const MODULE_HINT = "porsche_font_multi";    // 先试这个 id，找不到再扫
+
+// 用一条 shell 把「模块目录 + id + 版本号 + 自带配色数」一次读回来（尽量少起进程）
+// vc 用来防止选到"上一次安装缓存下来的旧版本"（/data/adb/modules_update 里可能是旧的）
+async function detectModDir() {
+  const out = await ksuExec(
+    'for d in /data/adb/modules/' + MODULE_HINT + ' /data/adb/modules_update/' + MODULE_HINT + ' ' +
+    '/data/adb/modules/porsche_font_* /data/adb/modules_update/porsche_font_*; do ' +
+    '[ -f "$d/module.prop" ] || continue; ' +
+    'i=$(sed -n "s/^id=//p" "$d/module.prop" 2>/dev/null | head -n1 | tr -d "\\r"); ' +
+    'vc=$(sed -n "s/^versionCode=//p" "$d/module.prop" 2>/dev/null | head -n1 | tr -d "\\r"); ' +
+    'b=$(ls "$d"/builtin/*.ttf "$d"/builtin/*.otf 2>/dev/null | wc -l | tr -d " "); ' +
+    'echo "$d|$i|$b|$vc"; done'
+  );
+  const lines = String(out || "").split("\n").map(s => s.trim()).filter(Boolean);
+  if (!lines.length) return null;
+
+  // 同一条 shell 里同一个目录会被 glob 命中两次（字面量 + 通配符）→ 先按目录去重
+  const seen = new Set();
+  const cands = [];
+  lines.forEach(l => {
+    const p = l.split("|");
+    const dir = p[0];
+    if (!dir || seen.has(dir)) return;
+    seen.add(dir);
+    cands.push({ dir, id: p[1] || "", builtin: +(p[2] || 0), ver: +(p[3] || 0) });
+  });
+
+  // 版本号大的优先：避免选到 /data/adb/modules_update 里缓存的旧版本
+  const maxVer = Math.max(0, ...cands.map(c => c.ver));
+  const fresh = maxVer > 0 ? cands.filter(c => c.ver >= maxVer) : cands;
+
+  // 优先：id 正好是这个变体（打包脚本注入的 MODULE_HINT）；其次：自带配色最多的
+  return fresh.find(x => x.id === MODULE_HINT) ||
+         fresh.slice().sort((a, b) => b.builtin - a.builtin)[0];
+}
+
 const LIB = "/data/adb/custom_font_lib";
-const DIAGWEB = MODDIR + "/webroot/diag";   // 诊断状态/正文的镜像目录（fetch 直接读，不起 shell）
 const NONE_LABEL = "无字体（系统默认）";
 const ROM_NAMES = {hyperos:"澎湃OS/HyperOS/MIUI", coloros:"ColorOS/OPPO/一加/realme", originos:"OriginOS/vivo/iQOO", flyme:"Flyme/魅族", samsung:"三星 One UI（通用适配）", honor:"荣耀 MagicOS（通用适配）", huawei:"华为 EMUI/鸿蒙（通用适配）", nothing:"Nothing OS（通用适配）", aosp:"原生/类原生/谷歌Pixel"};
 const HUGE_FONT = 30 * 1048576;    // 超过这个体积应用前要确认
@@ -566,10 +579,8 @@ const SCOPE_TEXT = {all: "中英文", latin: "仅英文/数字", cjk: "仅中文
 const THEME_LABELS = {auto:"🌓 自动", light:"☀️ 浅色", dark:"🌙 深色"};
 
 let cbCounter = 0, busy = false, themePref = "auto", toastTimer = null, rebooting = false;
-let fonts = [];            // [{id,name,size}]
+let fonts = [];            // [{id,name,size}] —— 内置配色（由安装脚本注入字体库）
 let activeId = "none", pendingId = "none";
-let manageMode = false;
-const selected = new Set();   // 字体库多选
 
 /* ---------- 基础工具 ---------- */
 function ksuExec(cmd) {
@@ -727,17 +738,26 @@ function applyStatus(st) {
     const mo = g("MO").split(",");
     const ml = document.getElementById("mountLabel");
     ml.classList.remove("warn", "ok");
+    // ⚠️ 判"有没有挂载记录"不能看 mo[0] 是否为空串：
+    //    MO 是 "ok fail stage same skip"，当 ok=0 时（本次开机没有新的绑定动作，
+    //    因为槽位早就挂好了）字符串**以空格开头**，split 后 mo[0] === ""，
+    //    于是界面会误报"本次开机未挂载" —— 真机踩过：字体明明生效了，
+    //    界面却说没挂载，用户以为更新失败。
+    //    正确判据：只要有挂载动作（ok）或已就位（same）就算挂过。
+    const moOk = +(mo[0] || 0), moSame = +(mo[3] || 0), moSkip = +(mo[4] || 0);
     if (g("PM") === "manager") setValue("mountLabel", "交给管理器挂载");
     else if (activeId === "none") setValue("mountLabel", "无需挂载");
-    else if (mo[0] !== "") {
+    else if (moOk || moSame) {
       // 这行只报挂载动作本身，写短一点（一行放得下）；"到底生效没有"由下面那行逐个核对负责
-      let txt = "成功 " + mo[0];
-      const same = +(mo[3] || 0), skip = +(mo[4] || 0);
+      let txt;
+      if (moOk && moSame) txt = "成功 " + moOk + "，已就位 " + moSame;
+      else if (moOk) txt = "成功 " + moOk;
+      else txt = "本次开机未改动（已就位 " + moSame + "）";
       if (+mo[1]) txt += "，失败 " + mo[1];
-      if (same) txt += "，已就位 " + same;
-      if (skip) txt += "，跳过 " + skip;
+      // skip = 计划里"设备上不存在"的槽位。只有确实有失败或跳过才标黄，
+      // 只是"已就位"不标黄（那说明一切正常）
       setValue("mountLabel", txt);
-      ml.classList.add((+mo[1] || skip) ? "warn" : "ok");
+      ml.classList.add(+mo[1] ? "warn" : "ok");
     } else { setValue("mountLabel", "本次开机未挂载"); ml.classList.add("warn"); }
     // 逐个核对（按 inode 实测），这才是"有没有真的生效"的答案
     const vf = g("VF").split(",");
@@ -757,26 +777,6 @@ function applyStatus(st) {
     render();
 }
 
-async function refreshConflicts() {
-  try {
-    const st = await ksuExec(`sh ${MODDIR}/fontctl.sh status`);
-    applyStatus(st);
-  } catch (e) {}
-}
-
-function isLocked(id) { return selIds(activeId).includes(id) || selIds(pendingId).includes(id); }
-
-function autoScope(meta) {
-  if (meta.latin === undefined && meta.cjk === undefined) return null;
-  if (meta.cjk === "1" && meta.latin === "1") return "all";
-  if (meta.latin === "1") return "latin";
-  if (meta.cjk === "1") return "cjk";
-  return "latin";
-}
-function scopeOf(f) {
-  const s = f.meta && f.meta.scope;
-  return (s === "all" || s === "latin" || s === "cjk") ? s : autoScope(f.meta || {});
-}
 
 function makeCard(id, name, metaText, f) {
   const card = document.createElement("div");
@@ -814,51 +814,25 @@ function render() {
   document.getElementById("pendingRow").style.display = hasPending ? "flex" : "none";
   if (hasPending) setValue("pendingLabel", labelOf(pendingId));
 
-  // 字体被删掉后，清理多选里失效的项
-  [...selected].forEach(id => { if (!fonts.some(f => f.id === id) || isLocked(id)) selected.delete(id); });
-
   const box = document.getElementById("fontList");
   box.textContent = "";
 
   const none = makeCard("none", NONE_LABEL, "不替换任何系统字体（默认）");
-  if (manageMode) none.classList.add("locked");
-  none.onclick = () => { if (manageMode) showToast("这一项不能删除"); else selectFont("none"); };
+  none.onclick = () => selectFont("none");
   box.append(none);
 
   fonts.forEach(f => {
     const card = makeCard(f.id, f.name, fmtSize(f.size), f);
-    if (manageMode) {
-      const locked = isLocked(f.id);
-      if (locked) card.classList.add("locked");
-      card.classList.toggle("selected", selected.has(f.id));
-      const ck = document.createElement("div");
-      ck.className = "ckbox"; ck.textContent = "✓";
-      card.append(ck);
-      card.onclick = () => toggleSelect(f.id, card);
-    } else {
-      card.onclick = () => selectFont(f.id);
-      const icons = document.createElement("div");
-      icons.className = "icons";
-      const ed = document.createElement("button");
-      ed.className = "icon-btn"; ed.textContent = "✎"; ed.setAttribute("aria-label", "编辑");
-      ed.onclick = ev => { ev.stopPropagation(); editFont(f.id); };
-      const del = document.createElement("button");
-      del.className = "icon-btn"; del.textContent = "🗑"; del.setAttribute("aria-label", "删除");
-      del.onclick = ev => { ev.stopPropagation(); deleteFonts([f.id]); };
-      icons.append(ed, del);
-      card.append(icons);
-    }
+    card.onclick = () => selectFont(f.id);
     box.append(card);
   });
 
   if (!fonts.length) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = "字体库还是空的，先在下方导入一个字体吧";
+    e.textContent = "没有读到内置配色。请重新刷一遍本模块 —— 安装时会把自带的三套配色装进字体库。";
     box.append(e);
   }
-
-  updateBatchBtn();
 
   const hint = document.getElementById("rebootHint");
   hint.textContent = hasPending
@@ -866,35 +840,10 @@ function render() {
     : "当前没有待生效的更改，重启按钮仍可随时使用";
 }
 
-/* ---------- 字体库多选 / 批量删除 ---------- */
-function updateBatchBtn() {
-  const btn = document.getElementById("batchBtn");
-  btn.style.display = manageMode ? "block" : "none";
-  btn.textContent = "删除选中 (" + selected.size + ")";
-  btn.disabled = selected.size === 0;
-  const mb = document.getElementById("manageBtn");
-  mb.textContent = manageMode ? "完成" : "多选";
-  mb.classList.toggle("on", manageMode);
-}
-
-function toggleManage() {
-  if (busy) return;
-  manageMode = !manageMode;
-  selected.clear();
-  render();
-}
-
-function toggleSelect(id, card) {
-  if (isLocked(id)) { showToast("使用中或待生效的字体不能删除"); return; }
-  if (selected.has(id)) selected.delete(id); else selected.add(id);
-  if (card) card.classList.toggle("selected", selected.has(id));
-  updateBatchBtn();
-}
-
-function batchDelete() {
-  if (selected.size) deleteFonts([...selected]);
-}
-
+/* ---------- 卡片忙遮罩 ----------
+   注意：这个函数是 selectFont 用的，别跟着"多选/批量删除"一起删掉。
+   它抛错的话会发生在 selectFont 的 try **之外** → finally 不执行 → busy 永久为 true，
+   界面所有操作（切换配色 / 设置开关 / 谷歌兼容 / 在线安装）全部静默失效。 */
 function setCardBusy(card, on) {
   if (!card) return;
   const old = card.querySelector(".overlay");
@@ -909,7 +858,7 @@ function setCardBusy(card, on) {
   card.classList.add("busy");
 }
 
-/* ---------- 切换 / 重命名 / 删除 ---------- */
+/* ---------- 切换配色（内置配色版：只在这几套之间切） ---------- */
 async function selectFont(id) {
   if (busy) return;
   const big = selIds(id).map(x => fonts.find(f => f.id === x)).filter(f => f && f.size >= HUGE_FONT);
@@ -917,9 +866,9 @@ async function selectFont(id) {
     const f = big[0];
     const go = await dialog({
       title: "字体体积较大",
-      msg: "「" + f.name + "」有 " + fmtSize(f.size) + "。体积很大的字体会占用更多内存、首次加载更慢，低内存手机上可能出现卡顿。" +
-           "建议先精简（刷机包 tools 文件夹里的 optimize_font.py，电脑或手机 Termux 均可运行）。仍要使用吗？",
-      okText: "仍然使用"
+      msg: "「" + f.name + "」有 " + fmtSize(f.size) + "。内置配色是完整的可变字体，体积大是正常的。" +
+           "内存较小的手机上首次加载会稍慢一些。仍要切换吗？",
+      okText: "仍然切换"
     });
     if (!go) return;
   }
@@ -930,7 +879,7 @@ async function selectFont(id) {
   await nextPaint();
   try {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh apply ${shq(id)}`);
-    const m = out.match(/^OK:(.*):(\d+):(\w+)\s*$/m);
+    const m = out.match(/^OK:(.*):(\d+):(\w+)(?::(\d+))?\s*$/m);
     if (m) {
       showToast(id === "none"
         ? "已选择「无字体」，重启后恢复系统默认"
@@ -944,353 +893,9 @@ async function selectFont(id) {
   }
 }
 
-async function editFont(id) {
-  if (busy) return;
-  const f = fonts.find(x => x.id === id);
-  if (!f) return;
-  const r = await dialog({ title: "编辑字体", input: f.name, okText: "保存" });
-  if (r === null) return;
-  busy = true;
-  try {
-    if (r && r !== f.name) await ksuExec(`sh ${MODDIR}/fontctl.sh rename ${shq(id)} ${shq(r)}`);
-    showToast("已保存");
-  } catch (e) { showToast("保存失败：" + errText(e)); }
-  busy = false;
-  await refreshAll();
-}
-
-async function deleteFonts(ids) {
-  if (busy || !ids.length) return;
-  const msg = ids.length === 1
-    ? "确定从字体库删除「" + labelOf(ids[0]) + "」？"
-    : "确定从字体库删除选中的 " + ids.length + " 个字体？";
-  const ok = await dialog({title: "删除字体", msg, okText: "删除", danger: true});
-  if (!ok) return;
-  busy = true;
-  try {
-    const out = await ksuExec(`sh ${MODDIR}/fontctl.sh delete ${ids.map(shq).join(" ")}`);
-    const m = out.match(/OK:(\d+):(\d+)/);
-    const del = m ? +m[1] : 0, skip = m ? +m[2] : 0;
-    if (!del && skip) showToast("使用中或待生效的字体不能删除");
-    else showToast("已删除 " + del + " 个" + (skip ? "，" + skip + " 个使用中已跳过" : ""));
-  } catch (e) { showToast("删除失败：" + errText(e)); }
-  busy = false;
-  selected.clear();
-  manageMode = false;
-  await refreshAll();
-}
-
 async function ackRescue() {
   try { await ksuExec(`sh ${MODDIR}/fontctl.sh ack`); } catch (e) {}
   document.getElementById("rescueBanner").classList.remove("show");
-}
-
-/* ---------- 导入 ---------- */
-/* ---------- 字体体检：读取 cmap，判断覆盖范围 / 是否可变 / 字重 ---------- */
-// 只读取字体的表目录和 cmap 等小表（几十 KB），不经过 WebView 传整个文件
-const PROBES = {
-  latin:  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-  digits: "0123456789",
-  han:    "的一是不了人我在有他这中大来上国个到说们为子和你地出道也时年得就那要下以生会自着去之过家学对可她里后小",
-  kana:   "あいうえおかきくけこさしすせそアイウエオカキクケコ",
-  hangul: "한국어글자가나다라마바사아자차카타파하"
-};
-
-async function readHex(path, offset, length) {
-  const out = await ksuExec(`tail -c +${offset + 1} ${shq(path)} | head -c ${length} | od -An -v -tx1 | tr -d ' \\n'`);
-  const hex = out.trim();
-  const u8 = new Uint8Array(hex.length >> 1);
-  for (let i = 0; i < u8.length; i++) u8[i] = parseInt(hex.substr(i * 2, 2), 16);
-  return u8;
-}
-const u16 = (b, o) => (b[o] << 8) | b[o + 1];
-const u32 = (b, o) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
-
-// 返回 (codepoint) => 是否有字形
-function cmapLookup(buf) {
-  const n = u16(buf, 2);
-  let best = null, bestScore = -1;
-  for (let i = 0; i < n; i++) {
-    const pid = u16(buf, 4 + i * 8), eid = u16(buf, 6 + i * 8), off = u32(buf, 8 + i * 8);
-    if (off + 4 > buf.length) continue;
-    const fmt = u16(buf, off);
-    let score = -1;
-    if ((pid === 3 && eid === 10) || (pid === 0 && (eid === 4 || eid === 6))) score = fmt === 12 ? 4 : -1;
-    else if ((pid === 3 && eid === 1) || (pid === 0 && eid <= 3)) score = fmt === 4 ? 3 : (fmt === 12 ? 2 : -1);
-    if (score > bestScore) { bestScore = score; best = {off, fmt}; }
-  }
-  if (!best) return null;
-  const t = best.off;
-  if (best.fmt === 12) {
-    const groups = u32(buf, t + 12);
-    return cp => {
-      let lo = 0, hi = groups - 1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1, g = t + 16 + mid * 12;
-        if (g + 12 > buf.length) return false;
-        const s = u32(buf, g), e = u32(buf, g + 4);
-        if (cp < s) hi = mid - 1; else if (cp > e) lo = mid + 1; else return (u32(buf, g + 8) + cp - s) !== 0;
-      }
-      return false;
-    };
-  }
-  if (best.fmt === 4) {
-    const segX2 = u16(buf, t + 6), seg = segX2 >> 1;
-    const endO = t + 14, startO = endO + segX2 + 2, deltaO = startO + segX2, rangeO = deltaO + segX2;
-    return cp => {
-      if (cp > 0xFFFF) return false;
-      for (let i = 0; i < seg; i++) {
-        if (rangeO + i * 2 + 2 > buf.length) return false;
-        const e = u16(buf, endO + i * 2);
-        if (cp > e) continue;
-        const s = u16(buf, startO + i * 2);
-        if (cp < s) return false;
-        const delta = u16(buf, deltaO + i * 2), ro = u16(buf, rangeO + i * 2);
-        if (ro === 0) return ((cp + delta) & 0xFFFF) !== 0;
-        const a = rangeO + i * 2 + ro + (cp - s) * 2;
-        if (a + 2 > buf.length) return false;
-        const gid = u16(buf, a);
-        return gid !== 0 && ((gid + delta) & 0xFFFF) !== 0;
-      }
-      return false;
-    };
-  }
-  return null;
-}
-
-// 返回元数据对象；失败/不支持时抛出错误
-async function probeFont(path) {
-  const head = await readHex(path, 0, 12);
-  const tag0 = String.fromCharCode(head[0], head[1], head[2], head[3]);
-  if (tag0 === "ttcf") throw new Error("TTC 合集");
-  const num = u16(head, 4);
-  if (!num || num > 64) throw new Error("字体目录异常");
-  const dir = await readHex(path, 12, num * 16);
-  const tables = {};
-  for (let i = 0; i < num; i++) {
-    const o = i * 16;
-    tables[String.fromCharCode(dir[o], dir[o + 1], dir[o + 2], dir[o + 3])] = {off: u32(dir, o + 8), len: u32(dir, o + 12)};
-  }
-  const meta = {vf: tables["fvar"] ? 1 : 0};
-  if (tables["CFF "] || tables["CFF2"]) meta.cff = 1;
-  if (tables["COLR"] || tables["CBDT"] || tables["sbix"]) meta.color = 1;
-  if (tables["maxp"]) meta.glyphs = u16(await readHex(path, tables["maxp"].off + 4, 2), 0);
-  if (tables["OS/2"]) meta.wght = u16(await readHex(path, tables["OS/2"].off + 4, 2), 0);
-  if (tables["cmap"]) {
-    const buf = await readHex(path, tables["cmap"].off, Math.min(tables["cmap"].len, 4 * 1024 * 1024));
-    const has = cmapLookup(buf);
-    if (has) {
-      const ratio = s => { const cps = Array.from(s); return cps.filter(c => has(c.codePointAt(0))).length / cps.length; };
-      meta.latin = ratio(PROBES.latin) >= 0.95 && ratio(PROBES.digits) >= 0.99 ? 1 : 0;
-      meta.cjk = ratio(PROBES.han) >= 0.9 ? 1 : 0;
-      meta.kana = ratio(PROBES.kana) >= 0.8 ? 1 : 0;
-      meta.hangul = ratio(PROBES.hangul) >= 0.8 ? 1 : 0;
-    }
-  }
-  return meta;
-}
-
-// 导入后读取覆盖范围并写入元数据；失败不影响导入（按中英文处理）
-async function probeAndSave(id) {
-  try {
-    const m = await probeFont(`${LIB}/${id}.ttf`);
-    const kv = Object.entries(m).map(([k, v]) => k + "=" + v).join(" ");
-    await ksuExec(`sh ${MODDIR}/fontctl.sh setmeta ${shq(id)} ${kv}`);
-  } catch (e) { /* 忽略 */ }
-}
-function setImporting(on) {
-  ["importBtn", "sysPickBtn"].forEach(i => { document.getElementById(i).disabled = on; });
-  if (!on) document.getElementById("progress").classList.remove("show");
-}
-function setProgress(text, ratio) {
-  document.getElementById("progress").classList.add("show");
-  document.getElementById("progressText").textContent = text;
-  document.getElementById("progressBar").style.width = Math.round((ratio || 0) * 100) + "%";
-}
-function summarize(ok, fails) {
-  if (!fails.length) return "导入成功 " + ok + " 个";
-  return "成功 " + ok + " 个，失败 " + fails.length + " 个：" + fails[0];
-}
-
-// 批量导入：items = [[完整路径, 显示名], ...]，每个文件一次 cp，速度快
-async function importMany(items) {
-  if (busy || !items.length) return;
-  busy = true; setImporting(true);
-  let ok = 0; const fails = [];
-  try {
-    for (let i = 0; i < items.length; i++) {
-      const [path, name] = items[i];
-      setProgress("导入 " + (i + 1) + "/" + items.length + "：" + name, i / items.length);
-      await nextPaint();
-      try {
-        const out = await ksuExec(`sh ${MODDIR}/fontctl.sh import ${shq(path)} ${shq(stripExt(name))}`);
-        if (out.indexOf("OK:") === 0) { ok++; setProgress("检查字体覆盖范围：" + name, (i + 1) / items.length); await probeAndSave(out.trim().slice(3)); }
-        else fails.push(name + "：" + out.replace(/^ERROR:/, ""));
-      } catch (e) {
-        fails.push(name + "：" + errText(e));
-      }
-    }
-    setProgress("完成", 1);
-    showToast(summarize(ok, fails));
-  } finally {
-    busy = false; setImporting(false);
-    await refreshAll();
-  }
-}
-
-/* ---------- 文件浏览器（可多选，选择会跨文件夹保留） ---------- */
-const FB_ROOT = "/storage/emulated/0";
-const FB = {path: FB_ROOT, dirs: [], files: []};
-const picked = new Map();   // 完整路径 -> {name, size}
-const b64 = s => btoa(unescape(encodeURIComponent(s)));
-const joinPath = (d, n) => d.replace(/\/$/, "") + "/" + n;
-
-function openBrowser() {
-  if (busy) return;
-  document.getElementById("sheet").classList.add("show");
-  updatePickCount();
-  fbLoad(FB.path);
-}
-function closeBrowser() { document.getElementById("sheet").classList.remove("show"); }
-
-function fbMsg(text) {
-  const list = document.getElementById("fbList");
-  list.textContent = "";
-  const e = document.createElement("div");
-  e.className = "empty"; e.textContent = text;
-  list.append(e);
-}
-
-async function fbLoad(path) {
-  fbMsg("读取中...");
-  document.getElementById("fbPath").textContent = path;
-  try {
-    const out = await ksuExec(`sh ${MODDIR}/fontctl.sh ls ${shq(b64(path))}`);
-    const dirs = [], files = [];
-    let cur = path;
-    out.split("\n").forEach(l => {
-      const p = l.replace(/\r$/, "").split("|");
-      if (p[0] === "P") cur = p.slice(1).join("|");
-      else if (p[0] === "D") dirs.push(p.slice(1).join("|"));
-      else if (p[0] === "F") {
-        const size = parseInt(p.pop(), 10) || 0;
-        files.push({n: p.slice(1).join("|"), s: size});
-      }
-    });
-    FB.path = cur;
-    FB.dirs = dirs;
-    FB.files = files.map(f => ({...f, full: joinPath(cur, f.n)}));
-    renderBrowser();
-  } catch (e) {
-    if (path !== FB_ROOT) { showToast("该目录无法读取，已回到根目录"); FB.path = FB_ROOT; fbLoad(FB_ROOT); }
-    else fbMsg("读取失败：" + errText(e));
-  }
-}
-
-function renderBrowser() {
-  document.getElementById("fbPath").textContent = FB.path;
-  const list = document.getElementById("fbList");
-  list.textContent = "";
-
-  FB.dirs.forEach(d => {
-    const it = document.createElement("div");
-    it.className = "pick-item";
-    const ico = document.createElement("span"); ico.className = "pico"; ico.textContent = "📁";
-    const nm = document.createElement("span"); nm.className = "pname"; nm.textContent = d;
-    const ar = document.createElement("span"); ar.className = "arrow"; ar.textContent = "›";
-    it.append(ico, nm, ar);
-    it.onclick = () => fbLoad(joinPath(FB.path, d));
-    list.append(it);
-  });
-
-  FB.files.forEach(f => {
-    const it = document.createElement("div");
-    it.className = "pick-item" + (picked.has(f.full) ? " selected" : "");
-    const ck = document.createElement("div"); ck.className = "ckbox"; ck.textContent = "✓";
-    const nm = document.createElement("span"); nm.className = "pname"; nm.textContent = f.n;
-    const sz = document.createElement("span"); sz.className = "psize"; sz.textContent = fmtSize(f.s);
-    it.append(ck, nm, sz);
-    it.onclick = () => {
-      if (picked.has(f.full)) picked.delete(f.full); else picked.set(f.full, {name: f.n, size: f.s});
-      it.classList.toggle("selected", picked.has(f.full));
-      updatePickCount();
-    };
-    list.append(it);
-  });
-
-  if (!FB.dirs.length && !FB.files.length) fbMsg("这个文件夹里没有子文件夹，也没有 .ttf/.otf 字体");
-  updatePickCount();
-}
-
-function updatePickCount() {
-  const b = document.getElementById("fbImport");
-  b.textContent = "导入选中 (" + picked.size + ")";
-  b.disabled = picked.size === 0;
-  const all = FB.files.length > 0 && FB.files.every(f => picked.has(f.full));
-  document.getElementById("fbAllBtn").textContent = all ? "取消全选" : "全选本页";
-}
-
-function fbUp() {
-  if (FB.path === FB_ROOT) return;
-  fbLoad(FB.path.replace(/\/[^\/]+$/, "") || FB_ROOT);
-}
-function fbSelectAll() {
-  if (!FB.files.length) { showToast("这个文件夹里没有字体"); return; }
-  const all = FB.files.every(f => picked.has(f.full));
-  FB.files.forEach(f => { if (all) picked.delete(f.full); else picked.set(f.full, {name: f.n, size: f.s}); });
-  renderBrowser();
-}
-function fbClear() { picked.clear(); renderBrowser(); }
-
-function fbImport() {
-  if (!picked.size) return;
-  const items = [...picked.entries()].map(([path, v]) => [path, v.name]);
-  picked.clear();
-  closeBrowser();
-  importMany(items);
-}
-
-/* ---------- 系统选择器（备用，慢：按块经 WebView 传输） ---------- */
-const CHUNK = 45000; // 每块字节数（3 的倍数，base64 后约 60KB）
-
-function toB64(u8) {
-  let s = "";
-  for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
-  return btoa(s);
-}
-
-async function onFilePicked(input) {
-  const list = Array.from(input.files || []);
-  input.value = "";
-  if (!list.length || busy) return;
-  busy = true; setImporting(true);
-  let ok = 0; const fails = [];
-  try {
-    for (let k = 0; k < list.length; k++) {
-      const file = list[k];
-      const tag = list.length > 1 ? "(" + (k + 1) + "/" + list.length + ") " : "";
-      if (!/\.(ttf|otf)$/i.test(file.name)) { fails.push(file.name + "：不是 ttf/otf"); continue; }
-      try {
-        await ksuExec(`sh ${MODDIR}/fontctl.sh upload-start`);
-        for (let off = 0; off < file.size; off += CHUNK) {
-          const buf = new Uint8Array(await file.slice(off, off + CHUNK).arrayBuffer());
-          await ksuExec(`printf '%s' '${toB64(buf)}' | base64 -d >> ${LIB}/.upload.part`);
-          const done = Math.min(off + CHUNK, file.size);
-          setProgress(tag + "传输 " + file.name + " " + fmtSize(done) + "/" + fmtSize(file.size), done / file.size);
-        }
-        const out = await ksuExec(`sh ${MODDIR}/fontctl.sh upload-finish ${file.size} ${shq(stripExt(file.name))}`);
-        if (out.indexOf("OK:") === 0) { ok++; await probeAndSave(out.trim().slice(3)); }
-        else fails.push(file.name + "：" + out.replace(/^ERROR:/, ""));
-      } catch (e) {
-        fails.push(file.name + "：" + errText(e));
-        try { await ksuExec(`rm -f ${LIB}/.upload.part`); } catch (_) {}
-      }
-    }
-    showToast(summarize(ok, fails));
-  } finally {
-    busy = false; setImporting(false);
-    await refreshAll();
-  }
 }
 
 /* ---------- 替换范围设置 / 诊断 ---------- */
@@ -1325,8 +930,8 @@ async function toggleSetting(key) {
       const ok = await dialog({
         title: "确认关闭保留？",
         msg: key === "keep_lang"
-          ? "关闭后，日文/韩文/阿拉伯文等其他文字的字体槽也会被换成你的字体。如果你的字体没有这些文字，对应语言会显示方块。"
-          : "关闭后，衬线、等宽、时钟、展示和斜体槽位也会被换成你的字体，终端和锁屏时钟等可能变得不协调。",
+          ? "关闭后，日文/韩文/阿拉伯文等其他文字的字体槽也会被换成这套配色。如果配色里没有这些文字，对应语言会显示方块。"
+          : "关闭后，衬线、等宽、时钟、展示和斜体槽位也会被换成这套配色，终端和锁屏时钟等可能变得不协调。",
         okText: "关闭", danger: true
       });
       if (!ok) return;
@@ -1347,7 +952,7 @@ async function toggleSetting(key) {
     await ksuExec(`sh ${MODDIR}/fontctl.sh settings set ${key} ${nv}`);
     if (pendingId !== "none") {
       const out = await ksuExec(`sh ${MODDIR}/fontctl.sh reapply`);
-      const m = out.match(/^OK:(.*):(\d+):(\w+)\s*$/m);
+      const m = out.match(/^OK:(.*):(\d+):(\w+)(?::(\d+))?\s*$/m);
       showToast(m ? "已重新生成：" + m[2] + " 个槽位，重启后生效" : "重新生成失败：" + out.replace(/^ERROR:/, ""));
     } else showToast("已修改");
     success = true;
@@ -1857,7 +1462,7 @@ function closeReport() {
   // 但"生成中"的那一份必须继续跑，所以不中止任何后台任务
 }
 // 中止生成：点了立刻有反应（先把界面改成"已中止"，再让后台去杀进程，不等它返回）
-function cancelReport() {
+async function cancelReport() {
   repStop = true;
   repPollToken++;
   repTickStop();
@@ -1865,7 +1470,7 @@ function cancelReport() {
   btnBusy(btn, true, "正在停止…");
   repEl("reportBanner").style.display = "none";
   repEl("reportProgressBar").parentElement.classList.remove("running");
-  try { ksuExec(`sh ${MODDIR}/fontctl.sh diag cancel`); } catch (e) {}
+  try { await ksuExec(`sh ${MODDIR}/fontctl.sh diag cancel`); } catch (e) {}
   repPaintSimple("cancelled", "已中止生成。\n\n已经生成好的部分仍然保存在 Download/未完成的体检报告.txt。\n想要完整报告就点「重新生成」。");
   btnBusy(btn, false);
   btn.style.display = "none";
@@ -1948,8 +1553,13 @@ async function googleAction(action) {
 }
 
 /* ---------- GitHub 更新 ---------- */
-const UPDATE_CHECK_KEY = "cf_update_checked";
-const UPDATE_CACHE_KEY = "cf_update_info";
+// 4 个配色包共用同一份界面模板，localStorage 也是共用的（同源）——
+// 所以"更新信息/重启状态"必须按模块 id 分开存，否则装了另一个配色包会读到上一个的缓存。
+// 主题偏好（cf_theme）故意不隔离：那是用户对整个界面的偏好，换包时保持更自然。
+function lsName(base) { return base + ":" + (MODID || MODULE_HINT); }
+const updateCheckKey = () => lsName("cf_update_checked");
+const updateCacheKey = () => lsName("cf_update_info");
+const updateDoneKey  = () => lsName("cf_update_done");
 let updateInfo = null;
 
 function parseKV(out) {
@@ -1976,7 +1586,7 @@ async function checkUpdate(manual) {
     void start;
     if (!out) { setValue("newVerLabel", "检查超时"); lbl.classList.add("off"); if (manual) showToast("检查超时，请稍后再试"); return; }
     const u = parseKV(out);
-    try { localStorage.setItem(UPDATE_CHECK_KEY, String(Date.now())); } catch (e) {}
+    try { localStorage.setItem(updateCheckKey(), String(Date.now())); } catch (e) {}
     lbl.classList.remove("ok", "warn", "off");
     if (!u.NEW_CODE) {
       setValue("newVerLabel", "检查失败");
@@ -1984,7 +1594,7 @@ async function checkUpdate(manual) {
       if (manual) showToast("检查失败：" + (u.ERR || "未知错误"));
       return;
     }
-    try { localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(u)); } catch (e) {}
+    try { localStorage.setItem(updateCacheKey(), JSON.stringify(u)); } catch (e) {}
     renderUpdate(u);
     if (manual) showToast(u.HAS === "1" ? "发现新版本 " + u.NEW_VER : "已是最新版本");
   } catch (e) {
@@ -1994,9 +1604,9 @@ async function checkUpdate(manual) {
 }
 
 // 已下载安装、等待重启的版本号（存 localStorage，刷新页面后依然显示「重启生效」）
-function updateDoneCode() { try { return localStorage.getItem("cf_update_done") || ""; } catch (e) { return ""; } }
+function updateDoneCode() { try { return localStorage.getItem(updateDoneKey()) || ""; } catch (e) { return ""; } }
 function setUpdateDone(code) {
-  try { if (code) localStorage.setItem("cf_update_done", String(code)); else localStorage.removeItem("cf_update_done"); } catch (e) {}
+  try { if (code) localStorage.setItem(updateDoneKey(), String(code)); else localStorage.removeItem(updateDoneKey()); } catch (e) {}
 }
 // 安装完成后：把「下载并安装」变成红色「立即重启生效」
 function applyRebootButton(ver) {
@@ -2171,12 +1781,46 @@ async function installUpdate() {
 
 // 初始化：先等状态读回来（要等版本号填好），再决定用哪份更新信息
 // 注意：以前是 refreshAll() 还没回来就去比对 curVerLabel，结果缓存永远对不上、用不上
+// 第一步必须是「找到模块目录」——所有 shell 调用都靠它，找不到就什么都做不了。
 (async function init() {
+  showToast("正在连接模块…", true);
+  let found = null, bridgeErr = "";
+  for (let i = 0; i < 3 && !found; i++) {
+    try { found = await detectModDir(); bridgeErr = ""; }
+    catch (e) { found = null; bridgeErr = errText(e); }
+    if (!found) await new Promise(r => setTimeout(r, 350));
+  }
+  if (!found) {
+    clearToast();
+    // 分清两种失败：没桥（用普通浏览器打开的）vs 真找不到模块目录，别都怪用户"刷坏了"
+    if (bridgeErr === "NO_BRIDGE") {
+      setValue("activeLabel", "没有检测到 WebUI 环境（请从模块管理器的 WebUI 入口打开）");
+      setValue("romLabel", "无法读取");
+    } else {
+      setValue("activeLabel", "找不到模块目录（请确认本模块已安装并启用，必要时重刷一次）");
+      setValue("romLabel", "无法读取");
+    }
+    const gh = document.getElementById("googleLabel");
+    if (gh) gh.textContent = "无法读取";
+    ["slotLabel", "mountLabel", "verifyLabel"].forEach(id => setValue(id, "-"));
+    return;
+  }
+  MODDIR = found.dir;
+  DIAGWEB = MODDIR + "/webroot/diag";
+  if (found.id) MODID = found.id;
+  // 单色包里只有一套配色，副标题写"三套"会自相矛盾
+  const sub = document.querySelector(".subtitle");
+  if (sub) {
+    sub.textContent = (found.builtin >= 3 && found.id === MODULE_HINT)
+      ? "内置配色版 · 素装(无色) / 一点红 / 烈焰"
+      : "内置配色版";
+  }
+  clearToast();
   loadSettings();
   refreshGoogle();
   await refreshAll();
   let cached = null;
-  try { cached = JSON.parse(localStorage.getItem(UPDATE_CACHE_KEY) || "null"); } catch (e) {}
+  try { cached = JSON.parse(localStorage.getItem(updateCacheKey()) || "null"); } catch (e) {}
   const curVer = (document.getElementById("curVerLabel").textContent || "").trim();
   if (cached && cached.NEW_CODE && cached.CUR_VER === curVer) renderUpdate(cached);
   // 每次打开页面都联网核对一次

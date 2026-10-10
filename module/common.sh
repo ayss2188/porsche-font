@@ -9,6 +9,34 @@ SETTINGS="$LIB/settings.conf"
 getp() { getprop "$1" 2>/dev/null | tr -d '\r\n'; }
 
 # ---------------------------------------------------------------------------
+# 字体库枚举：库里"算数的字体"有哪些
+#
+# ⚠️ 内置配色版必须同时认两种命名，只认一种会出大事：
+#     f<时间戳>     用户导入的（fontctl.sh 的 new_id 生成）—— 主项目只有这一种
+#     builtin_xxx   本模块自带的配色（builtin.sh 的 builtin_import 注入）
+#   如果哪里只 glob f*.ttf，界面就列不出任何配色、诊断报告也会写"字体库 0 个"，
+#   用户会以为模块装坏了。所以统一走这两个函数，别再各处手写 glob。
+#
+# 放在 common.sh 的原因：fontctl.sh 和 diag.sh 都要用，而 diag.sh 只 source
+# common.sh / slots.sh / mount.sh，**不 source fontctl.sh**。
+# ---------------------------------------------------------------------------
+lib_font_ids() {
+  local f
+  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
+    [ -f "$f" ] || continue
+    basename "$f" .ttf
+  done
+}
+
+lib_font_files() {
+  local f
+  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
+    [ -f "$f" ] || continue
+    echo "$f"
+  done
+}
+
+# ---------------------------------------------------------------------------
 # 识别当前 ROM：
 #   专项适配（有已知文件名清单）：hyperos | coloros | originos | flyme
 #   通用适配（靠真实字体目录 + 字体配置 XML 发现槽位）：samsung | honor | huawei | nothing | aosp

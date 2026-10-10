@@ -34,11 +34,15 @@ CODE=${CODE:-0}
 echo "版本：$VER ($CODE)"
 echo
 
-grep -v '^#' "$CONF" | grep -v '^[[:space:]]*$' | while IFS='|' read -r key id upfile fonts disp; do
+grep -v '^#' "$CONF" | grep -v '^[[:space:]]*$' | while IFS='|' read -r key id upfile fonts disp zipkey; do
   key=$(printf '%s' "$key" | tr -d ' \r')
   id=$(printf '%s' "$id" | tr -d ' \r')
   upfile=$(printf '%s' "$upfile" | tr -d ' \r')
+  zipkey=$(printf '%s' "${zipkey:-}" | tr -d ' \r')
   [ -n "$key" ] || continue
+  # zip 文件名用"给用户看的型号名"（718/911/gt3），别用 none/colon/flair 这种内部代号；
+  # 留空则回落到变体键
+  [ -n "$zipkey" ] || zipkey="$key"
 
   work="$OUT/.work-$key"
   rm -rf "$work"; mkdir -p "$work"
@@ -69,8 +73,21 @@ grep -v '^#' "$CONF" | grep -v '^[[:space:]]*$' | while IFS='|' read -r key id u
       echo "updateJson=https://raw.githubusercontent.com/ayss2188/porsche-font/main/$upfile"
   } > "$prop.new" && mv "$prop.new" "$prop"
 
-  # 3) 打包（模块内容在 zip 根目录）
-  zipname="porsche-font-$key-$VER.zip"
+  # 3) 把界面里的模块 id 改成这个变体的 id
+  #    为什么必须改：4 个包共用同一份 index.html，而界面里所有 shell 调用都要拼模块目录路径。
+  #    以前是写死主项目的 custom_font_switcher（换皮时漏改），结果整个界面一条命令都调不到；
+  #    现在改成运行时探测，这里再把"先试哪个 id"按变体写准，单色包也不会猜错。
+  idx="$work/webroot/index.html"
+  if [ -f "$idx" ]; then
+    if grep -q 'const MODULE_HINT' "$idx"; then
+      sed "s/const MODULE_HINT = \"[^\"]*\"/const MODULE_HINT = \"$id\"/" "$idx" > "$idx.new" && mv "$idx.new" "$idx"
+    else
+      echo "  ⚠ 界面里没有 const MODULE_HINT，跳过 id 注入（升级模板后请同步 build-multi.sh）"
+    fi
+  fi
+
+  # 4) 打包（模块内容在 zip 根目录）
+  zipname="porsche-font-$zipkey-$VER.zip"
   rm -f "$OUT/$zipname"
   ( cd "$work" && zip -r -9 -X "$OUT_ABS/$zipname" . >/dev/null )
 

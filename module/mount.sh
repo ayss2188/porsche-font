@@ -4,8 +4,15 @@
 # 原理：开机时把字体库里的字体文件直接 bind mount 到每个真实字体槽上，
 #       不在模块目录生成任何副本（一份字体，零额外占用，也不受模块目录是镜像分区的影响）；
 #       模块带 skip_mount，管理器不会重复挂载。
-#   Magisk          -> post-fs-data 阶段挂载（Magisk 没有 post-mount 阶段）
-#   KernelSU/APatch -> post-mount 阶段挂载（在元模块等挂载之后，避免被目录级挂载盖住）
+#
+# 挂载时机（重要，改过一次）：
+#   主挂载点 = **post-fs-data**，所有管理器都在这里挂。
+#     原因：post-mount 不是所有管理器都执行（实测 KernelSU Ultra 就不执行），
+#     而 post-fs-data 是唯一保证会跑的阶段。以前让 KSU 让位给 post-mount，
+#     结果在那类管理器上字体一个槽位都没换上。
+#   二次修补 = post-mount（KSU / APatch 若支持就会跑）
+#     作用：元模块的目录级挂载盖住我们的 per-file 挂载时，靠 inode 比对发现并补回来。
+#     幂等：已经指向我们的文件就跳过，不会叠挂载。
 #
 # slots.map 每行 "<字体id> <目标路径>"，目标路径相对 /，如 f1700000000 system/fonts/Roboto-Regular.ttf
 #
@@ -26,7 +33,42 @@ _to() {
 payload_mount() {
   local moddir="$1" id rel src dst err ok=0 fail=0 skip=0 same=0
   local map="$moddir/slots.map"
-  [ -s "$map" ] || return 0
+  # ---------------------------------------------------------------------------
+  # 没有挂载计划时：先尝试**重新生成**，再挂。
+  #
+  # 为什么放在这里（而不是等下次开机）：真机上出过一次「更新安装时 apply 报了 OK，
+  # 但 slots.map / payload.mode 没落盘」→ 更新后第一次重启一个槽位都挂不上，
+  # 用户必须再重启一次才好 —— 对更新用户来说体验很差。
+  # 在挂载前补一次，就能让**第一次重启**直接生效。
+  #
+  # 边界（都很重要）：
+  #   · 只在"选了配色"时才补；pending_font 为空/none 时保持不动；
+  #   · manager 模式不补（那是管理器挂载，slots.map 本来就不该有内容）；
+  #   · 找不到 fontctl.sh 就不补（老版本模块没有这个文件）；
+  #   · 每个槽位的 mount 本来就有 5 秒超时兜底，所以即使这里补失败也不会卡开机。
+  # ---------------------------------------------------------------------------
+  if [ ! -s "$map" ]; then
+    local p pm
+    p=$(tr -d '[:space:]' 2>/dev/null < "$moddir/pending_font")
+    pm=$(tr -d '[:space:]' 2>/dev/null < "$moddir/payload.mode")
+    case "$p" in
+      ""|none) echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 没有挂载计划：未选择配色，无需挂载" >> "$LIB/mount.log" 2>/dev/null; return 0 ;;
+    esac
+    if [ "$pm" = manager ]; then
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 没有挂载计划：管理器挂载模式，跳过" >> "$LIB/mount.log" 2>/dev/null
+      return 0
+    fi
+    if [ -f "$moddir/fontctl.sh" ]; then
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 没有挂载计划（slots.map 为空），尝试重新生成（pending=$p）" >> "$LIB/mount.log" 2>/dev/null
+      sh "$moddir/fontctl.sh" apply "$p" >/dev/null 2>&1
+      map="$moddir/slots.map"
+    fi
+    if [ ! -s "$map" ]; then
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 重新生成后仍没有挂载计划，本次不挂载（请把诊断报告发给作者）" >> "$LIB/mount.log" 2>/dev/null
+      return 0
+    fi
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 已补上挂载计划（$(grep -c . "$map" 2>/dev/null) 个槽位），继续挂载" >> "$LIB/mount.log" 2>/dev/null
+  fi
   while read -r id rel src || [ -n "$rel" ]; do
     rel=$(printf '%s' "$rel" | tr -d '\r')
     case "$id" in ""|*[!A-Za-z0-9_]*) continue ;; esac
@@ -83,6 +125,11 @@ payload_verify() {
     # 第三个字段才是真正挂上去的文件（.ttc 槽位挂的是包好的多 face TTC）
     [ -n "$src" ] || src="$LIB/$id.ttf"
     src=$(printf '%s' "$src" | tr -d '\r')
+    # ⚠️ 目标在设备上不存在时不计数。
+    # 否则"总槽位"里会混进一批根本挂不了的路径（计划里多出来的槽位），
+    # 界面上就会出现「实际生效 31 / 62」这种看着像只成功了一半的数字 ——
+    # 其实只有 31 个槽位是真实存在的。真机反馈过这个困惑点。
+    [ -f "/$rel" ] || continue
     n=$((n+1))
     if [ "$mode" = manager ]; then
       # 管理器挂载会经过 overlay/tmpfs，inode 不同，只能比较大小
