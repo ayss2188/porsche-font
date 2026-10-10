@@ -2,6 +2,6 @@
   "version": "v3.0",
   "versionCode": 30,
   "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v3.0/porsche-font-gt3-v3.0.zip",
-  "changelog": "https://github.com/ayss2188/porsche-font/main/CHANGELOG.md",
+  "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/UPDATE-v3.0.md",
   "sha256": "458f5c042c55b1db9b83d58814d618c70125f57c2abf2923fc3aa9f79603a0af"
 }
