@@ -1,0 +1,95 @@
+name: Release
+
+# 一次跑完：取字体素材 → 打 4 个包（三合一 + 3 个单色）→ 建 Release → 写回 4 个 update.json
+# 手动触发：Actions 页 → 左侧 Release → Run workflow
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # ⚠️ 建好仓库后，把「字体素材」Release 里那个三合一 zip 的附件链接粘到这里
+  #    形如 https://github.com/ayss2188/porsche-font/releases/download/fonts-v1/xxx.zip
+  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v1/porsche-font-profiles-v1.zip"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 取字体素材（从 Release 附件里拆出三套配色）
+        run: |
+          set -e
+          mkdir -p module/builtin
+          if [ -z "$FONTS_ZIP_URL" ] || [ "${FONTS_ZIP_URL#*在此粘贴}" != "$FONTS_ZIP_URL" ]; then
+            echo "::warning::还没填 FONTS_ZIP_URL，改用仓库里已有的 builtin/ 字体（如果有）"
+          else
+            curl -fsSL "$FONTS_ZIP_URL" -o /tmp/fonts.zip
+            unzip -o -j /tmp/fonts.zip 'profiles/*.ttf' -d module/builtin/ || true
+            unzip -o -j /tmp/fonts.zip 'system/fonts_src/*.ttf' -d module/builtin/ || true
+          fi
+          echo "---- builtin 里的字体 ----"
+          ls -l module/builtin/ || true
+          n=$(ls module/builtin/*.ttf 2>/dev/null | wc -l)
+          [ "$n" -ge 1 ] || { echo "::error::没有拿到任何字体，无法打包"; exit 1; }
+
+      - name: 读版本号
+        id: ver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          VER=$(sed -n 's/^version=//p' module/module.prop | head -n1 | tr -d '\r')
+          CODE=$(sed -n 's/^versionCode=//p' module/module.prop | head -n1 | tr -d '\r')
+          [ -n "$VER" ] && [ -n "$CODE" ] || { echo "::error::module.prop 里读不到 version / versionCode"; exit 1; }
+          if gh release view "$VER" >/dev/null 2>&1; then
+            echo "::error::Release $VER 已经存在。发新版前请先把 module.prop 的 version 和 versionCode 改大"
+            exit 1
+          fi
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      - name: 打 4 个包
+        run: |
+          sh scripts/build-multi.sh module dist
+          echo "---- 产物 ----"
+          ls -lh dist/
+
+      - name: 生成发布说明（取 CHANGELOG 顶部那一段）
+        run: |
+          awk '/^## /{ if (found) exit; found=1 } found' CHANGELOG.md > /tmp/notes.md
+          [ -s /tmp/notes.md ] || echo "更新" > /tmp/notes.md
+          cat /tmp/notes.md
+
+      - name: 建 Release 并挂 4 个包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VER: ${{ steps.ver.outputs.ver }}
+        run: |
+          set -e
+          gh release create "$VER" \
+            --title "保时捷字体 $VER" \
+            --notes-file /tmp/notes.md \
+            dist/*.zip
+
+      - name: 写回 4 个 update.json
+        env:
+          VER: ${{ steps.ver.outputs.ver }}
+          CODE: ${{ steps.ver.outputs.code }}
+        run: |
+          set -e
+          while IFS='|' read -r key id zipname upfile sum; do
+            [ -n "$key" ] || continue
+            printf '{\n  "version": "%s",\n  "versionCode": %s,\n  "zipUrl": "%s/%s/releases/download/%s/%s",\n  "changelog": "%s/%s/main/CHANGELOG.md",\n  "sha256": "%s"\n}\n' \
+              "$VER" "$CODE" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$VER" "$zipname" \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$sum" > "$upfile"
+            echo "已写 $upfile -> $zipname ($sum)"
+          done < dist/sha256.txt
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add update*.json
+          git commit -m "chore: 更新 update.json（$VER / $CODE）" || echo "没有变化"
+          git push
