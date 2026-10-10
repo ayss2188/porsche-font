@@ -1,0 +1,38 @@
+# Flyme / 魅族 字体槽
+# 拉丁/数字/谷歌部分为标准 AOSP 命名；中文 flyme 槽为常见命名，
+# 安装时会扫描真机目录补全 FlymeSans/MeizuSans 等实际存在的文件。
+# 注意：魅族另有 /data/customizecenter/font/flymeFont.ttf 个性化字体机制，
+# 简单 system/fonts 覆盖无法接管该路径，本清单只覆盖系统字体链路。
+Roboto-Thin.ttf
+Roboto-ExtraLight.ttf
+Roboto-Light.ttf
+Roboto-Regular.ttf
+Roboto-Medium.ttf
+Roboto-SemiBold.ttf
+Roboto-Bold.ttf
+Roboto-ExtraBold.ttf
+Roboto-Black.ttf
+RobotoFlex-Regular.ttf
+RobotoStatic-Regular.ttf
+GoogleSans-Regular.ttf
+GoogleSans-Medium.ttf
+GoogleSans-SemiBold.ttf
+GoogleSans-Bold.ttf
+GoogleSansText-Regular.ttf
+GoogleSansText-Medium.ttf
+GoogleSansText-SemiBold.ttf
+GoogleSansText-Bold.ttf
+GoogleSansFlex-Regular.ttf
+NotoSans-Regular.ttf
+# 魅族中文（常见命名，真机扫描会补全）
+FlymeSans-Thin.ttf
+FlymeSans-Light.ttf
+FlymeSans-Regular.ttf
+FlymeSans-Medium.ttf
+FlymeSans-Bold.ttf
+FlymeSansVF.ttf
+flymeSans-Regular.ttf
+MeizuSans-Regular.ttf
+MeizuSans-Medium.ttf
+MeizuSans-Bold.ttf
+FlymeFont.ttf

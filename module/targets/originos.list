@@ -1,0 +1,38 @@
+# OriginOS / vivo / iQOO 字体槽
+# 拉丁/数字/谷歌部分为标准 AOSP 命名；中文 vivo-sans 槽为常见命名，
+# 安装时会扫描真机 /system/fonts 等目录，把实际存在的 VivoSans/OriginSans/iQOOSans 一并并入
+Roboto-Thin.ttf
+Roboto-ExtraLight.ttf
+Roboto-Light.ttf
+Roboto-Regular.ttf
+Roboto-Medium.ttf
+Roboto-SemiBold.ttf
+Roboto-Bold.ttf
+Roboto-ExtraBold.ttf
+Roboto-Black.ttf
+RobotoFlex-Regular.ttf
+RobotoStatic-Regular.ttf
+GoogleSans-Regular.ttf
+GoogleSans-Medium.ttf
+GoogleSans-SemiBold.ttf
+GoogleSans-Bold.ttf
+GoogleSansText-Regular.ttf
+GoogleSansText-Medium.ttf
+GoogleSansText-SemiBold.ttf
+GoogleSansText-Bold.ttf
+GoogleSansFlex-Regular.ttf
+NotoSans-Regular.ttf
+# vivo 中文（常见命名，真机扫描会补全其余字重）
+VivoSans-Thin.ttf
+VivoSans-Light.ttf
+VivoSans-Regular.ttf
+VivoSans-Medium.ttf
+VivoSans-SemiBold.ttf
+VivoSans-Bold.ttf
+VivoSansVF.ttf
+VivoSansCondensed-Regular.ttf
+VivoSansCondensed-Medium.ttf
+VivoSansCondensed-Bold.ttf
+vivoSans-Regular.ttf
+OriginSans-Regular.ttf
+iQOOSans-Regular.ttf
