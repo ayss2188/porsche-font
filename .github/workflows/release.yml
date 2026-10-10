@@ -57,11 +57,13 @@ jobs:
           echo "---- 产物 ----"
           ls -lh dist/
 
-      - name: 生成发布说明（取 CHANGELOG 顶部那一段）
+      - name: 生成发布说明（Release 页用）
         run: |
+          # Release 页用 CHANGELOG 顶部那一段（详细版，带小节和表格）
           awk '/^## /{ if (found) exit; found=1 } found' CHANGELOG.md > /tmp/notes.md
           [ -s /tmp/notes.md ] || echo "更新" > /tmp/notes.md
-          cat /tmp/notes.md
+          echo "---- Release 说明（$(wc -l < /tmp/notes.md) 行）----"
+          head -n 5 /tmp/notes.md
 
       - name: 建 Release 并挂 4 个包
         env:
@@ -80,11 +82,17 @@ jobs:
           CODE: ${{ steps.ver.outputs.code }}
         run: |
           set -e
+          # ⚠️ changelog 用 jsDelivr CDN，不要用 raw.githubusercontent.com：
+          #    raw 域名在国内经常被墙，管理器弹窗会显示 "Not Found"（真机踩过）。
+          #    内容指向 UPDATE-<版本>.md（约 20 行的短版）——
+          #    update.json 的 changelog 会被管理器弹窗直接显示，不能塞
+          #    CHANGELOG.md 那种 77 行 / 6.5KB 的完整版，用户看不完。
+          #    Release 页仍然用完整版（上一步生成的 /tmp/notes.md）。
           while IFS='|' read -r key id zipname upfile sum; do
             [ -n "$key" ] || continue
-            printf '{\n  "version": "%s",\n  "versionCode": %s,\n  "zipUrl": "%s/%s/releases/download/%s/%s",\n  "changelog": "%s/%s/main/CHANGELOG.md",\n  "sha256": "%s"\n}\n' \
+            printf '{\n  "version": "%s",\n  "versionCode": %s,\n  "zipUrl": "%s/%s/releases/download/%s/%s",\n  "changelog": "https://cdn.jsdelivr.net/gh/%s@main/UPDATE-%s.md",\n  "sha256": "%s"\n}\n' \
               "$VER" "$CODE" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$VER" "$zipname" \
-              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$sum" > "$upfile"
+              "$GITHUB_REPOSITORY" "$VER" "$sum" > "$upfile"
             echo "已写 $upfile -> $zipname ($sum)"
           done < dist/sha256.txt
 
