@@ -2,6 +2,6 @@
   "version": "v3.0",
   "versionCode": 30,
   "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v3.0/porsche-font-911-v3.0.zip",
-  "changelog": "https://github.com/ayss2188/porsche-font/main/CHANGELOG.md",
+  "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/UPDATE-v3.0.md",
   "sha256": "918dbc23b780272513b76a8e32a3efb290d17f2382eb3b487b5fecf91f9ef378"
 }
