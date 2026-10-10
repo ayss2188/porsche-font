@@ -1,0 +1,3 @@
+dist/
+*.zip
+module/builtin/*.ttf
