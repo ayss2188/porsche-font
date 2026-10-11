@@ -23,28 +23,39 @@ shutting_down && exit 0
 
 rm -f "$MODDIR/mount_missed"
 [ "$(getprop sys.boot_completed)" = "1" ] && rm -f "$MODDIR/.booting"
+# 开机真的完成了 -> 把"连续失败"计数清零：说明这个字体在这台机器上是能用的。
+# （计数只在 post-fs-data 的救援分支里加，两次就会写 disable 停用模块，宁可保守。）
+[ "$(getprop sys.boot_completed)" = "1" ] && rm -f "$LIB/rescue_count" 2>/dev/null
 
-# 自带挂载模式下选了字体，但本次开机没有挂载记录 -> 提示用户（多为管理器不支持 post-mount）
+# ---------------------------------------------------------------------------
+# 开机完成后补一次完整计划（含 .ttc 合集合成）。
+# 为什么放这儿、不放 post-fs-data：post-fs-data 是**阻塞**阶段，合成几十 MB 的合集
+# 会把老设备的开机动画卡住（真机反馈过）。这里开机已经起来了，慢一点没人受影响。
+# 只补"确实没有计划"的情况：正常情况下计划在 apply 时就写好了，这里什么都不做。
+# ---------------------------------------------------------------------------
+if [ -f "$MODDIR/fontctl.sh" ] && [ ! -s "$MODDIR/slots.map" ]; then
+  _p2=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
+  case "$_p2" in
+    ""|none) ;;
+    *)
+      if [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" != manager ]; then
+        beat service "计划为空，开机后补做完整计划（含合集）"
+        sh "$MODDIR/fontctl.sh" apply "$_p2" >/dev/null 2>&1
+        beat service "补做结果：计划 $(grep -c . "$MODDIR/slots.map" 2>/dev/null) 个槽位（下次开机生效）"
+      fi
+      ;;
+  esac
+fi
+
+# 自带挂载模式下选了字体，但本次开机没有挂载记录 -> 提示用户
+# （主挂载在 post-fs-data，所以这一般意味着"Root 管理器开机时没运行模块脚本"：
+#   临时 root / 需要手动再激活一次的 root / 模块被禁用 / 安全模式）
 P=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
 # 心跳：证明 service 阶段确实被执行了（诊断用）
 beat service "pending=$P boot_completed=$(getprop sys.boot_completed 2>/dev/null)"
 case "$P" in
   ""|none) ;;
   *)
-    # ---------------------------------------------------------------------
-    # 自愈：选了配色、但**挂载计划是空的**（slots.map 没有内容）→ 重新生成一次。
-    #
-    # 真机上出过一次：刷入时 apply 报了 OK，但 slots.map 没落盘（原因未查明），
-    # 于是开机时 payload_mount 第一行就返回（[ -s "$map" ] || return 0），
-    # 一个槽位都挂不上，界面只显示"本次开机未挂载"，用户无从下手。
-    # 这里补一次：本开机仍然是没挂上，但下次重启就会生效，用户只需多重启一次。
-    # ---------------------------------------------------------------------
-    if [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" != manager ] && \
-       [ ! -s "$MODDIR/slots.map" ]; then
-      beat service "slots.map 是空的，尝试重新生成（$P）"
-      sh "$MODDIR/fontctl.sh" apply "$P" >/dev/null 2>&1
-      beat service "重新生成结果：slots.map $([ -s "$MODDIR/slots.map" ] && echo 已生成 || echo 仍为空)"
-    fi
     if [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" != manager ] && \
        [ "$(sed -n 's/^boot=//p' "$MODDIR/mount.state" 2>/dev/null)" != "$(boot_id)" ]; then
       touch "$MODDIR/mount_missed"
@@ -55,16 +66,20 @@ esac
 # ---------------------------------------------------------------------------
 # 清理"设备上已不存在"的槽位记录
 #
-# 真机踩到的：slots.applied 里有 62 行，其中 31 行指向的字体文件在本机根本不存在
-# （是更早某次规划留下的残留）。后果：
-#   · 界面上「已替换槽位」显示 62 —— 虚高一倍，用户以为成功了一半；
-#   · 挂载时那 31 个槽位只能记成"跳过"，看着像出错。
-# 这些条目永远不会生效，留着只有坏处，所以开机完成后清掉。
-# 放在 service 阶段（开机已完成）：post-fs-data 是阻塞阶段，不在这里写文件。
-# 用临时文件 + 替换，避免写一半被打断留下残缺清单。
+# 为什么会有失效记录：计划是按**当时那台设备**的字体目录生成的。之后换了 ROM、
+# 系统更新删掉了某些字体文件，或者装过实验版留下了别的格式，slots.applied /
+# slots.map 里就会留着指向**已经不存在的文件**的条目。这些条目永远不会生效，
+# 留着只有坏处：
+#   · 界面「已替换槽位」虚高 —— 用户以为替换了一大堆，其中一部分根本不存在；
+#   · 挂载时这些槽位只能记成"跳过"，看着像出错。
+# 所以开机完成后清掉。
+#
+# 放在 service 阶段（开机已完成）：post-fs-data 是阻塞阶段，不在那里写文件。
+# 用临时文件 + mv 替换，避免写一半被打断留下残缺清单。
+# 只在"自带挂载"模式做：管理器模式下 slots.applied 是模块内副本的清单，判据不同。
 # ---------------------------------------------------------------------------
 prune_dead_slots() {
-  local f tmp n_before n_after p rel id
+  local f tmp n_before n_after line rel
   [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" = manager ] && return 0
   for f in "$MODDIR/slots.applied" "$MODDIR/slots.map"; do
     [ -s "$f" ] || continue
@@ -73,13 +88,16 @@ prune_dead_slots() {
     : > "$tmp" 2>/dev/null || continue
     while IFS= read -r line || [ -n "$line" ]; do
       [ -n "$line" ] || continue
-      set -- $line
       if [ "$f" = "$MODDIR/slots.map" ]; then
-        # map 一行是 "id [角色] 路径"，路径是最后一个字段
-        if [ "$#" -ge 3 ]; then rel="$3"; else rel="$2"; fi
+        # map 一行是 "<字体id> <目标路径> [源文件]"：目标路径**永远是第 2 个字段**。
+        # 第 3 个字段是 .ttc 实验版留下的"这个槽位挂哪个文件"，不是路径 ——
+        # 拿它当路径会把那台机器上的 .ttc 槽位当成失效记录删掉。
+        # 用参数展开取字段（不用 set -- / cut），避免路径里的 * 被当通配符展开、也少开进程。
+        rel=${line#* }
+        rel=${rel%% *}
       else
-        # applied 一行就是路径
-        rel="$1"
+        # applied 一行就是一个目标路径
+        rel="$line"
       fi
       rel=$(printf '%s' "$rel" | tr -d '\r')
       case "$rel" in ""|/*|*..*) continue ;; esac
@@ -88,7 +106,7 @@ prune_dead_slots() {
     n_after=$(wc -l < "$tmp" 2>/dev/null | tr -d ' ')
     if [ "$n_after" != "$n_before" ]; then
       mv -f "$tmp" "$f" 2>/dev/null
-      beat service "清理失效槽位：$(basename "$f") $n_before → $n_after 行"
+      beat service "清理失效槽位：${f##*/} $n_before → $n_after 行"
     else
       rm -f "$tmp" 2>/dev/null
     fi

@@ -1,5 +1,6 @@
 #!/system/bin/sh
-# 自定义字体切换模块 - 字体库管理 / 应用脚本（供 WebUI、安装脚本调用）
+# 保时捷字体（内置配色版）- 字体库管理 / 应用脚本（供 WebUI、安装脚本调用）
+# 换皮自主项目的 custom_font_switcher；同步主项目时本文件的固定改动见 common.sh 顶部清单。
 # 用法：
 #   sh fontctl.sh status                      输出 A=<生效> P=<待生效> R=<系统> 等状态
 #   sh fontctl.sh list                        列出字体库：id|名称|字节数|元数据
@@ -22,6 +23,10 @@
 #   sh fontctl.sh sync                        开机后确认 pending -> active
 #   sh fontctl.sh prop                        刷新 module.prop 描述
 #   sh fontctl.sh ack                         清除"已自动恢复"提示
+#   sh fontctl.sh ack-stopped                 清除"曾被自动停用"提示
+#
+# import / rename / delete 三条命令**保留没删** —— 内置配色版界面不再调用它们，
+# 但保留着不占资源，而且万一日后要支持"混搭自己的字体"可以直接接回去。
 #
 # 切换采用"先生成、再校验、最后提交"：新字体文件全部就绪才替换旧的，中途失败保留原来的字体。
 
@@ -35,13 +40,19 @@ STORAGE=${STORAGE:-/data/media/0}
 . "$MODDIR/common.sh" 2>/dev/null
 . "$MODDIR/slots.sh" 2>/dev/null
 . "$MODDIR/mount.sh" 2>/dev/null
+# ⚠️ 必须判存在再 source：POSIX 里 `.` 打不开文件是**致命错误**，会直接把整个 fontctl 退出
+#    （exit 2，连一行输出都没有）—— 主项目的写法是 `. "$MODDIR/ttcwrap.sh" 2>/dev/null`，
+#    看起来"找不到就跳过"，其实**整个界面都会废掉**（不是只少个 .ttc 功能）。
+#    ttcwrap.sh 是新增文件，最容易在打包时漏掉，所以这里加一道守卫：
+#    万一包里没有它，只有 .ttc 合集功能不可用，其它一切照常。
+[ -f "$MODDIR/ttcwrap.sh" ] && . "$MODDIR/ttcwrap.sh"
 mkdir -p "$LIB" 2>/dev/null
 export TMPDIR="$LIB"
 
 APPLIED="$MODDIR/slots.applied"
 MODID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
 # 兜底：module.prop 读不到时（异常情况）扫一下本机装的是哪个配色包。
-# 注意不要写死成主项目的 custom_font_switcher —— 换皮成保时捷后那个 id 根本不存在。
+# ⚠️ 不要写死成主项目的 custom_font_switcher —— 换皮成保时捷后那个 id 根本不存在。
 if [ -z "$MODID" ]; then
   for _d in /data/adb/modules/porsche_font_*; do
     [ -f "$_d/module.prop" ] || continue
@@ -49,6 +60,7 @@ if [ -z "$MODID" ]; then
     break
   done
 fi
+[ -n "$MODID" ] || MODID=porsche_font_multi
 
 # 旧版把设置放在模块目录（升级会被覆盖），迁移到字体库目录
 [ -f "$SETTINGS" ] || { [ -f "$MODDIR/settings.conf" ] && cp -f "$MODDIR/settings.conf" "$SETTINGS" 2>/dev/null; }
@@ -64,18 +76,31 @@ meta_set() {
 meta_compact() { tr '\n' ',' 2>/dev/null < "$LIB/$1.meta" | sed 's/,$//'; }
 
 # 该字体实际使用的替换范围：用户指定 > 按覆盖范围自动判断
-effective_scope() {
+# 结果同时写进全局 EFF_SCOPE，"凭什么这么判"写进 SCOPE_VIA（诊断报告的决策记录要用）。
+# 注意：想拿到 SCOPE_VIA 就直接调 _eff_scope，别用 $(...) 包 —— 那会开子 shell 把变量丢掉。
+_eff_scope() {
   local sc latin cjk
-  case "$1" in *+*) echo combo; return ;; ""|none) echo all; return ;; esac
+  case "$1" in
+    *+*) EFF_SCOPE=combo; SCOPE_VIA=组合字体; return ;;
+    ""|none) EFF_SCOPE=all; SCOPE_VIA=未选择字体; return ;;
+  esac
   sc=$(meta_get "$1" scope)
-  case "$sc" in all|latin|cjk) echo "$sc"; return ;; esac
+  case "$sc" in
+    all|latin|cjk) EFF_SCOPE="$sc"; SCOPE_VIA="字体元数据 scope=$sc（导入时指定）"; return ;;
+  esac
   latin=$(meta_get "$1" latin); cjk=$(meta_get "$1" cjk)
-  if [ -z "$latin$cjk" ]; then echo all; return; fi      # 没有元数据：中英文都替换
-  if [ "$cjk" = 1 ] && [ "$latin" = 1 ]; then echo all
-  elif [ "$latin" = 1 ]; then echo latin
-  elif [ "$cjk" = 1 ]; then echo cjk
-  else echo latin; fi
+  if [ -z "$latin$cjk" ]; then
+    EFF_SCOPE=all
+    SCOPE_VIA="没有覆盖范围记录（老字体）→ 按中英文都替换"
+    return
+  fi
+  if [ "$cjk" = 1 ] && [ "$latin" = 1 ]; then EFF_SCOPE=all;   SCOPE_VIA="探针：英文有 中文有 → 全换"
+  elif [ "$latin" = 1 ]; then              EFF_SCOPE=latin; SCOPE_VIA="探针：英文有 中文没有 → 只换拉丁"
+  elif [ "$cjk" = 1 ]; then                EFF_SCOPE=cjk;   SCOPE_VIA="探针：中文有 英文没有 → 只换中文"
+  else                                     EFF_SCOPE=latin; SCOPE_VIA="探针：两边都不全 → 只换拉丁"
+  fi
 }
+effective_scope() { _eff_scope "$1"; printf '%s\n' "$EFF_SCOPE"; }
 
 clean_name() { printf '%s' "$1" | tr -d '|\\\r\n'; }
 
@@ -129,13 +154,71 @@ cur_active()  { local v; v=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_fon
 cur_pending() { local v; v=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font"); echo "${v:-$(cur_active)}"; }
 
 # 只接受 TTF / OTF（TTC 合集不能直接替换单文件槽位）
+# ⚠ 光看魔数不够：**截断/损坏的文件魔数也是对的**，而把坏字体挂到系统字体槽上，
+#   轻则文字显示异常，重则开机后系统字体加载失败（真机反馈过"卡开机后黑屏"）。
+#   所以这里把表目录也验一遍：
+#     · 表数量合理、目录长度落在文件内
+#     · 每条表的 偏移+长度 都落在文件内（截断文件必然过不了这一关）
+#     · 必需的几张表都在（cmap/head/hhea/hmtx/maxp + glyf/loca 或 CFF）
 valid_font() {
-  local m
-  m=$(head -c 4 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+  local f="$1" m sz b num tot bytes v c tag off ln
+  local has_cmap=0 has_head=0 has_hhea=0 has_hmtx=0 has_maxp=0 has_glyf=0 has_cff=0
+  [ -f "$f" ] || return 1
+  sz=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+  case "$sz" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$sz" -ge 512 ] 2>/dev/null || return 1
+  m=$(head -c 4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')
   case "$m" in
-    00010000|4f54544f|74727565) return 0 ;;
+    00010000|4f54544f|74727565) ;;
+    *) return 1 ;;
   esac
-  return 1
+  b=$(od -An -tu1 -j4 -N2 "$f" 2>/dev/null); set -- $b
+  [ $# -ge 2 ] || return 1
+  num=$(( $1 * 256 + $2 ))
+  [ "$num" -ge 5 ] 2>/dev/null || return 1
+  [ "$num" -le 512 ] 2>/dev/null || return 1
+  tot=$(( 12 + 16 * num ))
+  [ "$tot" -le "$sz" ] 2>/dev/null || return 1
+  bytes=$(od -An -tu1 -j0 -N"$tot" "$f" 2>/dev/null | tr -s ' \n' ' ')
+  set -- $bytes
+  [ $# -ge "$tot" ] || return 1
+  v=0; while [ "$v" -lt 12 ]; do shift; v=$((v+1)); done
+  v=0
+  while [ "$v" -lt "$num" ]; do
+    [ $# -ge 16 ] || return 1
+    tag=""
+    # 只认要用的那几张表，省掉字符串比较
+    [ "$1" = 99 ]  && [ "$2" = 109 ] && [ "$3" = 97 ]  && [ "$4" = 112 ] && tag=cmap
+    [ "$1" = 104 ] && [ "$2" = 101 ] && [ "$3" = 97 ]  && [ "$4" = 100 ] && tag=head
+    [ "$1" = 104 ] && [ "$2" = 104 ] && [ "$3" = 101 ] && [ "$4" = 97 ]  && tag=hhea
+    [ "$1" = 104 ] && [ "$2" = 109 ] && [ "$3" = 116 ] && [ "$4" = 120 ] && tag=hmtx
+    [ "$1" = 109 ] && [ "$2" = 97 ]  && [ "$3" = 120 ] && [ "$4" = 112 ] && tag=maxp
+    [ "$1" = 103 ] && [ "$2" = 108 ] && [ "$3" = 121 ] && [ "$4" = 102 ] && tag=glyf
+    [ "$1" = 67 ]  && [ "$2" = 70 ]  && [ "$3" = 70 ]  && [ "$4" = 32 ]  && tag=cff
+    shift 8
+    off=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 )); shift 4
+    ln=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 )); shift 4
+    # 截断文件在这里必然露馅
+    [ $(( off + ln )) -le "$sz" ] 2>/dev/null || return 1
+    case "$tag" in
+      cmap) has_cmap=1 ;; head) has_head=1 ;; hhea) has_hhea=1 ;;
+      hmtx) has_hmtx=1 ;; maxp) has_maxp=1 ;; glyf) has_glyf=1 ;; cff) has_cff=1 ;;
+    esac
+    v=$((v+1))
+  done
+  [ "$has_cmap" = 1 ] && [ "$has_head" = 1 ] && [ "$has_hhea" = 1 ] && \
+  [ "$has_hmtx" = 1 ] && [ "$has_maxp" = 1 ] || return 1
+  # 轮廓数据：TrueType 用 glyf，OpenType/CFF 用 CFF —— 两个都没有就是空壳
+  [ "$has_glyf" = 1 ] || [ "$has_cff" = 1 ] || return 1
+  return 0
+}
+
+# 可用空间（KB）。取不到（路径不存在、df 输出格式不同）就返回空 —— 调用方按"查不到就不拦"处理
+free_kb() {
+  local v
+  v=$(df -k "$1" 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4 | tr -d '[:space:]')
+  case "$v" in ''|*[!0-9]*) return 0 ;; esac
+  printf '%s' "$v"
 }
 
 new_id() {
@@ -151,9 +234,6 @@ id_ok() {
   case "$1" in ""|*[!A-Za-z0-9_]*) return 1 ;; esac
   [ -f "$LIB/$1.ttf" ]
 }
-
-# 字体库枚举（lib_font_ids / lib_font_files）定义在 common.sh 里 ——
-# diag.sh 也要用它，而 diag.sh **不 source 本文件**，所以不能放这儿。
 
 check_id() {
   case "$1" in
@@ -187,11 +267,22 @@ in_use() {
 
 # 入库：store_font <源文件> <名称> <cp|mv>
 store_font() {
-  local src="$1" name="$2" mode="$3" id dst
+  local src="$1" name="$2" mode="$3" id dst sz need free
   if ! valid_font "$src"; then
     rm -f "$PART"
-    echo "ERROR:不是有效的 TTF/OTF 字体文件（TTC 合集请先在电脑上用 tools/optimize_font.py --face 拆出单个字体）"
+    echo "ERROR:不是有效的 TTF/OTF 字体文件（可能已损坏或被截断；TTC 合集请先在电脑上用 tools/optimize_font.py --face 拆出单个字体）"
     return 1
+  fi
+  # 空间检查：字体本身 + 换成 .ttc 合集时要再合成几份（每份≈原合集+本字体），
+  # 写满 /data 会让系统起不来（真机反馈过"强制重启后黑屏、进不去桌面"）。
+  sz=$(wc -c < "$src" 2>/dev/null | tr -d ' ')
+  if [ -n "$sz" ] && [ "$sz" -gt 0 ] 2>/dev/null; then
+    need=$(( sz / 1024 * 4 + 20480 ))          # 字体×4 + 20MB 余量
+    free=$(free_kb "$LIB")
+    if [ -n "$free" ] && [ "$free" -lt "$need" ] 2>/dev/null; then
+      echo "ERROR:存储空间不足（字体 $(( sz / 1048576 ))MB，算上合集大约需要 $(( need / 1024 ))MB，/data 只剩 $(( free / 1024 ))MB）"
+      return 1
+    fi
   fi
   id=$(new_id); dst="$LIB/$id.ttf"
   if [ "$mode" = mv ]; then
@@ -299,13 +390,17 @@ refresh_rom() {
 # 生成计划到文件（每行 "角色 目标路径"）；输出 scope
 make_plan() {
   local sel="$1" out="$2" scope kl ks
-  scope=$(effective_scope "$sel")
+  _eff_scope "$sel"          # 不用 $(...)：SCOPE_VIA 要留在当前 shell 里给决策记录用
+  scope="$EFF_SCOPE"
   kl=$(cfg_get keep_lang 1); ks=$(cfg_get keep_special 1)
   if [ "$scope" = combo ]; then
     slot_plan "$MODDIR" all "$kl" "$ks" > "$out"
   else
     slot_plan "$MODDIR" "$scope" "$kl" "$ks" > "$out"
   fi
+  # 除了 echo，还留一份到全局变量：调用方常用 $(...) 取返回值，那会开子 shell，
+  # 而 SCOPE_VIA（判定依据）是在子 shell 里设的，外面拿不到 —— 所以调用方直接读 PLAN_SCOPE。
+  PLAN_SCOPE="$scope"
   echo "$scope"
 }
 
@@ -314,11 +409,72 @@ font_for_role() {
   case "$1" in
     *+*)
       case "$2" in
-        cjk|main|lang) sel_cjk "$1" ;;
+        cjk|main|lang|ttc) sel_cjk "$1" ;;
         *) sel_lat "$1" ;;
       esac ;;
     *) echo "$1" ;;
   esac
+}
+
+# ---------------------------------------------------------------------------
+# 多字重配对（复刻 MTZ 主题包的做法）
+#
+# 问题：系统里"加粗"是去同一族里找 weight=700 那份**文件**（MiSans-Bold / SourceSansPro-Bold…）。
+#       我们以前一个字体铺满所有槽位 —— 系统要 700，拿到的还是 Regular，所以看不出加粗。
+# 做法：同一族的多个字重（靠导入时记下的 fam 分组）在 apply 时各就各位：
+#       看槽位要哪个字重（从文件名推断），从族里挑最接近的那一份。
+# 代价：族里只有一份文件时什么都不做（零开销），这是绝大多数人的情况。
+# ---------------------------------------------------------------------------
+
+# 从槽位文件名推断系统想要的字重。顺序要紧：extrabold 必须先于 bold、
+# extralight 必须先于 light，否则会被短关键词先匹配走。
+slot_weight() {
+  local n
+  n=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$n" in
+    *thin*)                             echo 100 ;;
+    *extralight*|*ultralight*)          echo 200 ;;
+    *light*)                            echo 300 ;;
+    *medium*)                           echo 500 ;;
+    *semibold*|*demibold*)              echo 600 ;;
+    *extrabold*|*ultrabold*)            echo 800 ;;
+    *black*|*heavy*)                    echo 900 ;;
+    *bold*)                             echo 700 ;;
+    *)                                  echo 400 ;;
+  esac
+}
+
+# 把某个字体所在族的全部字重读进来（一次 apply 最多两次：组合模式下中英各一次）
+# 结果放 GRP_PAIRS="id:字重 id:字重 …"，没配对时只有它自己
+grp_load() {
+  local leader="$1" fam m id fam2 w
+  local pairs="$leader:$(meta_get "$leader" wght)"
+  GRP_PAIRS="$pairs"
+  fam=$(meta_get "$leader" fam)
+  case "$fam" in ""|none) return 0 ;; esac
+  for m in "$LIB"/f*.meta; do
+    [ -f "$m" ] || continue
+    id=${m##*/}; id=${id%.meta}
+    [ "$id" = "$leader" ] && continue
+    fam2=$(meta_get "$id" fam)
+    [ "$fam2" = "$fam" ] || continue
+    w=$(meta_get "$id" wght)
+    pairs="$pairs $id:$w"
+  done
+  GRP_PAIRS="$pairs"
+}
+
+# 从族里挑字重最接近 want 的那一份；族里只有一份就直接返回它
+grp_pick() {
+  local want="$1" p id w d best="" bestd=""
+  case "$GRP_PAIRS" in ""|*" "*) ;; *) printf '%s' "${GRP_PAIRS%%:*}"; return 0 ;; esac
+  for p in $GRP_PAIRS; do
+    id=${p%%:*}; w=${p##*:}
+    case "$w" in ''|*[!0-9]*) w=400 ;; esac
+    d=$(( w - want )); [ "$d" -lt 0 ] && d=$(( 0 - d ))
+    if [ -z "$bestd" ] || [ "$d" -lt "$bestd" ]; then bestd="$d"; best="$id"; fi
+  done
+  printf '%s' "${best:-${GRP_PAIRS%%:*}}"
 }
 
 # 删掉旧的"管理器挂载"文件（按 slots.applied 记录）
@@ -357,30 +513,37 @@ commit_payload() {
   fi
   rm -rf "$stage" 2>/dev/null
 
-  # 写清单时按**完整路径**去一次重（保序）：
-  #   · slots.applied 只存路径 → 同一路径只该有一行；
-  #   · slots.map 一行是 "id 角色 路径"（或 "id 路径"）→ 用第 2 字段（路径）判重，
-  #     不能只看整行：同一个路径配上不同 id 也是错的（那会挂两次）。
-  # 为什么要在写入端再保一道：计划生成端已经去过重了，但那是"多来源合并"的地方
-  # （XML ∪ 静态清单 ∪ OEM 规则 ∪ 小米主题字体），真机上出现过同一个路径计两遍，
-  # 界面显示「已替换槽位 62」而设备上只有 31 个槽位存在。这里再兜一次最稳。
-  if [ -f "$stage.list" ]; then
-    awk '!seen[$0]++' "$stage.list" > "$stage.list.d" 2>/dev/null && mv -f "$stage.list.d" "$stage.list"
-    mv -f "$stage.list" "$APPLIED"
-  else
-    : > "$APPLIED"
-  fi
-  if [ -f "$stage.map" ]; then
-    awk '{ p = (NF >= 3 ? $3 : $2); if (seen[p]++) next; print }' "$stage.map" > "$stage.map.d" 2>/dev/null && mv -f "$stage.map.d" "$stage.map"
-    mv -f "$stage.map" "$MODDIR/slots.map"
-  else
-    : > "$MODDIR/slots.map"
-  fi
+  if [ -f "$stage.list" ]; then mv -f "$stage.list" "$APPLIED"; else : > "$APPLIED"; fi
+  if [ -f "$stage.map" ]; then mv -f "$stage.map" "$MODDIR/slots.map"; else : > "$MODDIR/slots.map"; fi
   echo "$mode" > "$MODDIR/payload.mode"
 }
 
+# ---------------------------------------------------------------------------
+# 清掉"不再被引用"的合集文件
+#
+# 为什么需要：每个 .ttc 槽位都会在字体库里留一份合成好的合集（如 f1791634021.ttc5），
+# 一份就是二三十 MB。换了字体、关掉「替换 .ttc 合集」、或者系统合集 face 数变了之后，
+# 旧的那份就没人引用了 —— 不清的话会一直躺在 /data 里。
+# 判据很保守：只删 $LIB 下形如 <id>.ttc<face数> 的文件，而且**必须不在当前的 slots.map 里**
+# （slots.map 的第 3 个字段就是它）。删掉正在被 bind 挂载的文件是安全的 ——
+# 挂载持有的是 inode，文件名消失不影响本次开机已经挂好的东西，重启后会按新计划挂。
+# ---------------------------------------------------------------------------
+prune_wrapped_ttc() {
+  local f
+  for f in "$LIB"/*.ttc[0-9]* ; do
+    [ -f "$f" ] || continue
+    if [ -s "$MODDIR/slots.map" ] && \
+       awk -v p="$f" '$NF == p { found = 1 } END { exit !found }' "$MODDIR/slots.map" 2>/dev/null; then
+      continue
+    fi
+    rm -f "$f" 2>/dev/null
+  done
+  return 0
+}
+
 do_apply() {
-  local sel scope plan role rel id src dest stage mode COUNT=0 fail=0
+  local sel scope plan role rel id src dest stage mode COUNT=0 fail=0 wid
+  GRP_LAST=""; GRP_PAIRS=""     # 多字重配对的缓存（见 grp_load）
   sel=$(check_sel "$1") || { echo "$sel"; exit 1; }
   refresh_rom
   mode=$(mount_mode)
@@ -388,9 +551,21 @@ do_apply() {
   stage="$MODDIR/.stage.$$"
   rm -rf "$MODDIR"/.stage.* 2>/dev/null
   scope=none
+  GRP_LAST=""; GRP_PAIRS=""     # 多字重配对的缓存（见 grp_load）
+  # .ttc 合集替换 + 替换范围的"决策记录"（诊断报告会原样打印）。
+  # 为什么要有它：报告里 dump 的 fonts.xml 每行被截断到 2000 字，光看报告看不出
+  # 模块到底判了哪几号 face、范围是怎么定出来的；用户发一份报告就能从源头看出对不对。
+  # 真正的内容在下面 make_plan 之后写（那时才知道计划数和判定依据），这里先占位。
+  : > "$LIB/ttc.log" 2>/dev/null
 
   if [ "$sel" != none ]; then
-    scope=$(make_plan "$sel" "$plan")
+    # 不用 $(...)：那会开子 shell，make_plan 里设的 SCOPE_VIA（判定依据）就拿不到了
+    make_plan "$sel" "$plan" >/dev/null
+    scope="$PLAN_SCOPE"
+    {
+      echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=$sel"
+      echo "plan=$(grep -c . "$plan" 2>/dev/null) scope=$scope 判定依据=${SCOPE_VIA:-?} keep_lang=$(cfg_get keep_lang 1) keep_special=$(cfg_get keep_special 1)"
+    } > "$LIB/ttc.log" 2>/dev/null
     if [ ! -s "$plan" ]; then
       rm -f "$plan"
       echo "ERROR:没有找到可替换的槽位（范围：$scope）。可到设置里关闭「保留…」选项，或查看诊断报告"
@@ -405,19 +580,67 @@ do_apply() {
     mkdir -p "$stage"
     : > "$stage.list"
     : > "$stage.map"
-    # 目标不存在时跳过：计划生成端理论上只输出"设备上真实存在"的文件，
-    # 但真机上出现过计划里混进一批不存在路径的情况（挂载时 skip=31、
-    # 界面显示「已替换槽位 62」而实际只有 31 个槽位真实存在），
-    # 所以在这里按真实存在性再过滤一遍 —— 清单只记录真正会被替换的槽位。
-    : > "$stage.skipped"
     while read -r role rel; do
       [ -n "$rel" ] || continue
-      if [ ! -f "/$rel" ]; then
-        echo "$role $rel" >> "$stage.skipped"
-        continue
-      fi
       id=$(font_for_role "$sel" "$role")
+      # 多字重配对：这个槽位系统要的是哪个字重？从同一族里挑最接近的那份（族里只有一份 = 原样）
+      [ "$id" = "$GRP_LAST" ] || { grp_load "$id"; GRP_LAST="$id"; }
+      wid=$(grp_pick "$(slot_weight "${rel##*/}")")
+      [ -n "$wid" ] && [ -f "$LIB/$wid.ttf" ] && id="$wid"
       src="$LIB/$id.ttf"
+      # .ttc 合集槽位（三星简中这类，见 common.sh 的 ttc_enabled）：
+      # 把用户的字体包成"和目标合集一样多 face"的 TTC 再顶替 —— 系统配置里的 index 依然有效，
+      # 不用改任何系统配置。（实测 SM-S9280 / Android 16：中文能跟着变，Minikin 认 index 就够。）
+      # 生成失败就跳过这个槽位、保持系统原样 —— 绝不挂一个坏文件上去。
+      case "$rel" in
+        *.ttc|*.TTC)
+          nf=$(ttc_faces_of "/$rel" 2>/dev/null)
+          isnum "$nf" || continue
+          [ "$nf" -ge 1 ] 2>/dev/null || continue
+          # 合集里装着好几种字（三星：0=日 1=韩 2=简中 3=繁中），**只换中文那几号**，
+          # 日/韩保留原字形 —— 否则用户的中文字体没有假名/谚文字形，日韩就变方块。
+          # 注意用重定向而不是 $(...)：那会开子 shell，TTC_CN_SRC / TTC_CN_DETAIL 就丢了。
+          ttc_cn_indices "${rel##*/}" "$nf" > "$LIB/.ttccn.$$" 2>/dev/null
+          cn=$(tr '\n' ' ' < "$LIB/.ttccn.$$" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')
+          cn_src="$TTC_CN_SRC"; cn_detail="$TTC_CN_DETAIL"
+          rm -f "$LIB/.ttccn.$$" 2>/dev/null
+          # 决策记录：报告里那份 fonts.xml 是被截断的，看不出代码到底怎么判的，
+          # 所以这里把"换了哪几号、凭什么"写进 ttc.log，诊断报告会原样打印。
+          printf '%s %s faces=%s replace=%s via=%s detail=%s\n' \
+            "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "$cn_src" "${cn_detail:-无}" \
+            >> "$LIB/ttc.log" 2>/dev/null
+          [ -n "$cn" ] || continue
+          tag=$(printf '%s' "$cn" | tr ' ' '-')
+          cand="$LIB/$id.ttc${nf}_$tag"
+          # 源字体或**系统合集**比产物新，就重新生成（系统更新换了合集内容时必须重做）
+          if [ ! -s "$cand" ] || [ "$cand" -ot "$src" ] 2>/dev/null || [ "$cand" -ot "/$rel" ] 2>/dev/null; then
+            # 先算空间：这次要合成 = 原合集大小 + 用户字体大小。宁可这一个槽位不换，
+            # 也不能把 /data 写满 —— 写满之后系统会起不来（真机反馈过强制重启后黑屏）。
+            _osz=$(wc -c < "/$rel" 2>/dev/null | tr -d ' ')
+            _usz=$(wc -c < "$src" 2>/dev/null | tr -d ' ')
+            _free=$(free_kb "$LIB")
+            if [ -n "$_osz" ] && [ -n "$_usz" ] && [ -n "$_free" ]; then
+              _need=$(( (_osz + _usz) / 1024 + 8192 ))
+              if [ "$_free" -lt "$_need" ] 2>/dev/null; then
+                printf '%s %s faces=%s replace=空间不足跳过 via=space detail=需要%sMB只剩%sMB\n' \
+                  "$id" "$rel" "$nf" "$(( _need / 1024 ))" "$(( _free / 1024 ))" >> "$LIB/ttc.log" 2>/dev/null
+                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 空间不足，跳过合集 $rel（需要约 $(( _need / 1024 ))MB，只剩 $(( _free / 1024 ))MB）" >> "$LIB/mount.log" 2>/dev/null
+                continue
+              fi
+            fi
+            ttc_wrap_mix "$src" "$nf" "$cand" "/$rel" "$cn" 2>/dev/null || cand=""
+            # 合成后核对：文件必须真的写全（空间在合成途中被占满会留下半截文件）
+            if [ -s "$cand" ] && [ -n "$_osz" ] && [ -n "$_usz" ]; then
+              _got=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
+              [ -n "$_got" ] && [ "$_got" -gt "$_usz" ] 2>/dev/null || cand=""
+            fi
+          fi
+          [ -s "$cand" ] || continue
+          chmod 644 "$cand" 2>/dev/null
+          chcon u:object_r:system_file:s0 "$cand" 2>/dev/null
+          src="$cand"
+          ;;
+      esac
       if [ "$mode" = manager ]; then
         dest="$stage/$(mgr_path "$rel")"
         mkdir -p "${dest%/*}" 2>/dev/null
@@ -431,31 +654,30 @@ do_apply() {
         fi
       fi
       echo "$rel" >> "$stage.list"
-      echo "$id $rel" >> "$stage.map"
+      # 第三个字段 = 这个槽位实际挂哪个文件（.ttc 槽位挂的是包好的合集；老格式只有两个字段）
+      echo "$id $rel $src" >> "$stage.map"
       COUNT=$((COUNT+1))
     done < "$plan"
     rm -f "$plan"
-    # "计划里有、但设备上不存在"的槽位数量，供安装日志/诊断报告定位
-    SKIPPED=$(wc -l < "$stage.skipped" 2>/dev/null | tr -d ' ')
-    rm -f "$stage.skipped" 2>/dev/null
 
     if [ "$fail" = 1 ] || [ "$COUNT" = 0 ]; then
       rm -rf "$stage" "$stage.list" "$stage.map"
       echo "ERROR:生成字体文件失败（存储空间不足？），已保留原来的字体"
       exit 1
     fi
+  else
+    # 没选字体（none）：也留一行，报告里能看出"这次是什么都没选"，而不是"记录没写"
+    echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=none（未选择字体，不需要替换）" > "$LIB/ttc.log" 2>/dev/null
   fi
 
   # 3. 提交
   commit_payload "$stage" "$mode"
+  prune_wrapped_ttc
   echo "$sel" > "$MODDIR/pending_font"
   echo "$sel" > "$LIB/last_selection"
   [ -f "$MODDIR/active_font" ] || echo none > "$MODDIR/active_font"
   refresh_prop
-  # 第 4 段（可选）= 计划里"设备上不存在"因而被跳过的槽位数。
-  # 正常情况应该是 0；不是 0 就说明计划生成端多算了槽位（真机出现过 31 个），
-  # 界面上的「已替换槽位」也因此虚高。打印出来便于定位。
-  echo "OK:$(label_of "$sel"):$COUNT:$scope:${SKIPPED:-0}"
+  echo "OK:$(label_of "$sel"):$COUNT:$scope"
 }
 
 do_report() {
@@ -492,7 +714,7 @@ do_report() {
   else
     echo "本次开机自带挂载: 未执行（无字体、管理器挂载模式，或尚未重启）"
   fi
-  [ -f "$MODDIR/mount_missed" ] && echo "提示: 本次开机没有执行挂载，Root 管理器可能不支持 post-mount 阶段，可改用「交给管理器挂载」"
+  [ -f "$MODDIR/mount_missed" ] && echo "提示: 本次开机没有执行挂载。常见原因是 Root 管理器在开机时没有运行模块脚本（例如临时 root：重启后要重新激活的那种），也可能是模块被停用。可改用「交给管理器挂载」，或换用开机即生效的 root 方案"
   v=$(payload_verify "$MODDIR")
   echo "实际生效检测: ${v% *} / ${v#* }（待生效与当前生效不同时，重启前此项为旧状态）"
   echo "skip_mount: $([ -f "$MODDIR/skip_mount" ] && echo 有 || echo 无)"
@@ -520,10 +742,16 @@ case "${1:-}" in
     echo "MO=$(mount_result | tr ' ' ',')"
     echo "VF=$(payload_verify "$MODDIR" | tr ' ' ',')"
     if [ -f "$MODDIR/mount_missed" ]; then echo "MM=1"; else echo "MM=0"; fi
+    # RS=1：模块因为"连续开机失败"被自动停用过（这次是用户重新启用后进来的）
+    if [ -s "$LIB/rescue_stopped" ]; then echo "RS=1"; else echo "RS=0"; fi
     echo "CF=$(list_conflicts 2>/dev/null | cut -d'|' -f2 | tr '\n' ' ')"
     ;;
   ack)
     rm -f "$MODDIR/rescued"
+    echo "OK"
+    ;;
+  ack-stopped)
+    rm -f "$LIB/rescue_stopped" 2>/dev/null
     echo "OK"
     ;;
   ls)
@@ -542,8 +770,8 @@ case "${1:-}" in
     done
     ;;
   list)
-    # 注意：这里必须用 lib_font_ids（同时认 f<时间戳> 和 builtin_*），
-    # 直接写 f*.ttf 会把内置配色全漏掉 → 界面一张配色卡片都没有。
+    # ⚠️ 这里必须用 lib_font_ids（同时认 f<时间戳> 和 builtin_*），
+    #    直接写 f*.ttf 会把内置配色全漏掉 → 界面一张配色卡片都没有。
     lib_font_ids | while IFS= read -r id; do
       f="$LIB/$id.ttf"
       [ -f "$f" ] || continue
@@ -622,6 +850,14 @@ case "${1:-}" in
         case "$3" in
           keep_lang|keep_special)
             case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
+          theme_fonts)
+            # 是否连"设置 → 字体样式"里选的字体（主题字体目录）也一起替换。
+            # 默认 0：换掉它就等于盖掉用户在设置里的选择，还会毁掉「字体粗细」调节
+            #（用户选小米兰亭 Pro 就是为了那个可变字重轴）—— 真机反馈过。
+            case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
+          ttc_replace)
+            # auto = 交给自动判断（三星开、其它关）；界面上的开关写 0/1，写进去就是手动指定
+            case "$4" in auto|0|1) ;; *) echo "ERROR:取值只能是 auto / 0 / 1"; exit 1 ;; esac ;;
           mount_mode)
             case "$4" in self|manager) ;; *) echo "ERROR:取值只能是 self 或 manager"; exit 1 ;; esac ;;
           *) echo "ERROR:未知设置项"; exit 1 ;;
@@ -629,7 +865,8 @@ case "${1:-}" in
         cfg_set "$3" "$4"; echo "OK"
         ;;
       *)
-        echo "keep_lang=$(cfg_get keep_lang 1) keep_special=$(cfg_get keep_special 1) mount_mode=$(mount_mode)"
+        # ttc_replace 回显的是**生效值**：这类机型即使没手动设过，界面开关也该是亮的
+        echo "keep_lang=$(cfg_get keep_lang 1) keep_special=$(cfg_get keep_special 1) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0)"
         ;;
     esac
     ;;
@@ -658,7 +895,7 @@ case "${1:-}" in
     list_conflicts
     ;;
   report)
-    # 有 diag.sh 时，报告就是「一键体检」（结论在最上面 + 10 节明细）
+    # 有 diag.sh 时，报告就是「一键体检」（结论在最上面 + 11 节明细）
     if [ -f "$MODDIR/diag.sh" ]; then
       if [ "$2" = save ]; then sh "$MODDIR/diag.sh" save; else sh "$MODDIR/diag.sh" full; fi
     elif [ "$2" = save ]; then

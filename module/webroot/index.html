@@ -366,11 +366,16 @@ try {
     ⚠ 检测到上次选配色后没能正常开机，已自动恢复为「无字体」。建议换一个配色再试。
     <br><button onclick="ackRescue()">知道了</button>
   </div>
+  <div class="banner" id="stoppedBanner">
+    🛑 <b>本模块曾连续两次开机失败，已自动停用</b>（写入了禁用标记），所以手机当时能正常开机。
+    你这次是重新启用后进来的 —— <b>请先换一个配色</b>再应用，避免再次开不了机。
+    <br><button onclick="ackStopped()">知道了</button>
+  </div>
   <div class="banner warn" id="conflictBanner">
     ⚠ 检测到其他字体模块：<b id="conflictNames"></b>。多个字体模块会互相覆盖，建议在管理器里停用它们后重启。
   </div>
   <div class="banner warn" id="missedBanner">
-    ⚠ 本次开机没有执行自带挂载，你的 Root 管理器可能不支持 post-mount 阶段。可在下方「替换范围（高级）」里改为「交给管理器挂载」后再试。
+    ⚠ 本次开机没有执行自带挂载。最常见的原因是 Root 管理器在开机时没有运行模块脚本（例如临时 root：重启后需要重新激活的那种），也可能是模块被停用或进了安全模式。可先重启一次；仍不行就在下方「替换范围（高级）」里改为「交给管理器挂载」再试。
   </div>
   <div class="banner" id="updateBanner">
     发现新版本 <b id="updateBannerVer"></b>，可在页面下方「模块更新」里下载安装。
@@ -399,6 +404,14 @@ try {
   <div class="switch-row fade" onclick="toggleSetting('mount_mode')">
     <div><div class="t">模块自带挂载（推荐）</div><div class="d">不需要元模块，能覆盖 my_product、mi_ext 等厂商分区。关闭后交给 Root 管理器 / 元模块挂载（传统方式）。</div></div>
     <div class="sw on" id="sw_mount_mode"></div>
+  </div>
+  <div class="switch-row fade" onclick="toggleSetting('ttc_replace')">
+    <div><div class="t">替换 .ttc 合集（三星 / 魅族等机型的中文）</div><div class="d">部分机型的中文来自 .ttc 合集（如 SECCJK-Regular.ttc、NotoSansCJK-Regular.ttc），普通替换影响不到它 —— 表现是"英文变了、中文没变"。开着（<b>这类机型会自动打开</b>）会把配色字体包成同样 face 数的合集顶上去，只换中文那几号，日文/韩文保持原样，且不修改任何系统配置。<b>本模块自带的配色含完整中文字形，一般不会出方块；万一中文变方块，回到这里关掉它、重启一次即可完全恢复。</b>代价是每个合集约"原合集 + 配色字体"那么大（44MB 级别），空间不足时会自动跳过。</div></div>
+    <div class="sw" id="sw_ttc_replace"></div>
+  </div>
+  <div class="switch-row fade" onclick="toggleSetting('theme_fonts')">
+    <div><div class="t">也替换「设置里选的字体」（主题 / 字体样式）</div><div class="d">MIUI / HyperOS（<code>/data/system/theme/fonts</code>）、三星（<code>/data/overlays/font</code>）、vivo（<code>/data/vfonts</code>）都会把你「设置 → 字体样式」里选的字体放在单独目录，<b>那里的文件优先级高于系统字体目录</b>。<b>本项默认关闭</b>：<br>· <b>关</b>（推荐）：你在设置里选什么就是什么 —— 尤其「小米兰亭 Pro」这种<b>靠它才能调字体粗细</b>的可变字体，关着才不会被换掉；<br>· <b>开</b>：这些目录也换成配色字体，好处是不用再去设置里切回「默认」；代价是设置里选的那个字体失效、粗细可能一起失效。<br>例外：vivo 的 <code>/system/fonts/VivoFont.ttf</code> 是指向该目录的符号链接，它本身仍按普通槽位替换。</div></div>
+    <div class="sw" id="sw_theme_fonts"></div>
   </div>
   <div class="g-hint">修改后会按当前选择自动重新生成，重启生效。</div>
   <div class="btn-row">
@@ -731,6 +744,7 @@ function applyStatus(st) {
     const nSlots = g("N").trim();
     setValue("slotLabel", nSlots && +nSlots > 0 ? nSlots + " 个" : "0（未替换）");
     document.getElementById("rescueBanner").classList.toggle("show", g("X") === "1");
+    document.getElementById("stoppedBanner").classList.toggle("show", g("RS") === "1");
     document.getElementById("missedBanner").classList.toggle("show", g("MM") === "1");
     setValue("romLabel", ROM_NAMES[rom] || rom || "未知");
     setValue("curVerLabel", g("V") || "-");
@@ -738,26 +752,30 @@ function applyStatus(st) {
     const mo = g("MO").split(",");
     const ml = document.getElementById("mountLabel");
     ml.classList.remove("warn", "ok");
-    // ⚠️ 判"有没有挂载记录"不能看 mo[0] 是否为空串：
-    //    MO 是 "ok fail stage same skip"，当 ok=0 时（本次开机没有新的绑定动作，
-    //    因为槽位早就挂好了）字符串**以空格开头**，split 后 mo[0] === ""，
-    //    于是界面会误报"本次开机未挂载" —— 真机踩过：字体明明生效了，
-    //    界面却说没挂载，用户以为更新失败。
-    //    正确判据：只要有挂载动作（ok）或已就位（same）就算挂过。
-    const moOk = +(mo[0] || 0), moSame = +(mo[3] || 0), moSkip = +(mo[4] || 0);
+    // ⚠️ 判"这次开机到底挂没挂"不能看 mo[0] 是不是空串。
+    //    MO = "ok fail stage same skip"，而 mount_result 是 echo "$ok $fail $stage $same $skip"：
+    //    当 ok=0（本次开机没有新的绑定动作 —— 槽位早就挂好了，或计划里的槽位都被跳过）时，
+    //    整个字符串**以空格开头**，split 后 mo[0] === "" → 会误报"本次开机未挂载"。
+    //    真机上就是这个后果：字体明明生效了，界面却说没挂载，用户以为更新失败。
+    //    正确判据：ok / same / fail / skip 只要有一个非 0，就说明本次开机确实跑过挂载
+    //    （= mount.state 是本次开机写的）。
+    const moOk = +(mo[0] || 0), moFail = +(mo[1] || 0);
+    const moSame = +(mo[3] || 0), moSkip = +(mo[4] || 0);
     if (g("PM") === "manager") setValue("mountLabel", "交给管理器挂载");
     else if (activeId === "none") setValue("mountLabel", "无需挂载");
-    else if (moOk || moSame) {
+    else if (moOk || moSame || moFail || moSkip) {
       // 这行只报挂载动作本身，写短一点（一行放得下）；"到底生效没有"由下面那行逐个核对负责
+      const parts = [];
+      if (moOk) parts.push("成功 " + moOk);
+      if (moSame) parts.push("已就位 " + moSame);
+      if (moFail) parts.push("失败 " + moFail);
+      if (moSkip) parts.push("跳过 " + moSkip);
       let txt;
-      if (moOk && moSame) txt = "成功 " + moOk + "，已就位 " + moSame;
-      else if (moOk) txt = "成功 " + moOk;
-      else txt = "本次开机未改动（已就位 " + moSame + "）";
-      if (+mo[1]) txt += "，失败 " + mo[1];
-      // skip = 计划里"设备上不存在"的槽位。只有确实有失败或跳过才标黄，
-      // 只是"已就位"不标黄（那说明一切正常）
+      if (moOk || moFail) txt = parts.join("，");
+      else txt = "本次开机未改动（" + parts.join("，") + "）";
       setValue("mountLabel", txt);
-      ml.classList.add(+mo[1] ? "warn" : "ok");
+      // 只有"失败"才是真故障，才标黄；"已就位 / 跳过"是正常的中间状态，不要吓用户
+      ml.classList.add(moFail ? "warn" : "ok");
     } else { setValue("mountLabel", "本次开机未挂载"); ml.classList.add("warn"); }
     // 逐个核对（按 inode 实测），这才是"有没有真的生效"的答案
     const vf = g("VF").split(",");
@@ -879,7 +897,7 @@ async function selectFont(id) {
   await nextPaint();
   try {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh apply ${shq(id)}`);
-    const m = out.match(/^OK:(.*):(\d+):(\w+)(?::(\d+))?\s*$/m);
+    const m = out.match(/^OK:(.*):(\d+):(\w+)\s*$/m);
     if (m) {
       showToast(id === "none"
         ? "已选择「无字体」，重启后恢复系统默认"
@@ -897,16 +915,21 @@ async function ackRescue() {
   try { await ksuExec(`sh ${MODDIR}/fontctl.sh ack`); } catch (e) {}
   document.getElementById("rescueBanner").classList.remove("show");
 }
+// "曾被自动停用"的提示：看到并点了"知道了"就清掉（说明用户已经知道原因了）
+async function ackStopped() {
+  try { await ksuExec(`sh ${MODDIR}/fontctl.sh ack-stopped`); } catch (e) {}
+  document.getElementById("stoppedBanner").classList.remove("show");
+}
 
 /* ---------- 替换范围设置 / 诊断 ---------- */
-const settings = {keep_lang: "1", keep_special: "1", mount_mode: "self"};
+const settings = {keep_lang: "1", keep_special: "1", mount_mode: "self", ttc_replace: "0", theme_fonts: "0"};
 let mountMode = "self";
 async function loadSettings() {
   try {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh settings`);
     (out.match(/(\w+)=(\S+)/g) || []).forEach(kv => { const i = kv.indexOf("="); settings[kv.slice(0, i)] = kv.slice(i + 1); });
   } catch (e) {}
-  ["keep_lang", "keep_special"].forEach(k => document.getElementById("sw_" + k).classList.toggle("on", settings[k] === "1"));
+  ["keep_lang", "keep_special", "ttc_replace", "theme_fonts"].forEach(k => document.getElementById("sw_" + k).classList.toggle("on", settings[k] === "1"));
   document.getElementById("sw_mount_mode").classList.toggle("on", settings.mount_mode !== "manager");
 }
 async function toggleSetting(key) {
@@ -921,6 +944,26 @@ async function toggleSetting(key) {
         title: "改为交给管理器挂载？",
         msg: "字体文件会放进模块的 system 目录，由 Root 管理器挂载。KernelSU / APatch 需要先装好元模块（如 Hybrid Mount）；my_product、mi_ext 等厂商分区的字体槽可能无法生效。仅在自带挂载不工作时使用。",
         okText: "改用管理器挂载", danger: true
+      });
+      if (!ok) return;
+    }
+  } else if (key === "theme_fonts") {
+    nv = settings[key] === "1" ? "0" : "1";
+    if (nv === "1") {
+      const ok = await dialog({
+        title: "也替换设置里选的字体？",
+        msg: "系统会把你「设置 → 字体样式」里选的字体放在单独目录（MIUI/HyperOS：/data/system/theme/fonts，三星：/data/overlays/font，vivo：/data/vfonts），那里的优先级高于系统字体。\n\n打开后：这些文件也会被换成配色字体 —— 好处是不用再去设置里切回默认；代价是你在设置里选的那个字体会失效。\n\n注意：如果你选的是「小米兰亭 Pro」这类可变字体（靠它调「字体粗细」），打开后粗细就调不动了 —— 本模块的配色虽然也是可变字体，但粗细滑杆控制的是你在设置里选的那套。",
+        okText: "仍然打开", danger: true
+      });
+      if (!ok) return;
+    }
+  } else if (key === "ttc_replace") {
+    nv = settings[key] === "1" ? "0" : "1";
+    if (nv === "1") {
+      const ok = await dialog({
+        title: "打开「替换 .ttc 合集」？",
+        msg: "这台机器上的中文来自 .ttc 合集，普通替换影响不到它（所以你会看到「英文变了、中文没变」）。\n\n打开后会把配色字体包成同样 face 数的合集顶上去，只换中文那几号，日文/韩文保留系统字形，改完需要重启一次。\n\n代价：每个合集会在 /data 里占「原合集 + 配色字体」那么大的空间（本模块字体 44MB 级别），空间不足时会自动跳过这个槽位。\n\n万一中文变方块：回到这里关掉开关、重启一次即可完全恢复（不会损坏系统文件，模块从不修改系统文件）。",
+        okText: "打开", danger: true
       });
       if (!ok) return;
     }
@@ -952,7 +995,7 @@ async function toggleSetting(key) {
     await ksuExec(`sh ${MODDIR}/fontctl.sh settings set ${key} ${nv}`);
     if (pendingId !== "none") {
       const out = await ksuExec(`sh ${MODDIR}/fontctl.sh reapply`);
-      const m = out.match(/^OK:(.*):(\d+):(\w+)(?::(\d+))?\s*$/m);
+      const m = out.match(/^OK:(.*):(\d+):(\w+)\s*$/m);
       showToast(m ? "已重新生成：" + m[2] + " 个槽位，重启后生效" : "重新生成失败：" + out.replace(/^ERROR:/, ""));
     } else showToast("已修改");
     success = true;

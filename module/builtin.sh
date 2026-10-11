@@ -1,6 +1,11 @@
 #!/system/bin/sh
 # builtin.sh —— 内置字体注入 + 刷入时选配色（内置字体模块专用）
 #
+# ⚠️ 本文件是**本项目专属**的：主项目 D:\ds\src 里没有它。
+#    同步主项目（覆盖源码）时，这个文件不会被动到，但 customize.sh 里对它的三处调用
+#    （builtin_sibling_cleanup / builtin_import / builtin_clean_legacy）和
+#    builtin_menu 的调用**必须重放**，否则内置配色注入不进字体库（详见接手文档第 17 节）。
+#
 # 思路：不改造老的内置字体模块，直接复用"自定义字体切换"的全套机制 ——
 # 把模块自带的字体在**安装时**硬链接进字体库（/data/adb/custom_font_lib），
 # 于是它和"用户自己导入的字体"完全一样：界面能选、能切配色、开机保护、诊断报告、在线更新全都现成。
@@ -46,10 +51,29 @@ builtin_count() {
 }
 
 # ---------------------------------------------------------------------------
+# 这个自带字体是不是"可变字体"（带字重轴）
+#
+# 为什么要判：诊断报告和界面的「字体粗细」说明都靠 meta 里的 vf= 字段 ——
+#   系统设置里的「字体粗细」调节靠的是可变字体的 wght 轴，普通单字重字体没有这个轴。
+#   本模块自带的三套配色都是可变字体（fvar 表 + wght 轴 150~700），所以正常都该写 vf=1；
+#   万一哪个包里的字体被换成静态字体，这个字段就是"报告为什么会说粗细调不动"的依据。
+#
+# 判据：sfnt 的表目录紧跟在文件头 12 字节后面，长度 = 12 + 16×表数量（这里 21 张表 = 348 字节），
+#   所以 'fvar' 这个表标签一定出现在**文件前 512 字节**里。只读这 512 字节，不读整个 44MB 文件。
+# ---------------------------------------------------------------------------
+builtin_is_vf() {
+  local f="$1" n
+  [ -f "$f" ] || return 1
+  n=$(head -c 512 "$f" 2>/dev/null | grep -c 'fvar' 2>/dev/null)
+  case "$n" in ''|0) return 1 ;; esac
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # 注入：把 builtin/*.ttf 硬链接成字体库里的字体
 # ---------------------------------------------------------------------------
 builtin_import() {
-  local bdir="$MODDIR/builtin" f n info id nm dst ok=0
+  local bdir="$MODDIR/builtin" f n info id nm dst ok=0 vf=0
   [ -d "$bdir" ] || return 0
   mkdir -p "$LIB" 2>/dev/null
 
@@ -61,8 +85,14 @@ builtin_import() {
     [ -n "$id" ] || continue
     dst="$LIB/$id.ttf"
 
+    # 本模块自带的三套配色都是可变字体（带 wght 字重轴）→ 写进 meta 供报告/界面判断
+    if builtin_is_vf "$f"; then vf=1; else vf=0; fi
+
     # 已经是指向同一份文件的硬链接就跳过（覆盖安装/重复安装时省事）
     if [ -f "$dst" ] && [ "$(stat -c %i "$dst" 2>/dev/null)" = "$(stat -c %i "$f" 2>/dev/null)" ]; then
+      # 硬链接已经在位，但 meta 可能还是旧格式（比如少了 vf=）→ 重写一遍
+      printf '%s' "$nm" > "$LIB/$id.name" 2>/dev/null
+      printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\n' "$vf" > "$LIB/$id.meta" 2>/dev/null
       ok=$((ok + 1)); continue
     fi
 
@@ -75,7 +105,7 @@ builtin_import() {
     chmod 644 "$dst" 2>/dev/null
     chcon u:object_r:system_file:s0 "$dst" 2>/dev/null
     printf '%s' "$nm" > "$LIB/$id.name" 2>/dev/null
-    printf 'scope=all\nlatin=1\ncjk=1\n' > "$LIB/$id.meta" 2>/dev/null
+    printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\n' "$vf" > "$LIB/$id.meta" 2>/dev/null
     ok=$((ok + 1))
   done
   return 0

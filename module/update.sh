@@ -66,13 +66,27 @@ jstr() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^
 jnum() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p"; }
 
 load_json() {
-  local url
+  local url bust
   url=$(prop updateJson)
   case "$url" in
     https://*) ;;
     *) ERR="module.prop 里没有配置 updateJson"; return 1 ;;
   esac
   case "$url" in *__REPO__*) ERR="作者还没有配置 GitHub 仓库地址"; return 1 ;; esac
+  # ---------------------------------------------------------------------------
+  # 加一个每次都不同的查询串，**绕开 CDN 缓存**。
+  # 为什么必须这么做：更新地址走 jsDelivr，而它对 @main 有缓存（最长 12 小时）——
+  # 不加这一下，刚发布的版本在 App 里点「检查更新」可能还是旧版本，
+  # 表现成"明明发了新版却收不到"（真机反馈过，用户以为是延迟）。
+  # 带随机串的 URL 对 CDN 来说是新的，会回源取最新内容。
+  # 管理器自己的更新检查读的是 module.prop 里那个固定地址，绕不开 ——
+  # 那条靠发版时主动 purge jsDelivr 解决（CI 里做了）。
+  # ---------------------------------------------------------------------------
+  bust="cfs$(date +%s 2>/dev/null)$$"
+  case "$url" in
+    *\?*) url="$url&_=$bust" ;;
+    *)    url="$url?_=$bust" ;;
+  esac
   fetch "$url" "$TMP/update.json" 20 || { ERR="无法连接 GitHub，请检查网络后重试"; return 1; }
   NEW_VER=$(jstr version "$TMP/update.json")
   NEW_CODE=$(jnum versionCode "$TMP/update.json")

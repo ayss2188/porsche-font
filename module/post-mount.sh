@@ -1,11 +1,11 @@
 #!/system/bin/sh
-# post-mount（KernelSU / APatch 若支持就会跑）：**二次修补**，不是主挂载点。
+# post-mount（KernelSU / APatch 支持时才会跑）：**二次修补**，不是主挂载点。
 #
 # 主挂载在 post-fs-data.sh —— 因为 post-mount 不是所有管理器都执行
-# （实测 KernelSU Ultra 就不跑这个阶段），把主挂载放这儿会导致字体完全没换上。
+# （真机上遇到过不执行这个阶段的管理器，结果字体一个槽位都没换上）。
 # 这里的作用只有一个：如果元模块的目录级挂载排在 post-fs-data 之后、把我们挂上去的
-# 文件盖住了，这一遍会靠 inode 比对发现并补回来。
-# payload_mount 是幂等的（已经指向我们的文件就跳过），所以这里不会叠出两层挂载。
+# 文件盖住了，这一遍会靠 inode 比对发现并补回来 —— payload_mount 是幂等的
+# （已经指向我们的文件就跳过），所以这里不会叠出两层挂载。
 
 MODDIR=${0%/*}
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"

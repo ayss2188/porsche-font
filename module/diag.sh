@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# diag.sh - 一键体检
+# diag.sh - 一键体检（保时捷字体 · 内置配色版；换皮自主项目的 custom_font_switcher）
 #
 # 目的：把「重启了也不生效 / 字体没变化」的可能原因一次跑完，并给出大白话结论。
 # 特点：
@@ -11,7 +11,7 @@
 #
 # 用法：
 #   sh diag.sh brief     只打印结论（「操作」按钮 / 速查用）
-#   sh diag.sh full      打印完整报告（10 节，含原始配置与哈希清单）
+#   sh diag.sh full      打印完整报告（11 节，含原始配置与哈希清单）
 #   sh diag.sh install   生成完整报告并写入 Download，同时打印结论（「操作」按钮用）
 #   sh diag.sh save      生成完整报告并写入 Download，只输出 OK:<路径>
 #   sh diag.sh bg [force] [fast]  后台生成（WebUI 用；force = 强制重来，fast = 轻量口径）
@@ -33,7 +33,8 @@
 # 本脚本永远返回 0，避免影响安装流程。
 
 MODDIR=${0%/*}
-# 兜底：直接执行且 $0 没有目录部分时，找本机实际装着的配色包（不要写死主项目的 id）
+# 兜底：直接执行且 $0 没有目录部分时，找本机实际装着的配色包
+# ⚠️ 不要写死主项目的 custom_font_switcher —— 换皮成保时捷后那个 id 根本不存在。
 if [ -z "$MODDIR" ] || [ ! -f "$MODDIR/module.prop" ]; then
   for _d in /data/adb/modules/porsche_font_*; do
     [ -f "$_d/module.prop" ] || continue
@@ -41,6 +42,7 @@ if [ -z "$MODDIR" ] || [ ! -f "$MODDIR/module.prop" ]; then
     break
   done
 fi
+[ -n "$MODDIR" ] || MODDIR=/data/adb/modules/porsche_font_multi
 . "$MODDIR/common.sh" 2>/dev/null
 . "$MODDIR/slots.sh" 2>/dev/null
 . "$MODDIR/mount.sh" 2>/dev/null
@@ -161,14 +163,107 @@ $_ST_T
   done
   printf '%s' "$_ST_OUT"
 }
-# TTC 合集头：'ttcf' + version + numFonts(偏移 8，4 字节小端)
+# TTC 合集头：'ttcf' + 主版本 + 次版本 + numFonts(偏移 8，4 字节**大端**)
+# ⚠ 不能直接用 `od -tu4`：那是按本机字节序读的，字节会颠倒 —— face 数 5 会显示成 83886080
+#   （真机报告里就是这么错的），按大端自己算才对。
 ttc_faces() {
-  local n
-  n=$(od -An -tu4 -j8 -N4 "$1" 2>/dev/null | tr -d ' \n')
-  [ -n "$n" ] || n=$(od -An -tx1 -j8 -N4 "$1" 2>/dev/null | tr -d ' \n')
-  echo "${n:-?}"
+  local b
+  b=$(od -An -tu1 -j8 -N4 "$1" 2>/dev/null)
+  set -- $b
+  [ $# -ge 4 ] || { echo "?"; return 0; }
+  echo $(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 ))
 }
 ttc_tag() { head -c 4 "$1" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n'; }
+
+# ---------------------------------------------------------------------------
+# 读一个 .ttc（或单文件字体）里第 N 号 face 的 PostScript 名（nameID=6；没有就退回家族名 nameID=1）
+#
+# 用途：诊断里把"原合集"和"我们生成的合集"每号 face 的名字并排打出来 ——
+# 真机反馈"中文没变"时，一眼就能看出是我们合成的合集结构不对，还是系统不认它。
+# 纯 shell + od（不起 Python），单文件字体当成只有 0 号 face。
+# ---------------------------------------------------------------------------
+ttc_face_name() {
+  local f="$1" i="${2:-0}" fo nt at tag off len b p so cnt rec nid plid slen soff
+  local tbh tb bytes j c out="" want=0 pick=0 want_plid=0 fb_off="" fb_len=0 fb_plid=0
+  [ -f "$f" ] || { echo "?"; return 0; }
+  fo=0
+  if [ "$(head -c 4 "$f" 2>/dev/null)" = ttcf ]; then
+    b=$(od -An -tu1 -j$(( 12 + 4 * i )) -N4 "$f" 2>/dev/null); set -- $b
+    [ $# -ge 4 ] || { echo "?"; return 0; }
+    fo=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 ))
+    [ "$fo" -ge 12 ] 2>/dev/null || { echo "?"; return 0; }
+  fi
+  b=$(od -An -tu1 -j$(( fo + 4 )) -N2 "$f" 2>/dev/null); set -- $b
+  [ $# -ge 2 ] || { echo "?"; return 0; }
+  nt=$(( $1 * 256 + $2 ))
+  [ "$nt" -ge 1 ] && [ "$nt" -le 512 ] 2>/dev/null || { echo "?"; return 0; }
+  # 一次把整个表目录读出来，在 shell 里找 tag = "name"（6e 61 6d 65）的那条
+  bytes=$(od -An -tu1 -j"$fo" -N$(( 12 + 16 * nt )) "$f" 2>/dev/null | tr -s ' \n' ' ')
+  set -- $bytes
+  # 跳过 face 头 12 字节
+  j=0; while [ "$j" -lt 12 ] && [ $# -gt 0 ]; do shift; j=$((j+1)); done
+  tag=""; off=""; len=""
+  c=0
+  while [ "$c" -lt "$nt" ] && [ $# -ge 16 ]; do
+    if [ "$1" = 110 ] && [ "$2" = 97 ] && [ "$3" = 109 ] && [ "$4" = 101 ]; then
+      shift 8
+      off=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 )); shift 4
+      len=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 )); shift 4
+      tag=name
+      break
+    fi
+    j=0; while [ "$j" -lt 16 ] && [ $# -gt 0 ]; do shift; j=$((j+1)); done
+    c=$((c+1))
+  done
+  [ "$tag" = name ] || { echo "?"; return 0; }
+  # name 表头：format(2) count(2) stringOffset(2)
+  b=$(od -An -tu1 -j"$off" -N6 "$f" 2>/dev/null); set -- $b
+  [ $# -ge 6 ] || { echo "?"; return 0; }
+  cnt=$(( $3 * 256 + $4 ))
+  so=$(( $5 * 256 + $6 ))
+  [ "$cnt" -ge 1 ] && [ "$cnt" -le 400 ] 2>/dev/null || { echo "?"; return 0; }
+  tb=$(od -An -tu1 -j$(( off + 6 )) -N$(( 12 * cnt )) "$f" 2>/dev/null | tr -s ' \n' ' ')
+  # 一条 name 记录 12 字节：platformID(2) encodingID(2) languageID(2) nameID(2) length(2) offset(2)
+  # 只要 nameID=6（PostScript 名）；优先 Windows(3) / Unicode(0) 平台 —— 这两个都是 UTF-16BE
+  set -- $tb
+  c=0
+  while [ "$c" -lt "$cnt" ] && [ $# -ge 12 ]; do
+    plid=$(( $1 * 256 + $2 ))
+    nid=$(( $7 * 256 + $8 ))
+    slen=$(( $9 * 256 + ${10} ))
+    # 注意：位置参数 ≥10 必须写 ${11} —— 写成 $11 会被当成 ${1} 后面跟一个字面量 1（踩过）
+    soff=$(( ${11} * 256 + ${12} ))
+    if [ "$nid" = 6 ]; then
+      case "$plid" in
+        3|0) pick=$(( off + so + soff )); want=$slen; want_plid=$plid; break ;;
+        *) [ -z "$fb_off" ] && { fb_off=$(( off + so + soff )); fb_len=$slen; fb_plid=$plid; } ;;
+      esac
+    fi
+    j=0; while [ "$j" -lt 12 ] && [ $# -gt 0 ]; do shift; j=$((j+1)); done
+    c=$((c+1))
+  done
+  if [ -z "$pick" ] && [ -n "$fb_off" ]; then pick=$fb_off; want=$fb_len; want_plid=$fb_plid; fi
+  [ -n "$pick" ] && [ "${want:-0}" -gt 0 ] 2>/dev/null || { echo "?"; return 0; }
+  [ "$want" -le 128 ] 2>/dev/null || want=128
+  b=$(od -An -tu1 -j"$pick" -N"$want" "$f" 2>/dev/null)
+  # platformID 3 / 0 都是 UTF-16BE：ASCII 字符是 (0, 码) 成对，跳过高字节；
+  # 非 ASCII 用 ? 代替。八进制转义用纯 shell 算（每个字符起一个 printf 进程太慢）。
+  j=0
+  for v in $b; do
+    case "$want_plid" in
+      3|0)
+        j=$((j+1))
+        [ $(( j % 2 )) = 1 ] && continue ;;
+    esac
+    if [ "$v" -ge 32 ] && [ "$v" -lt 127 ]; then
+      if [ "$v" = 37 ]; then out="$out%%"; else out="$out\\$(( v / 64 ))$(( (v / 8) % 8 ))$(( v % 8 ))"; fi
+    else
+      out="$out?"
+    fi
+  done
+  [ -n "$out" ] || out="?"
+  printf "$out"
+}
 # 文件首 4 字节（十六进制）：一个 od 进程，空格用 shell 去掉（以前是 head|od|tr 三个进程）
 magic4() { local m; m=$(od -An -tx1 -N4 "$1" 2>/dev/null); set -- $m; printf '%s' "$1$2$3$4"; }
 
@@ -379,6 +474,8 @@ SYSFONT_N=$(printf '%s\n' "$SYSFONTS" | grep -c . )
 TTC_LIST=$(printf '%s\n' "$SYSFONTS" | grep -i '\.ttc$')
 TTCNUM=$(printf '%s\n' "$TTC_LIST" | grep -c . )
 TTCFIRST=$(printf '%s\n' "$TTC_LIST" | head -n1)
+# 合集替换当前是否生效（auto 时三星会自动开，见 common.sh 的 ttc_enabled）
+TTC_ON=$(ttc_effective 2>/dev/null); [ -n "$TTC_ON" ] || TTC_ON=0
 ZH_TTC=0
 for x in $XMLFOUND; do
   xmlnorm "$x" | grep -i 'zh-Hans' | grep -qi '\.ttc' && ZH_TTC=1
@@ -626,6 +723,95 @@ dir_conclusion() {
 }
 
 # ---------------------------------------------------------------------------
+# 应用侧可见性：模块的挂载在「App 自己的进程里」还看不看得到
+#
+# 为什么需要这一节（真机反馈）：报告一路显示 71/71 全部生效，用户却说「只有桌面 /
+# 主界面变了，App 里没变」。原因是 KernelSU 系有个「卸载模块」机制：应用进程从 zygote
+# 派生时会切进自己的挂载命名空间，把模块挂载摘掉；内核里的默认值就是"卸"
+# （KernelSU 源码 policy/allowlist.c：default_non_root_profile.umount_modules = true），
+# 只有管理器自己、授予过 root 权限的 App、以及 uid 1000 这类系统进程不受影响。
+# 本脚本是 root 跑在全局命名空间里，看到的是全局真相 —— 所以**报告本身永远显示已生效**，
+# 必须进到 App 的命名空间里数一数才能判断，下面就是这件事。
+#
+# 依据（以后有人怀疑这段结论时，照着核对）：
+#   https://kernelsu.org/zh_CN/guide/app-profile.html      官方 App Profile 文档：默认卸载模块默认开
+#   kernel/feature/kernel_umount.c  只对 zygote 派生出来的应用进程下手；
+#                                   uid 1000/2000 这类不是 appuid，不卸；
+#                                   隔离进程（WebView 渲染进程）无条件卸
+#   kernel/policy/allowlist.c       default_non_root_profile.umount_modules = true；
+#                                   授予过 root 的 App（allow_su）不卸
+# ---------------------------------------------------------------------------
+AS_MINE=""; AS_LIST=""; AS_READ=0; AS_RISK=0; AS_HIDDEN=0
+AS_KREL=""; AS_FEATURE=""; AS_DOTUM=""; AS_METAUM=""
+
+# 数一份 mountinfo 里有多少条"我们挂上去的"：源都在字体库目录，凭路径就能认出来
+# （.ttf 与 .ttc 合集槽位都算，源分别是 <id>.ttf / <id>.ttcN_x-y）
+as_count() { grep -c 'custom_font_lib/' "$1" 2>/dev/null; }
+
+app_side_probe() {
+  local p bn uid cmd c n=0 _ask _asv _asr _asmaj _asmin _asdu _asiu _asf
+  # 幂等：万一被调用两次（或同一个进程里重跑），不要累加上一轮的采样
+  AS_LIST=""; AS_READ=0; AS_HIDDEN=0
+  AS_MINE=$(as_count /proc/self/mountinfo)
+  # 内核版本：KernelSU 只在 5.10 及以上内核里真的执行卸载（更低版本这个开关只是配置项）
+  AS_KREL=$(uname -r 2>/dev/null | sed 's/^\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/')
+  _asmaj=${AS_KREL%%.*}; _asmin=${AS_KREL#*.}
+  case "$_asmaj" in ''|*[!0-9]*) _asmaj=0 ;; esac
+  case "$_asmin" in ''|*[!0-9]*) _asmin=0 ;; esac
+  if [ "$_asmaj" -gt 5 ] || { [ "$_asmaj" -eq 5 ] && [ "$_asmin" -ge 10 ]; }; then
+    [ "$RM" = ksu ] && AS_RISK=1
+  fi
+  # 管理器侧"卸载模块"的现场：原样列出（不猜文件格式，作者一眼就能看懂）
+  if [ -f /data/adb/ksu/.feature_config ]; then
+    AS_FEATURE=$(grep -a -i 'umount' /data/adb/ksu/.feature_config 2>/dev/null | head -n1)
+    [ -n "$AS_FEATURE" ] || AS_FEATURE="（文件在，但没有含 umount 的项）"
+  else
+    AS_FEATURE="（没有 /data/adb/ksu/.feature_config）"
+  fi
+  if [ -f /data/adb/ksu/.umount ]; then
+    AS_DOTUM=$(head -c 120 /data/adb/ksu/.umount 2>/dev/null | tr '\n' ' ')
+    [ -n "$AS_DOTUM" ] || AS_DOTUM="（空文件）"
+  else
+    AS_DOTUM="（没有 /data/adb/ksu/.umount）"
+  fi
+  # 元模块（Hybrid Mount 这类）自己也有"卸载/隐藏"开关，配置里叫 disable_umount
+  for _asf in /data/adb/hybrid-mount/config.toml /data/adb/hybrid_mount/config.toml /data/adb/magic_mount/config.toml; do
+    [ -f "$_asf" ] || continue
+    _asdu=$(sed -n 's/^[[:space:]]*disable_umount[[:space:]]*=[[:space:]]*//p' "$_asf" 2>/dev/null | head -n1)
+    _asiu=$(sed -n 's/^[[:space:]]*vfs_isolate_uids[[:space:]]*=[[:space:]]*//p' "$_asf" 2>/dev/null | head -n1)
+    AS_METAUM="$_asf  disable_umount=${_asdu:-未写}  vfs_isolate_uids=${_asiu:-未写}"
+    break
+  done
+  # 采样最多 3 个"普通 App"进程（uid 10000-19999）。
+  # 隔离进程（90000+，WebView 渲染进程）故意不要 —— KernelSU 对它们是无条件卸载的，
+  # 拿它们做对照会把"正常现象"误判成"模块没生效"。
+  # 用 /proc/* 而不是 /proc/[0-9]*：文件名通配里的方括号不是所有 sh 都支持
+  # （busybox-w32 就不支持，沙盒测试会走到字面量上），数字判断交给 case。
+  for p in /proc/*; do
+    bn=${p#/proc/}
+    case "$bn" in ''|*[!0-9]*) continue ;; esac
+    [ -r "$p/status" ] || continue
+    uid=""
+    while read -r _ask _asv _asr; do
+      case "$_ask" in Uid:) uid=$_asv; break ;; esac
+    done < "$p/status" 2>/dev/null
+    case "$uid" in ''|*[!0-9]*) continue ;; esac
+    [ "$uid" -ge 10000 ] && [ "$uid" -le 19999 ] || continue
+    cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null); cmd=${cmd% }
+    [ -n "$cmd" ] || continue
+    c=$(as_count "/proc/$bn/mountinfo")
+    [ -n "$c" ] || c="读不到"
+    AS_LIST="$AS_LIST$bn|$uid|$cmd|$c
+"
+    [ "$c" = 0 ] && [ "$AS_MINE" -gt 0 ] 2>/dev/null && AS_HIDDEN=1
+    n=$((n + 1))
+    [ "$n" -ge 3 ] && break
+  done
+  [ "$n" -gt 0 ] && AS_READ=1
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # 实机挂载能力测试：挂一个真实槽位 -> 校验 -> 立刻卸载
 # ---------------------------------------------------------------------------
 MT_RESULT="未测试"
@@ -688,6 +874,8 @@ do_mount_test() {
 }
 subnote "挂载实测（挂一个真实槽位再立刻卸载）"
 do_mount_test
+subnote "应用侧可见性（App 里看不看得到，见第 11 节）"
+app_side_probe
 }    # collect() 到此结束：这些采集只允许在真正生成报告时跑（见 collect_once）
 
 # 只在生成报告时采集一次（界面按钮用的 state/cancel/bg/estimate/text/savenow 绝不调用）
@@ -737,7 +925,8 @@ conclusion() {
     echo "❌ 结论：没有任何一次开机留下「脚本执行过」的痕迹。"
     if [ -f "$M/mount_missed" ]; then
       echo "   但存在 mount_missed（$(mstamp "$M/mount_missed")，$(since_txt "$M/mount_missed")）："
-      echo "   说明某次开机脚本跑过，只是「挂载阶段」被跳过了（管理器没有 post-mount 阶段）。"
+      echo "   说明某次开机脚本跑过，但「挂载」没有执行 —— 最常见的原因是 Root 管理器在开机时"
+      echo "   没有运行模块脚本（例如临时 root：重启后需要重新激活的那种），其次才是模块被停用。"
     else
       echo "   连 mount_missed 都没有 → 模块脚本从来没被执行过（不是挂载失败）。"
     fi
@@ -765,13 +954,27 @@ conclusion() {
   else
     echo "⚠ 结论：没找到明确的失败点。请看第 2 节执行痕迹、第 4 节候选槽位和第 10 节日志。"
   fi
-  # 简中的"兜底字体"是 .ttc 合集，模块不动它。但注意别说成"中文一定不变"：
-  # 只要主字体家族（sans-serif / MiSansVF 这类）在替换列表里、且你的字体自带中文字形，
-  # 中文照样会变 —— .ttc 只在主字体缺字形、系统回落到它时才起作用。
+  # 简中的"兜底字体"是 .ttc 合集。默认（三星）会把它替换掉，用户也可以在设置里关掉。
+  # 但注意别说成"中文一定不变"：只要主字体家族（sans-serif / MiSansVF 这类）在替换列表里、
+  # 且你的字体自带中文字形，中文照样会变 —— .ttc 只在主字体缺字形、系统回落到它时才起作用。
   if [ "$ZH_TTC" = 1 ] && [ "$APPLIED_TTC" = 0 ] && [ -n "$PEND" ] && [ "$PEND" != none ]; then
-    echo "ℹ 中文说明：本机简中的「兜底字体」是 .ttc 合集（${TTCFIRST:-?}），本模块不替换 .ttc。"
+    echo "ℹ 中文说明：本机简中的「兜底字体」是 .ttc 合集（${TTCFIRST:-?}），本次没有替换它。"
+    [ "$TTC_ON" = 1 ] || echo "   → 想让中文也用你的字体：到「替换范围（高级）」里打开「替换 .ttc 合集」，重启一次即可。"
     echo "   只要替换列表里的主字体自带中文字形，中文一般也会跟着变；"
     echo "   只有主字体缺字形、系统回落到这个合集时，那一部分中文不会变。第 6 节有明细。"
+  fi
+  # 「只有桌面/系统界面生效、App 里没变」——最常见的解释不是挂载失败，而是管理器默认
+  # 就对应用「卸载模块」（KernelSU 系内核里的默认值就是"卸"）。第 11 节有实测对比。
+  if [ "$AS_HIDDEN" = 1 ]; then
+    echo "⚠ 重点：实测到「App 侧看不到本模块的挂载」（第 11 节）。"
+    echo "   管理器把模块从应用进程里卸载了 —— 桌面 / 系统界面这类不受影响，"
+    echo "   所以现象看着像「只有桌面生效、App 里没变」。"
+    echo "   → 到管理器里关掉「默认卸载模块」（或只给那个 App 关掉「卸载模块」），重启后再看。"
+    echo "   这不是模块故障，也不是挂载失败。"
+  elif [ "$AS_RISK" = 1 ] && [ -n "$PEND" ] && [ "$PEND" != none ]; then
+    echo "ℹ 提示：本机（$RM，内核 ${AS_KREL:-?}）具备「对应用卸载模块」的机制。"
+    echo "   如果现象是「桌面 / 系统界面正常、App 里没变」，先看第 11 节 ——"
+    echo "   这种情况挂载全成功、报告也看不出问题，按第 11 节的 ① 关掉「默认卸载模块」再试。"
   fi
   hr
   echo "本次开机: post-fs-data $([ "$PFD_THIS" = 0 ] && echo '未执行' || echo '已执行')   service $([ "$SVC_THIS" = 0 ] && echo '未执行' || echo '已执行')   实际生效 $VHIT/$VTOT"
@@ -802,11 +1005,55 @@ conclusion() {
     if [ "${MIUI_INPLAN:-0}" -gt 0 ] 2>/dev/null; then
       echo "   ✅ 与本次槽位同名的那 $MIUI_INPLAN 个已纳入替换（计划里的 theme 槽位）——"
       echo "      这些名字不会再被主题字体盖住，不需要再去 设置 里切回默认。"
+      echo "      ⚠ 但注意：这样一来你在 设置 里选的那个字体（如「小米兰亭 Pro」）也失效了，"
+      echo "        如果它本来是用来调「字体粗细」的，粗细会跟着失效（普通字体没有字重轴）。"
     else
-      echo "   个性字体由主题机制接管，优先级高于 /system/fonts —— 只替换系统目录不会全面生效。"
-      echo "   → 设置 → 显示 → 字体大小和样式 切回「默认」（或小米兰亭Pro）后重启一次。"
+      echo "   本模块**默认不替换**这里（设置里的选择优先）——「也替换设置里选的字体」开关是关的。"
+      echo "   · 如果你在 设置 里选过字体（尤其「小米兰亭 Pro」这种用来调粗细的可变字体），这样正好："
+      echo "     你选的字体照常生效、粗细照常能调，本模块只负责系统目录里的那些槽位。"
+      echo "   · 如果你希望模块连这里一起接管（省得去 设置 里切回默认），把那个开关打开即可 ——"
+      echo "     代价是设置里选的字体会失效。"
     fi
   fi
+  # ---------------------------------------------------------------------------
+  # 「字体粗细」相关的关键警告：本机原字体是可变字体（带字重轴），而用户字体是单字重
+  #  —— 这是真机上"以前能调粗细、现在调不动了"的根本原因，必须在结论区直接说清楚。
+  #  系统实现粗细靠的是可变字体的 wght 轴；换成普通单字重字体后那个轴就不存在了。
+  # ---------------------------------------------------------------------------
+  _vfn=0; _vflist=""
+  if [ -s "$MODDIR/slots.map" ]; then
+    while IFS= read -r _a _rel _c; do
+      [ -n "$_rel" ] || continue
+      case "$_rel" in ""|/*|*..*) continue ;; esac
+      [ -f "/$_rel" ] || continue
+      case "$(sfnt_tags "/$_rel" 2>/dev/null)" in
+        *fvar*)
+          _vfn=$((_vfn + 1))
+          [ "$_vfn" -le 4 ] && _vflist="$_vflist ${_rel##*/}"
+          ;;
+      esac
+      [ "$_vfn" -ge 30 ] && break
+    done < "$MODDIR/slots.map"
+  fi
+  _myvf=""
+  _myp=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
+  case "$_myp" in ""|none) ;; *) _myvf=$(sed -n 's/^vf=//p' "$LIB/$_myp.meta" 2>/dev/null | tail -n1) ;; esac
+  # ⚠️ 判据和主项目不同：主项目是"用户导入的字体"，这里是"内置配色"。
+  #    没选配色时（none）什么都不提醒；选了配色时，只有当这套配色**不是**可变字体才提醒 ——
+  #    本模块自带的三套配色都是带 wght 轴的可变字体（builtin_import 会写 vf=1），
+  #    所以正常情况这条不会触发，触发就说明这个包里的字体被换成静态单字重字体了。
+  case "$_myp" in
+    ""|none) ;;
+    *)
+      if [ "$_vfn" -gt 0 ] 2>/dev/null && [ "$_myvf" != 1 ]; then
+        echo "⚠ 重点：本机有 $_vfn 个槽位原本是【可变字体】（带字重轴）:$_vflist"
+        echo "   而当前这套配色是单字重 —— 替换后系统设置里的「字体粗细」调节会失效："
+        echo "   系统实现粗细靠的就是可变字体的字重轴，普通字体没有这个轴。"
+        echo "   · 本模块自带的配色本来就是可变字体（带 wght 轴），粗细照常能调；"
+        echo "     出现这条说明这个包里的字体不是可变字体 —— 换一个配色包，或把本报告发给作者。"
+      fi
+      ;;
+  esac
   if [ "$DATAFONT_N" -gt 0 ]; then
     echo "⚠ 另外：检测到「个性化字体」（放在 /data 上，优先级高于 /system/fonts）："
     printf '%s\n' $DATAFONT_LIST | while IFS= read -r _df; do
@@ -898,12 +1145,40 @@ sec2() {
 }
 
 # ---------------------------------------------------------------------------
+# 列出"盖在字体文件上面的挂载"（判断有没有生效、有没有别的模块在压我们）
+#
+# 老写法是 `mount | grep -c '/system/fonts/'`，会严重低估，两个原因都踩过：
+#   1) 只数了 /system/fonts —— 真机上还有 /product/fonts 这些厂商目录。
+#      真机实例：24 个槽位全挂上了，这里只显示 6（那 6 个刚好都在 /system/fonts）。
+#   2) Magisk 上 /system 常是 /system_root/system 的**符号链接**，挂载表里写的是展开后的路径。
+# 所以这里：任意字体目录都算（*/fonts/*），匹配不上再把挂载点展开符号链接判一次。
+# 只看文件名是字体扩展名的挂载点，免得把几百条无关挂载都拉进来。
+# ---------------------------------------------------------------------------
+font_overlay_list() {
+  local mnt r
+  "$MO" 2>/dev/null | while IFS= read -r L; do
+    case "$L" in *' on '*' type '*) ;; *) continue ;; esac
+    mnt=$(printf '%s' "$L" | sed 's/^.* on //; s/ type .*$//')
+    case "${mnt##*/}" in
+      *.ttf|*.TTF|*.otf|*.OTF|*.ttc|*.TTC) ;;
+      *) continue ;;
+    esac
+    case "$mnt" in
+      */fonts/*) printf '%s\n' "$L"; continue ;;
+    esac
+    r=$(readlink -f "$mnt" 2>/dev/null)
+    case "$r" in */fonts/*) printf '%s\n' "$L" ;; esac
+  done
+}
+
 sec3() {
   echo
   echo "【3】挂载现状 + 实机挂载能力实测"
   hr
-  echo "  /system/fonts 上层挂载点数量: $("$MO" 2>/dev/null | grep -c '/system/fonts/')"
-  "$MO" 2>/dev/null | grep '/system/fonts/' | head -n 8 | while IFS= read -r L; do echo "      $L"; done
+  echo "  字体文件被上层挂载覆盖的条数: $(font_overlay_list | grep -c . )"
+  font_overlay_list | head -n 8 | while IFS= read -r L; do echo "      $L"; done
+  echo "  （口径：所有字体目录都算，且把挂载点展开符号链接后再判）"
+  echo "  （老写法只数 /system/fonts，遇到 /product/fonts 或 /system 是符号链接时会严重低估）"
   echo "  实际生效校验   : $VHIT / $VTOT"
   echo "  实测：$MT_RESULT"
   [ -n "$MT_SRC" ] && echo "      源文件   : $MT_SRC  ($(size_kb "$MT_SRC"))"
@@ -1003,14 +1278,50 @@ sec6() {
   echo "【6】字体配置：中文与主字体指向哪个文件、引用的文件是否存在"
   hr
   echo "  /system/fonts 文件总数: $SYSFONT_N"
-  echo "  .ttc 合集清单（本模块不支持替换）:"
+  echo "  .ttc 合集清单（$([ "$TTC_ON" = 1 ] && echo '本模块会替换：把你的字体包成同 face 数的合集顶上' || echo '本次未启用替换')）:"
   printf '%s\n' "$TTC_LIST" | while IFS= read -r L; do
     [ -n "$L" ] || continue
     # TTC 一般有几十 MB：这里只读前 1 MB（h: 头哈希）就够标识，诊断靠 faces/size，不靠全量哈希
     echo "      $L  $(size_kb "/system/fonts/$L")  faces=$(ttc_faces "/system/fonts/$L")  h=$(head -c 1048576 "/system/fonts/$L" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1)"
   done
   [ "$TTCNUM" = 0 ] && echo "      （无）"
-  echo "  简中 zh-Hans 是否指向 .ttc: $([ "$ZH_TTC" = 1 ] && echo '是 ★ 这是它的兜底字体（本模块不替换 .ttc；主字体家族被替换且含中文字形时，中文仍会变）' || echo 否)"
+  echo "  简中 zh-Hans 是否指向 .ttc: $([ "$ZH_TTC" = 1 ] && echo "是 ★ 这是它的兜底字体（$([ "$TTC_ON" = 1 ] && echo '本模块会把你的字体包成同 face 数的合集替换它，中文也会变' || echo '当前未启用合集替换：主字体家族被替换且含中文字形时中文仍会变')）" || echo 否)"
+  # ---- 把每号 face 的 PostScript 名连成一行（最多 6 号，够看清结构）----
+  face_names_line() {
+    local f="$1" n="${2:-0}" i=0 o=""
+    [ "$n" -ge 1 ] 2>/dev/null || { printf '?'; return 0; }
+    [ "$n" -gt 6 ] 2>/dev/null && n=6
+    while [ "$i" -lt "$n" ]; do
+      o="$o$(ttc_face_name "$f" "$i")"
+      i=$((i+1))
+      [ "$i" -lt "$n" ] && o="$o | "
+    done
+    printf '%s' "$o"
+  }
+  # 模块自己判的合集替换方案（换了哪几号 face、凭什么）。上面那份 fonts.xml 在报告里被截断过，
+  # 光看它看不出判断结果 —— 这一段是"现场结论"，出问题先看这里。
+  if [ -f "$LIB/ttc.log" ]; then
+    echo "  ---- 合集替换决策（模块实际怎么判的）----"
+    sed 's/^/      /' "$LIB/ttc.log" 2>/dev/null | head -n 20
+    echo "      （via=xml = 按字体配置判的；via=fallback = 配置里没找到中文引用、按惯例兜底）"
+  fi
+  # ---- 原合集 vs 我们生成的：每号 face 的 PostScript 名 ----
+  # 真机说"中文没变"时，这里一眼能看出是【结构不对】还是【我们造的名字系统不认】：
+  # 换掉的那几号会带着"用户字体自己的名字"，保留的那几号还是原合集的（如 NotoSansCJKjp-Regular）。
+  if [ -s "$M/slots.map" ] && grep -q '\.ttc' "$M/slots.map" 2>/dev/null; then
+    echo "  ---- 合集 face 名单：原样 vs 我们生成的（每号最多列 6 个）----"
+    grep '\.ttc' "$M/slots.map" 2>/dev/null | head -n 3 | while read -r _id rel src; do
+      [ -f "/$rel" ] || continue
+      _n=$(ttc_faces "/$rel" 2>/dev/null)
+      echo "      原   ${rel##*/}（${_n} face）"
+      echo "           $(face_names_line "/$rel" "$_n")"
+      if [ -n "$src" ] && [ -f "$src" ]; then
+        _n2=$(ttc_faces "$src" 2>/dev/null)
+        echo "      我们 ${src##*/}（${_n2} face）"
+        echo "           $(face_names_line "$src" "$_n2")"
+      fi
+    done
+  fi
   for x in $XMLFOUND; do
     echo "  ---- ${x##*/} 里的 zh 相关 family ----"
     xmlnorm "$x" | grep -i -A 14 '<family[^>]*lang="zh' | head -n 60 | while IFS= read -r L; do echo "      $L"; done
@@ -1196,6 +1507,66 @@ sec10() {
   for p in ro.boot.verifiedbootstate ro.boot.flash.locked ro.boot.veritymode ro.security.vaultkeeper.feature ro.crypto.state ro.boot.warranty_bit ro.boot.bootloader ro.build.version.oneui ro.build.version.sem ro.build.version.security_patch; do
     echo "      $p=$($GP "$p" 2>/dev/null)"
   done
+}
+
+# ---------------------------------------------------------------------------
+# 【11】应用侧是否看得到这些挂载
+#   「只有桌面 / 主界面生效，App 里没变」不是挂载失败（那会全都不变），而是管理器
+#   在每个应用进程里把模块挂载卸掉了。这一节把现场证据摊开，并给出下一步动作。
+# ---------------------------------------------------------------------------
+sec11() {
+  echo
+  echo "【11】应用侧是否看得到这些挂载（「只有桌面 / 主界面生效」就查这里）"
+  hr
+  echo "  报告是 root 权限在**全局**挂载命名空间里跑的，看到的是全局真相；"
+  echo "  而「卸载模块」是在**每个 App 自己的进程里**把模块挂载摘掉 —— 所以："
+  echo "  「挂载成功」不等于「每个 App 都看得到」，这一节专门查这件事。"
+  echo
+  echo "  1) 本机有没有这个机制（管理器 + 内核）"
+  echo "     Root 管理器      : $RM（$(root_manager_name "$RM" 2>/dev/null)）   元模块: $([ -e /data/adb/metamodule ] && readlink /data/adb/metamodule 2>/dev/null || echo 无)"
+  echo "     内核版本         : ${AS_KREL:-?}"
+  if [ "$AS_RISK" = 1 ]; then
+    echo "     → 5.10 及以上：KernelSU 系内核会**真的执行**「卸载模块」（不是只当配置项）"
+  else
+    echo "     → 按内核 / 管理器判断：这一节描述的机制在本机（$RM）不一定生效，仅供参考"
+  fi
+  echo "     内核里的默认值就是「卸」：不受影响的只有管理器自己、授予过 root 权限的 App、"
+  echo "     以及 uid 1000（SystemUI 等）这类系统进程 —— 这正是「系统界面正常、App 没变」的原因。"
+  echo
+  echo "  2) 实测：同一个 App 进程里能不能看到我们的挂载"
+  echo "     我们自己的命名空间 : ${AS_MINE:-?} 条（源在 $LIB 的绑定挂载）"
+  if [ "$AS_READ" = 1 ]; then
+    printf '%s' "$AS_LIST" | while IFS='|' read -r _p _u _c _n; do
+      [ -n "$_p" ] || continue
+      echo "     App pid=$_p uid=$_u → 看到 ${_n} 条   ${_c}"
+    done
+  else
+    echo "     （没找到可对照的普通 App 进程：应用都没在跑，或 /proc 读不到）"
+    echo "      让用户先打开任意一个普通 App，再重新生成一次报告，就能对照了。"
+  fi
+  if [ "$AS_HIDDEN" = 1 ]; then
+    echo "     ★ 判定：App 侧看到 0 条，而我们自己看到 ${AS_MINE} 条 ——"
+    echo "       管理器已经把模块从应用进程里卸载了。不是挂载失败，也不需要改模块。"
+  elif [ "$AS_READ" = 1 ]; then
+    echo "     （两边都能看到，或抽到的这个 App 恰好被授予过 root）"
+    echo "      ℹ 授予了 root 权限的 App **不会**被卸载，所以它看到「有」不代表别的 App 也有。"
+  fi
+  echo
+  echo "  3) 管理器侧的现场（原样列出，不做格式猜测）"
+  echo "     kernel_umount（.feature_config）: $AS_FEATURE"
+  echo "     /data/adb/ksu/.umount           : $AS_DOTUM"
+  echo "     元模块配置                       : ${AS_METAUM:-（没找到 config.toml）}"
+  echo "     （找不到这些文件不代表没这个机制：名单也可能只在管理器内部或内核里）"
+  echo
+  echo "  4) 怎么办（按顺序试，一次只改一个，改完重启再看同一个 App）"
+  echo "     ① 管理器 → 设置 → 关掉「默认卸载模块」"
+  echo "        （= 黑名单模式：以后只有你手动开的 App 才卸）"
+  echo "     ② 或者只给那一个 App 关：管理器的「应用配置 / App Profile」里把它的「卸载模块」关掉"
+  echo "     ③ 装了元模块（Hybrid Mount 等）的：把它的「禁用卸载 / disable_umount」改成 true"
+  echo "     改了还是没变 → 就不是这条原因，回到第 5 / 6 节找（槽位没进计划、中文走 .ttc 等）。"
+  echo "  ℹ 另外：网页 / 小程序 / 内置浏览器属于 WebView，它的渲染进程是「隔离进程」——"
+  echo "     KernelSU 系对隔离进程是**无条件**卸载的，这类内容里的字体不受本模块影响（正常现象）。"
+  hr
 }
 
 # ---------------------------------------------------------------------------
@@ -1474,6 +1845,7 @@ report_full() {
   sec8
   sec9
   sec10
+  sec11
   echo
   echo "== 报告结束 =="
 }
@@ -1488,7 +1860,7 @@ set_out_now() {
   fi
 }
 
-# 把完整报告（结论 + 10 节 + 原始配置与哈希清单）写到 Download，成功时 SAVED=路径
+# 把完整报告（结论 + 11 节 + 原始配置与哈希清单）写到 Download，成功时 SAVED=路径
 # 只产出一个 txt（另有一份同内容的 font_diag.txt 备用名），不再生成附件文件夹
 write_kit() {
   local tmpf="$1"
@@ -1795,9 +2167,9 @@ kit_report() {
   timing_add '4 字体配置与字体来源' "$_PH_T0"
   export_part "$tmpf"
   _PH_T0=$(now_s)
-  dphase '5/6 清单 / 冲突 / 日志'
-  { sec8; sec9; sec10; } >> "$tmpf" 2>&1
-  timing_add '5 清单 / 冲突 / 日志' "$_PH_T0"
+  dphase '5/6 清单 / 冲突 / 日志 / App 可见性'
+  { sec8; sec9; sec10; sec11; } >> "$tmpf" 2>&1
+  timing_add '5 清单 / 冲突 / 日志 / App 可见性' "$_PH_T0"
   export_part "$tmpf"
   _PH_T0=$(now_s)
   dphase '6/6 打包原始配置与哈希清单'

@@ -1,5 +1,6 @@
 #!/system/bin/sh
 # 保时捷字体（内置配色版）- 安装脚本（Magisk / KernelSU / APatch 通用）
+# 换皮自主项目的 custom_font_switcher；本文件的固定改动见 common.sh 顶部清单。
 #
 # ⚠️ 两个目录别搞混（这个模块踩过坑）：
 #     $MODPATH  安装时的**暂存**目录（/data/adb/modules_update/<id>），zip 解到这里；
@@ -44,7 +45,7 @@ LAST=$(tr -d '[:space:]' 2>/dev/null < "$LIB/last_selection")
 [ -n "$LAST" ] || LAST=$(tr -d '[:space:]' 2>/dev/null < "$OLD/pending_font")
 [ -n "$LAST" ] || LAST=none
 
-for f in common.sh slots.sh mount.sh fontctl.sh update.sh google_font.sh action.sh \
+for f in common.sh slots.sh mount.sh fontctl.sh ttcwrap.sh update.sh google_font.sh action.sh \
          diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh; do
   chmod 755 "$MODPATH/$f" 2>/dev/null
 done
@@ -57,19 +58,17 @@ ui_print "- 挂载方式：$([ "$(mount_mode)" = manager ] && echo 交给管理�
 
 RESTORED=0
 if [ "$LAST" != none ]; then
-  ui_print "- 正在恢复上次的字体选择..."
+  ui_print "- 正在恢复上次的配色选择..."
   OUT=$(sh "$MODPATH/fontctl.sh" apply "$LAST" 2>&1 | tail -n1)
   case "$OUT" in
     OK:*)
       RESTORED=1
-      # 第 4 段（可选）= 计划里"设备上不存在"因而被跳过的槽位数，正常是 0
-      _SK=$(echo "$OUT" | cut -d: -f5)
-      case "$_SK" in ""|0) _SKTXT="" ;; *) _SKTXT="，跳过 $_SK 个不存在的槽位" ;; esac
-      ui_print "  已恢复：$(echo "$OUT" | cut -d: -f2)（$(echo "$OUT" | cut -d: -f3) 个槽位$_SKTXT）"
+      ui_print "  已恢复：$(echo "$OUT" | cut -d: -f2)（$(echo "$OUT" | cut -d: -f3) 个槽位）"
       ;;
     *)
       ui_print "  恢复失败：${OUT#ERROR:}"
       ui_print "  已改为「无字体」，请开机后在 WebUI 重新选择"
+      echo none > "$MODPATH/pending_font"
       ;;
   esac
 fi
@@ -92,6 +91,9 @@ fi
 # 为什么要有这一段：真机上出过一次"选了配色、也报了 OK，但 slots.map 没落盘"，
 # 结果开机后一个槽位都挂不上，界面上只写「本次开机未挂载」，用户完全不知道哪一步坏了。
 # 这类失败必须在**刷入时**就喊出来，而不是等到开机后让用户猜。
+#
+# 这一段同时承担"菜单选完配色之后的第一次 apply" —— 全新安装时 slots.map 还不存在，
+# 自然就会走到下面的重新生成分支。
 # ---------------------------------------------------------------------------
 PEND=$(tr -d '[:space:]' 2>/dev/null < "$MODPATH/pending_font")
 case "$PEND" in
@@ -160,7 +162,8 @@ if [ -n "$CONFLICTS" ]; then
 fi
 ui_print " "
 ui_print "若选的配色导致没能开机，下次开机会自动"
-ui_print "恢复为「无字体」。"
+ui_print "恢复为「无字体」；连续两次失败会自动停用"
+ui_print "本模块（保证手机能正常开机）。"
 
 # ---------------------------------------------------------------------------
 # 安装阶段不做任何耗时收集（避免刷入卡住）
@@ -186,7 +189,7 @@ ui_print "===================================="
 ui_print "- 完成"
 
 set_perm_recursive "$MODPATH" 0 0 0755 0644
-for f in common.sh slots.sh mount.sh fontctl.sh update.sh google_font.sh action.sh \
+for f in common.sh slots.sh mount.sh fontctl.sh ttcwrap.sh update.sh google_font.sh action.sh \
          diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh; do
   set_perm "$MODPATH/$f" 0 0 0755
 done

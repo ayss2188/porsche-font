@@ -1,7 +1,16 @@
 #!/system/bin/sh
-# 自定义字体切换模块 - 公共函数库
+# 保时捷字体（内置配色版）- 公共函数库（换皮自主项目的 custom_font_switcher）
 # 提供：系统识别 / 系统名称 / Root 管理器识别 / 持久化设置 / 挂载路径映射
 # 槽位发现见 slots.sh，自带挂载见 mount.sh；脚本中通过 source 引入
+#
+# ⚠️ 本项目对主项目源码的固定改动，同步主项目时**必须重放**（清单见接手文档第 17 节）：
+#    1. 本文件：lib_font_ids / lib_font_files（内置配色是 builtin_*.ttf，主项目只认 f<数字>）
+#    2. module.prop：id / name / version / versionCode / description / updateJson
+#    3. builtin.sh + builtin/（内置配色注入 + 刷入时音量键选配色）
+#    4. customize.sh：接 builtin_* 的三处调用
+#    5. webroot/index.html：内置配色版界面（去掉导入/改名/多选删除）+ 模块目录运行时探测
+#    6. fontctl.sh / diag.sh：模块 id 兜底扫 porsche_font_*（别写死主项目的 id）
+#    7. uninstall.sh：字体库共用判断扫 porsche_font_*
 
 LIB=${LIB:-/data/adb/custom_font_lib}
 SETTINGS="$LIB/settings.conf"
@@ -177,6 +186,39 @@ mount_mode() {
     *)       echo self ;;
   esac
 }
+
+# ---------------------------------------------------------------------------
+# .ttc 合集替换是否启用
+#   ttc_replace=1 / 0  -> 用户手动指定，照办（界面上的开关写的就是这个值）
+#   auto（默认/未设置）-> **不认机型，认事实**：只要这台机器的字体配置里存在
+#                        「被中文（lang 以 zh 开头）引用的 .ttc 合集」，就说明中文是从
+#                        合集里读的，单文件字体顶不了它（表现就是"英文变了、中文没变"）。
+#                        没有这种合集就不开 —— 不开的情况一定不会更差。
+# 实测覆盖：三星 SM-S9280（Android 16）、魅族 Flyme 12.6（Redmi 移植版）
+#           两边索引约定完全相同：0=日 1=韩 2=简中 3=繁中。
+# 判断依据放在字体配置里，所以换 ROM、换机型都不用改代码。
+# ---------------------------------------------------------------------------
+_rom_cached() {
+  local r=""
+  [ -n "${MODDIR:-}" ] && r=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")
+  [ -n "$r" ] || r=$(detect_rom)
+  printf '%s\n' "$r"
+}
+ttc_enabled() {
+  # CFS_NO_TTC=1：这一次不碰 .ttc 合集。开机阶段的"轻量补计划"会带上它 ——
+  # 合成合集要读写几十 MB，在阻塞的 post-fs-data 里做会把老设备卡在开机动画上。
+  [ -n "${CFS_NO_TTC:-}" ] && return 1
+  case "$(cfg_get ttc_replace auto)" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  # 直接调用（不用 $(...) 包）：这样 ttc_cn_pairs 的缓存留在当前 shell 里，
+  # 同一条命令里后面再问（比如逐个合集判序号）就不会重复扫字体配置了。
+  ttc_cn_pairs >/dev/null 2>&1
+  [ -n "$TTC_PAIRS_CACHE" ]
+}
+# 生效值（1/0），给界面和设置回显用
+ttc_effective() { ttc_enabled && echo 1 || echo 0; }
 
 # ---------------------------------------------------------------------------
 # 管理器挂载模式下，目标路径（相对 /）-> 模块内路径

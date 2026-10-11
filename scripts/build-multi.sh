@@ -58,6 +58,10 @@ grep -v '^#' "$CONF" | grep -v '^[[:space:]]*$' | while IFS='|' read -r key id u
   done
 
   # 2) 改 module.prop
+  #    ⚠️ 更新地址用 **jsDelivr CDN**，不要用 raw.githubusercontent.com：
+  #       raw 在国内经常连不上 / 超时，管理器就拉不到 update.json（＝收不到更新）。
+  #       代价是 jsDelivr 对 @main 有缓存（最长 12 小时），所以发版时 CI 会主动 purge
+  #       （见 .github/workflows/release.yml 最后一步）。
   prop="$work/module.prop"
   {
     awk -v id="$id" -v ver="$VER" -v code="$CODE" -v disp="$disp" -v up="$upfile" '
@@ -65,12 +69,12 @@ grep -v '^#' "$CONF" | grep -v '^[[:space:]]*$' | while IFS='|' read -r key id u
       /^name=/        { print "name=" disp; next }
       /^version=/     { print "version=" ver; next }
       /^versionCode=/ { print "versionCode=" code; next }
-      /^updateJson=/  { print "updateJson=https://raw.githubusercontent.com/ayss2188/porsche-font/main/" up; next }
+      /^updateJson=/  { print "updateJson=https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/" up; next }
       { print }
     ' "$prop"
     # 没有 updateJson 就补一行（老包都没有这一行）
     grep -q '^updateJson=' "$prop" || \
-      echo "updateJson=https://raw.githubusercontent.com/ayss2188/porsche-font/main/$upfile"
+      echo "updateJson=https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/$upfile"
   } > "$prop.new" && mv "$prop.new" "$prop"
 
   # 3) 把界面里的模块 id 改成这个变体的 id

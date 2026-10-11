@@ -60,6 +60,103 @@ slot_xml_files() {
   done | sort -u
 }
 
+# ---------------------------------------------------------------------------
+# 一次扫完所有字体配置，列出**所有被中文（lang 以 zh 开头）引用的 .ttc 合集**：
+#   每行 "<文件名> <序号> <lang>"，例如
+#   NotoSansCJK-Regular.ttc 2 zh-Hans
+#   NotoSansCJK-Regular.ttc 3 zh-Hant,zh-Bopo
+#
+# 为什么要有它：一个合集里装着好几套字（实测三星 SM-S9280 与魅族 Flyme 12.6 都是
+#   0=ja  1=ko  2=zh-Hans  3=zh-Hant,zh-Bopo），**只能换中文那几号**，
+# 日/韩留着原字形，否则用户的中文字体没有假名/谚文字形，日韩文本就变方块。
+#
+# 性能：整份 XML 只起 2 个进程（tr + sed），和 slot_xml_names 一个路子；结果在同一个
+# 进程里缓存（TTC_PAIRS_CACHE），一条命令里被问多次也只扫一遍。
+# ---------------------------------------------------------------------------
+ttc_cn_pairs() {
+  local x fam hdr body rest attrs name l idx
+  if [ -z "${TTC_PAIRS_CACHE+x}" ]; then
+    TTC_PAIRS_CACHE=$(
+      for x in $(slot_xml_files); do
+        [ -f "$x" ] || continue
+        tr '\n\r\t' '   ' 2>/dev/null < "$x" | sed 's/<family/\n<family/g' \
+          | while IFS= read -r fam || [ -n "$fam" ]; do
+              case "$fam" in '<family'*) ;; *) continue ;; esac
+              hdr=${fam%%>*}
+              l=""
+              case "$hdr" in *' lang="'*) l=${hdr#*' lang="'}; l=${l%%\"*} ;; esac
+              case "$l" in [Zz][Hh]*) ;; *) continue ;; esac
+              body=${fam#*>}
+              rest=$body
+              while :; do
+                case "$rest" in *'<font'*) ;; *) break ;; esac
+                rest=${rest#*<font}
+                attrs=${rest%%>*}
+                rest=${rest#*>}
+                name=${rest%%<*}
+                _trim "$name"
+                case "$TRIM_OUT" in
+                  *.[Tt][Tt][Cc])
+                    idx=0
+                    case "$attrs" in *' index="'*) idx=${attrs#*' index="'}; idx=${idx%%\"*} ;; esac
+                    case "$idx" in ''|*[!0-9]*) idx=0 ;; esac
+                    printf '%s %s %s\n' "$TRIM_OUT" "$idx" "$l"
+                    ;;
+                esac
+              done
+            done
+      done | sort -u
+    )
+  fi
+  [ -n "$TTC_PAIRS_CACHE" ] && printf '%s\n' "$TTC_PAIRS_CACHE"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# 某个 .ttc 合集里"哪几号 face 是中文" —— 要换成用户字体的就是这几号
+# 用法：ttc_cn_indices <文件名> [face总数]
+#
+# 兜底：这个文件一个中文引用都没有时，**只换 2 号**那一号 face。
+#
+# 为什么只换 2 号（以前是"2 号往后全换"）：2 号是 Noto / 三星这几套 CJK 合集里
+# 简体中文（zh-Hans）的位置，这是最可靠的一个惯例；再往后是什么**完全没法保证**——
+# 万一某机型的 3 号是日文，全换就会把日文换成用户字体、日文直接变方块。
+# 换句话说：这里宁可"只让中文跟着变"，也不赌别的语言。
+# （配置里能读到中文引用时走上面的 xml 分支，压根用不到这个兜底。）
+#
+# 顺便把"凭什么这么判"回填到两个全局变量，给诊断报告用（见 fontctl.sh 的 ttc.log）：
+#   TTC_CN_SRC    = xml（按字体配置）/ fallback（按惯例兜底）/ none（没得换）
+#   TTC_CN_DETAIL = 匹配到的 lang:index 明细，如 "zh-Hans:2 zh-Hant,zh-Bopo:3 "
+# 注意：要拿到这两个变量，调用时别用 $(...) 包（那会开子 shell），改成重定向到临时文件再读。
+# ---------------------------------------------------------------------------
+ttc_cn_indices() {
+  local want="$1" total="${2:-0}" pairs hans i
+  TTC_CN_SRC="none"; TTC_CN_DETAIL=""
+  pairs=$(ttc_cn_pairs 2>/dev/null | awk -v f="$want" '$1 == f { print $3 ":" $2 }' | sort -u)
+  if [ -n "$pairs" ]; then
+    TTC_CN_SRC="xml"     # 依据：字体配置里的 zh-* 引用
+    # 「保留繁体」开着（默认）时**不动繁体那一号**：用户的字体常缺繁体字形，换了就变方块。
+    # 这和 .ttf 槽位的语义保持一致（那边繁体槽位也是保留的，以前合集这条漏了）。
+    # 例外：如果这个合集**只**被繁中引用（纯繁体用户），就照换 —— 否则中文一点都不会变。
+    if [ "$(cfg_get keep_lang 1)" = 1 ]; then
+      hans=$(printf '%s\n' "$pairs" | grep -vi 'hant\|bopo')
+      if [ -n "$hans" ]; then
+        TTC_CN_DETAIL="$(printf '%s' "$pairs" | tr '\n' ' ')（已按「保留繁体」跳过繁体那一号）"
+        pairs="$hans"
+      fi
+    fi
+    [ -n "$TTC_CN_DETAIL" ] || TTC_CN_DETAIL=$(printf '%s' "$pairs" | tr '\n' ' ')
+    printf '%s\n' "$pairs" | sed 's/.*://' | sort -n -u
+    return 0
+  fi
+  if [ "$total" -ge 3 ] 2>/dev/null; then
+    TTC_CN_SRC="fallback"   # 配置里没找到中文引用 → 只按最可靠的惯例动 2 号
+    TTC_CN_DETAIL="配置里没有中文引用，按惯例只换 2 号（zh-Hans 常见位置）"
+    printf '2\n'
+  fi
+  return 0
+}
+
 # 某个 <family> 是否属于"主文字族"（无语言 / 拉丁 / 中文），排除衬线、等宽、Emoji 等
 # 纯 shell 大小写不敏感匹配，不启动任何外部进程（性能关键）
 _xml_family_ok() {
@@ -97,7 +194,7 @@ slot_xml_names() {
   for x in $(slot_xml_files); do
     tr '\n\r\t' '   ' 2>/dev/null < "$x" \
       | sed 's/<family/\n<family/g' \
-      | while IFS= read -r fam; do
+      | while IFS= read -r fam || [ -n "$fam" ]; do
           case "$fam" in '<family'*) ;; *) continue ;; esac
           hdr=${fam%%>*}
           n=""; l=""
@@ -213,7 +310,13 @@ slot_role() { _role_set "$(_lc "$1")"; echo "$ROLE"; }
 # 该角色在当前设置下是否参与替换
 _role_wanted() {
   local role="$1" scope="$2" keep_lang="$3" keep_special="$4"
-  case "$role" in    sym) return 1 ;;
+  case "$role" in
+    # ttc = .ttc 合集槽位（三星简中这类）。合集里同时装着 ja/ko/zh 好几套字形，
+    # 只有用户选的是"中英文/全覆盖"字体时替换才合理，所以限定 scope=all。
+    ttc)
+      [ "$scope" = all ] || return 1
+      return 0 ;;
+    sym) return 1 ;;
     lang)
       # 其他文字体系只在"全部范围 + 明确关闭保留"时才会被替换（字体需自带这些文字）
       [ "$keep_lang" = 1 ] && return 1
@@ -251,34 +354,84 @@ slot_candidates() {
   done
   exec 3<&- 4<&-
   rm -f "$t" "$t.l" 2>/dev/null
+
+  # .ttc 合集槽位（三星这类机器的中文，见 common.sh 的 ttc_enabled）：
+  # 三星简中来自 .ttc 合集，单文件字体顶不了 —— 由 fontctl 把用户的字体包成
+  # "同样 face 数"的 TTC 再挂上去（见 ttcwrap.sh）。
+  # 默认 auto：三星自动开；其它机器不开（可在界面「替换范围（高级）」里手动打开）。
+  if ttc_enabled; then
+    for d in $dirs; do
+      for f in "$FSROOT$d"/*.ttc "$FSROOT$d"/*.TTC; do
+        [ -f "$f" ] || continue
+        case "${f##*/}" in *'*') continue ;; esac      # glob 没匹配到会原样留着
+        printf 'ttc %s %s\n' "$d" "${f##*/}"
+      done
+    done
+  fi
 }
 
 # ---------------------------------------------------------------------------
 # 生成槽位计划
 # ---------------------------------------------------------------------------
-# 主题字体槽位（MIUI / HyperOS）：
+# 主题字体槽位（MIUI / HyperOS / 三星）：
 #   小米把"设置 → 显示 → 字体大小和样式"里选的字体放在 /data/system/theme/fonts/，
 #   **同名文件优先级高于 /system/fonts** —— 于是那几个名字（MiuiEx-*.ttf、Roboto-*.ttf）
 #   永远是主题字体，模块换了系统目录也看不到变化，报告只能让用户"切回默认再重启"。
+#   三星是同一个机制，目录不同：/data/overlays/font/（在"设置 → 字体大小和样式"里
+#   选了字体包/flipfont 之后，落点就在这里）。
 #   这里把这几个也纳入计划：只挑「名字和本次计划里已有槽位完全相同」的，
 #   覆盖范围跟用户的选择一致，不多碰主题自带的其他文件。
 #   注意：/data 上的文件在"交给管理器挂载"模式下挂不了（魔法挂载只覆盖系统分区），那种模式直接跳过。
+#
+# ★ 默认**不做**这件事（theme_fonts=0）★ —— 有真机教训：
+#   MIUI/HyperOS 把"设置 → 字体样式"里选的字体放在 data/system/theme/fonts，
+#   而且**整目录都是一个真实文件 + 一堆符号链接**（实测 18 个文件全指向 Roboto-Regular.ttf）。
+#   我们去替换它，就等于把用户在设置里做的选择盖掉：
+#     · 用户选「小米兰亭 Pro」是为了用它的**可变字重轴**调粗细 —— 被换成单字重字体后，
+#       「字体粗细」直接调不动了（真机反馈："小米兰亭pro 已经字体都不生效了"）
+#     · 挂载落在**符号链接**上本身也不可靠（同一台机器上"实际生效"校验会少一个）
+#   所以改成可选：界面上的「也替换设置里选的字体」开关，默认关。
 theme_slots() {
-  local base="$1" tdir names f n
-  tdir="$FSROOT/data/system/theme/fonts"
-  [ -d "$tdir" ] || return 0
+  local base="$1" names d tdir f n real
   [ "$(mount_mode 2>/dev/null)" = manager ] && return 0
+  [ "$(cfg_get theme_fonts 0)" = 1 ] || return 0
   names=$(printf '%s\n' "$base" | while read -r _r _p; do
             [ -n "$_p" ] || continue
             printf '%s\n' "${_p##*/}"
           done | sort -u)
   [ -n "$names" ] || return 0
-  for f in "$tdir"/*.ttf "$tdir"/*.TTF "$tdir"/*.otf "$tdir"/*.OTF; do
-    [ -f "$f" ] || continue
-    n=${f##*/}
-    case "$n" in *'*') continue ;; esac          # glob 没匹配到会原样留着
-    printf '%s\n' "$names" | grep -qxF "$n" || continue
-    printf 'theme data/system/theme/fonts/%s\n' "$n"
+  # 各家"在设置里选的字体"落点都看；.ttc 也在内（apply 的合集分支会按目标 face 数合成）
+  #   data/system/theme/fonts  MIUI / HyperOS
+  #   data/overlays/font       三星
+  #   data/vfonts              vivo —— /system/fonts/VivoFont.ttf 就是指向这里的**符号链接**
+  for d in data/system/theme/fonts data/overlays/font data/vfonts; do
+    tdir="$FSROOT/$d"
+    [ -d "$tdir" ] || continue
+    for f in "$tdir"/*.ttf "$tdir"/*.TTF "$tdir"/*.otf "$tdir"/*.OTF "$tdir"/*.ttc "$tdir"/*.TTC; do
+      [ -f "$f" ] || continue
+      n=${f##*/}
+      case "$n" in *'*') continue ;; esac        # glob 没匹配到会原样留着
+      printf '%s\n' "$names" | grep -qxF "$n" || continue
+      # 目录里常见"一堆符号链接指向同一个真实文件"（MIUI 实测：18 个文件全指向 Roboto-Regular.ttf）。
+      # 这时只替换那个**真实文件** —— 既不去挂符号链接本身（挂上去不可靠，真机上校验都对不上），
+      # 也不会把同一份文件挂十几遍（同名的整行会被 slot_plan 去重）。
+      real=""
+      if command -v readlink >/dev/null 2>&1; then
+        real=$(readlink -f "$FSROOT$d/$n" 2>/dev/null)
+        case "$real" in [A-Za-z]:/*) real=${real#?:} ;; esac   # 沙箱（Windows）会带盘符前缀
+        case "$real" in "$FSROOT"/*) real=${real#"$FSROOT"} ;; esac
+        # 注意：FSROOT 在真机上是空的，上面那步不会去掉开头的斜杠 —— 必须单独再剥一次，
+        # 否则解析结果永远不等于 "$d/$n"，会把每个普通文件都误判成符号链接（测试抓到过）。
+        case "$real" in /*) real=${real#/} ;; esac
+        case "$real" in *..*) real="" ;; esac                  # 保守：带 .. 的直接不动
+        [ "$real" = "$d/$n" ] && real=""                       # 解析结果就是它自己 = 不是符号链接
+      fi
+      case "$real" in
+        "") printf 'theme %s/%s\n' "$d" "$n" ;;                # 普通文件：原样
+        */fonts/*) printf 'theme %s\n' "$real" ;;              # 真身在某个字体目录里 → 挂真身
+        *) : ;;                                               # 真身跑到别处 → 不动它，避免误伤
+      esac
+    done
   done
 }
 
@@ -290,21 +443,19 @@ slot_plan() {
            printf '%s %s/%s\n' "$role" "${d#/}" "$name"
          done | sort -u -k2,2)
   [ -n "$base" ] || return 0
-  # ⚠️ 最后按**整行**（= 完整目标路径）去一次重。
-  #    为什么不能沿用上面那个 sort -u -k2,2：它的键是"目录/文件名"，
-  #    而同一个文件名出现在不同分区（/product/fonts/X 与 /system/fonts/X）是
-  #    **两条合法的不同槽位** —— 真机报告里就有这种成对槽位（挂载结果里的 same=N 就是它）。
-  #    按文件名去重会把它们误删；按整行去重才既不重复、也不丢合法槽位。
-  #    theme_slots 是"追加"的（小米主题字体），不参与上面那次去重，所以必须在这里
-  #    对 base+theme 的整体再做一次 —— 真机出现过同一个路径计两遍、
-  #    界面显示「已替换槽位 62」而实际只有 31 个槽位存在的问题。
+  # 最后按**整行**（= 完整目标路径）再兜一次去重。
+  # base 上面已经按"目录/文件名"去过重，而主题字体那批是**追加**的、不参与那一步，
+  # 所以这里对整体再来一次，保证计划生成端不会出现同一个目标路径两遍
+  # （否则「已替换槽位」会虚高，挂载日志里也会多出重复的"跳过"）。
+  # 注意：不能用文件名去重 —— /product/fonts/X 与 /system/fonts/X 是两条合法槽位，
+  # 按文件名去重会把它们误删（真机报告里 same=N 那批正是这种成对槽位）。
   { printf '%s\n' "$base"; theme_slots "$base"; } | awk '!seen[$0]++'
 }
 
 # 诊断：按角色统计设备上"候选且存在"的槽位数量
 slot_report() {
   local moddir="$1" role d name
-  local c_latin=0 c_cjk=0 c_main=0 c_lang=0 c_sym=0 c_italic=0 c_serif=0 c_mono=0 c_clock=0 c_display=0
+  local c_latin=0 c_cjk=0 c_main=0 c_lang=0 c_sym=0 c_italic=0 c_serif=0 c_mono=0 c_clock=0 c_display=0 c_ttc=0
   local tmp="${TMPDIR:-/data/local/tmp}/.slotrep.$$"
   mkdir -p "${tmp%/*}" 2>/dev/null
   slot_candidates "$moddir" > "$tmp"
@@ -313,9 +464,9 @@ slot_report() {
       latin) c_latin=$((c_latin+1)) ;; cjk) c_cjk=$((c_cjk+1)) ;; main) c_main=$((c_main+1)) ;;
       lang) c_lang=$((c_lang+1)) ;; sym) c_sym=$((c_sym+1)) ;; italic) c_italic=$((c_italic+1)) ;;
       serif) c_serif=$((c_serif+1)) ;; mono) c_mono=$((c_mono+1)) ;; clock) c_clock=$((c_clock+1)) ;;
-      display) c_display=$((c_display+1)) ;;
+      display) c_display=$((c_display+1)) ;; ttc) c_ttc=$((c_ttc+1)) ;;
     esac
   done < "$tmp"
   rm -f "$tmp"
-  echo "latin=$c_latin cjk=$c_cjk main=$c_main | 保留：lang=$c_lang sym=$c_sym italic=$c_italic serif=$c_serif mono=$c_mono clock=$c_clock display=$c_display"
+  echo "latin=$c_latin cjk=$c_cjk main=$c_main ttc=$c_ttc | 保留：lang=$c_lang sym=$c_sym italic=$c_italic serif=$c_serif mono=$c_mono clock=$c_clock display=$c_display"
 }

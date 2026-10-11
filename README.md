@@ -26,14 +26,14 @@
 
 **下载页（推荐）**：https://github.com/ayss2188/porsche-font/releases/latest
 
-**直接下（v3.0）**：
+**直接下（v3.5）**：
 
 | 包 | 下载 | 体积 |
 |---|---|---|
-| 🤍❤️🔥 **三合一**（推荐） | [porsche-font-multi-v3.0.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-multi-v3.0.zip) | 约 63MB |
-| 🤍 **718素装**（无色） | [porsche-font-718-v3.0.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-718-v3.0.zip) | 约 21MB |
-| ❤️ **911经典**（一点红） | [porsche-font-911-v3.0.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-911-v3.0.zip) | 约 21MB |
-| 🔥 **GT3烈焰** | [porsche-font-gt3-v3.0.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-gt3-v3.0.zip) | 约 21MB |
+| 🤍❤️🔥 **三合一**（推荐） | [porsche-font-multi-v3.5.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-multi-v3.5.zip) | 约 63MB |
+| 🤍 **718素装**（无色） | [porsche-font-718-v3.5.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-718-v3.5.zip) | 约 21MB |
+| ❤️ **911经典**（一点红） | [porsche-font-911-v3.5.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-911-v3.5.zip) | 约 21MB |
+| 🔥 **GT3烈焰** | [porsche-font-gt3-v3.5.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-gt3-v3.5.zip) | 约 21MB |
 
 怎么选：
 
@@ -81,10 +81,14 @@
 
 - **三套保时捷配色**随包内置，WebUI 里热切换
 - **多系统自动适配**，刷入自动认系统
+- **中文也能换**（三星 / 魅族 / vivo 等机型）：本机中文如果来自 `.ttc` 合集，会把配色包成
+  同样 face 数的合集顶上去，**只换中文那几号**，日文 / 韩文保留系统字形；这类机型自动打开，界面里可关
+- **不动你「设置里选的字体」**：MIUI / 三星 / vivo 的主题字体目录默认不碰，
+  所以「小米兰亭 Pro」和「字体粗细」都还在（想在界面里打开也支持）
 - **谷歌字体兼容**开关：解决 Chrome / Gmail 英文数字被 GMS 换回默认的问题
 - **在线更新**：管理器提示新版本，下载后自动校验 sha256 与包内 ID，不符就不装
-- **开机保护**：万一选的配色导致没能开机，下次开机自动恢复，不会一直卡
-- **诊断报告**：一键生成，把「为什么没生效」直接说清楚
+- **开机保护**：万一选的配色导致没能开机，下次开机自动恢复；连续两次失败会自动停用模块，保证能进系统
+- **诊断报告**：一键生成，把「为什么没生效」直接说清楚；「只有桌面生效、App 里没变」也能直接定位
 - **可逆**：只读挂载、不改系统分区，禁用或卸载即恢复
 
 具体实现方式见 [更新日志](CHANGELOG.md)。
@@ -93,7 +97,9 @@
 
 六、升级说明
 
-**从 v2.0 上来**：直接覆盖安装即可，**不用卸载**。你原来选的配色会被自动认出来并保留。
+**从 v3.0 上来**：直接覆盖安装即可，**不用卸载**。你选的配色和设置都会保留。
+
+**从 v2.0 上来**：同样直接覆盖安装，**不用卸载**。你原来选的配色会被自动认出来并保留。
 
 **从 v1.x 上来**：**必须先卸载旧模块再刷**（id 不同，不卸载会同时装两个、互相抢字体）。
 
@@ -102,6 +108,14 @@
 卸载旧模块重新安装
 卸载旧模块重新安装
 ```
+
+v3.5 的变化（对方便理解升级后表现有帮助）：
+
+- **不再替换「设置里选的字体」**：如果你在 设置 ➔ 字体样式 里选过字体（比如小米兰亭 Pro），
+  升级后它不会再被模块顶掉 —— 这是刻意的（v3.0 顶掉它会让「字体粗细」调不动）
+- **三星 / 魅族 / vivo 用户**：升级重启后中文会跟着配色变（以前是"英文变了、中文没变"）。
+  每个 `.ttc` 会在 `/data` 里多占「原合集 + 配色字体」那么大的空间（约 40~90MB），空间不足会自动跳过
+- **万一中文变方块**：WebUI ➔「替换范围（高级）」➔ 关掉「替换 .ttc 合集」➔ 重启，即可完全恢复
 
 其他：
 - v3 是**内置配色版**，不再支持导入外部字体
@@ -122,8 +136,12 @@
 八、已知局限
 
 - **谷歌商店（Play Store）**：新版把 Google Sans 打包进了 APK，属"应用内置字体"，任何系统级模块都换不掉 —— Chrome / Gmail 生效、商店不变属正常现象
-- **QQ、微信**个别页面走独立渲染，不会随系统改变
-- **`.ttc` 合集字体**（如 `NotoSansCJK-Regular.ttc`）不会被替换
+- **QQ、微信**个别页面走独立渲染，不会随系统改变；**网页 / 小程序**里的字（WebView 渲染进程）也不受系统字体模块影响
+- **`.ttc` 合集替换的"只换中文"混合方案还没有真机确认**（已确认的是"换合集后中文跟着变"）。
+  万一中文出现方块：WebUI ➔「替换范围（高级）」➔ 关掉「替换 .ttc 合集」➔ 重启即可完全恢复
+- **自带配色没有韩文字形**，所以「保留韩文」默认开着，不建议关掉
+- **「也替换设置里选的字体」默认关**：这是刻意的 —— 打开会盖掉你在设置里选的字体，
+  如果那套字体是用来调「字体粗细」的可变字体，粗细会一起失效
 - 个别机型把字体放在更深的自定义分区时，主界面中英文字体仍会生效，100% 全覆盖需视具体 ROM 而定
 
 ====================================
