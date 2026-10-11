@@ -51,19 +51,44 @@ jobs:
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
 
+      - name: 统一换行符（网页编辑过的文件可能带 Windows 换行）
+        run: |
+          # 在网页上编辑过的文件有可能是 CRLF，而 sh 会直接报错、CI 的打包脚本也会拒绝。
+          # 打包**之前**统一转成 LF（和主项目同一招）。
+          find module -type f \( -name '*.sh' -o -name '*.prop' -o -name '*.list' \
+            -o -name '*.html' -o -name '*.py' -o -name 'update-binary' -o -name 'updater-script' \) \
+            -exec sed -i 's/\r$//' {} +
+          echo "-- 检查还有没有 CR --"
+          if grep -rlP '\r$' module 2>/dev/null | head -n 5; then
+            echo "::warning::上面这些文件仍带 CR（二进制文件除外，可忽略）"
+          else
+            echo "没有 CR ✓"
+          fi
+
       - name: 打 4 个包
         run: |
           sh scripts/build-multi.sh module dist
           echo "---- 产物 ----"
           ls -lh dist/
 
-      - name: 生成发布说明（Release 页用）
+      - name: 提取本版更新说明（Release 页 + 管理器弹窗都用它）
         run: |
-          # Release 页用 CHANGELOG 顶部那一段（详细版，带小节和表格）
-          awk '/^## /{ if (found) exit; found=1 } found' CHANGELOG.md > /tmp/notes.md
-          [ -s /tmp/notes.md ] || echo "更新" > /tmp/notes.md
-          echo "---- Release 说明（$(wc -l < /tmp/notes.md) 行）----"
-          head -n 5 /tmp/notes.md
+          set -e
+          VER="${{ steps.ver.outputs.ver }}"
+          # 按**版本号**取，不按"第一段"取：以后在文件顶部加别的段落也不会串味。
+          awk -v v="## $VER" '
+            $0 == v { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > dist/notes.md
+          if [ ! -s dist/notes.md ]; then
+            # 这里必须**直接失败**：没有本版说明 = CHANGELOG 没更新，
+            # 管理器弹窗会是一片空白，不如现在就停下来。
+            echo "::error::CHANGELOG.md 里找不到 '## $VER' 这一段，请先补上再发版"
+            exit 1
+          fi
+          echo "---- 本版说明（$(wc -l < dist/notes.md) 行）----"
+          head -n 3 dist/notes.md
 
       - name: 建 Release 并挂 4 个包
         env:
@@ -72,11 +97,12 @@ jobs:
         run: |
           set -e
           gh release create "$VER" \
+            --target main \
             --title "保时捷字体 $VER" \
-            --notes-file /tmp/notes.md \
+            --notes-file dist/notes.md \
             dist/*.zip
 
-      - name: 写回 4 个 update.json
+      - name: 写回 4 个 update.json（并生成本版短更新日志）
         env:
           VER: ${{ steps.ver.outputs.ver }}
           CODE: ${{ steps.ver.outputs.code }}
@@ -84,10 +110,13 @@ jobs:
           set -e
           # ⚠️ changelog 用 jsDelivr CDN，不要用 raw.githubusercontent.com：
           #    raw 域名在国内经常被墙，管理器弹窗会显示 "Not Found"（真机踩过）。
-          #    内容指向 UPDATE-<版本>.md（约 20 行的短版）——
-          #    update.json 的 changelog 会被管理器弹窗直接显示，不能塞
-          #    CHANGELOG.md 那种 77 行 / 6.5KB 的完整版，用户看不完。
-          #    Release 页仍然用完整版（上一步生成的 /tmp/notes.md）。
+          #    内容指向 UPDATE-<版本>.md ——
+          #    update.json 的 changelog 会被管理器弹窗直接显示，不能塞完整版 CHANGELOG.md
+          #    （用户看不完）。短版这里**由 CI 自己从本版说明里取前 20 行生成**，
+          #    所以不用手动维护，也不会出现"忘了更新短日志"。
+          #    Release 页仍然用完整版（dist/notes.md）。
+          head -n 20 dist/notes.md > "UPDATE-$VER.md"
+          echo "---- UPDATE-$VER.md（$(wc -l < "UPDATE-$VER.md") 行）----"
           while IFS='|' read -r key id zipname upfile sum; do
             [ -n "$key" ] || continue
             printf '{\n  "version": "%s",\n  "versionCode": %s,\n  "zipUrl": "%s/%s/releases/download/%s/%s",\n  "changelog": "https://cdn.jsdelivr.net/gh/%s@main/UPDATE-%s.md",\n  "sha256": "%s"\n}\n' \
@@ -98,6 +127,39 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add update*.json
-          git commit -m "chore: 更新 update.json（$VER / $CODE）" || echo "没有变化"
-          git push
+          git add update*.json "UPDATE-$VER.md"
+          git commit -m "chore: 更新 update.json / UPDATE-$VER.md（$VER / $CODE）" || echo "没有变化"
+          # ⚠️ 这一步要是失败，update.json 就永远停在旧版本，**所有用户都收不到更新**。
+          #    而"你正在上传文件"这类并发提交会把推送顶掉（non-fast-forward）——
+          #    主项目 v1.0.5 发版时真出过这个事（当时没有重试，只能手动补）。
+          #    所以：推 main 用显式 refspec（checkout 出来可能是游离头），失败就 rebase 重试。
+          ok=0
+          for i in 1 2 3 4 5; do
+            if git push origin HEAD:main; then ok=1; break; fi
+            echo "推送失败，第 $i 次重试..."
+            git pull --rebase origin main || true
+            sleep 5
+          done
+          if [ "$ok" != 1 ]; then
+            # 重试都失败：把 Release 收回去，这样修好之后能直接重跑工作流
+            # （否则重跑会在"Release 已经存在"那一步就退出）
+            echo "::error::update.json 没能推上去 —— 用户收不到更新。已撤回 Release，修好后重跑本工作流即可"
+            gh release delete "$VER" --yes --cleanup-tag || true
+            exit 1
+          fi
+
+      - name: 刷新 jsDelivr 缓存（purge）
+        env:
+          VER: ${{ steps.ver.outputs.ver }}
+        run: |
+          # 更新地址走 jsDelivr（cdn.jsdelivr.net/gh/...@main/...），而它对 @main 有缓存
+          # （最长 12 小时）。不 purge 的话，刚发完版用户点「检查更新」可能还是旧版本 ——
+          # 真机上表现为"明明发了新版却收不到"，用户以为是延迟。
+          # 这里把刚改动的文件主动刷一遍。**失败不算错**（CDN 抖动不该让发版失败）。
+          for f in update.json update-none.json update-colon.json update-flair.json \
+                   "UPDATE-$VER.md" CHANGELOG.md README.md; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "https://purge.jsdelivr.net/gh/$GITHUB_REPOSITORY@main/$f" || echo 000)
+            echo "purge $f -> HTTP $code"
+          done
+          echo "（purge 只是刷新缓存；返回 200/404 都正常，404 表示该文件还没进 CDN）"
