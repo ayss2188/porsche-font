@@ -6,7 +6,7 @@
 #   sh fontctl.sh list                        列出字体库：id|名称|字节数|元数据
 #   sh fontctl.sh ls <base64(目录)>           列出手机存储目录（文件夹 + ttf/otf）
 #   sh fontctl.sh import <路径> [名称]         从手机存储导入字体（直接 cp，速度快）
-#   sh fontctl.sh upload-start                开始分块上传（界面已移除导入功能，保留给命令行/以后用）
+#   sh fontctl.sh upload-start                开始分块上传（WebUI 文件选择器用）
 #   sh fontctl.sh upload-finish <大小> [名称]  结束分块上传并入库
 #   sh fontctl.sh rename <id> <新名称>
 #   sh fontctl.sh delete <id> [id...]         删除（可多个；使用中的会跳过）
@@ -23,10 +23,6 @@
 #   sh fontctl.sh sync                        开机后确认 pending -> active
 #   sh fontctl.sh prop                        刷新 module.prop 描述
 #   sh fontctl.sh ack                         清除"已自动恢复"提示
-#   sh fontctl.sh ack-stopped                 清除"曾被自动停用"提示
-#
-# import / rename / delete 三条命令**保留没删** —— 内置配色版界面不再调用它们，
-# 但保留着不占资源，而且万一日后要支持"混搭自己的字体"可以直接接回去。
 #
 # 切换采用"先生成、再校验、最后提交"：新字体文件全部就绪才替换旧的，中途失败保留原来的字体。
 
@@ -37,14 +33,21 @@ PART="$LIB/.upload.part"
 STORAGE=${STORAGE:-/data/media/0}
 [ -d "$STORAGE" ] || STORAGE=/storage/emulated/0
 
-. "$MODDIR/common.sh" 2>/dev/null
-. "$MODDIR/slots.sh" 2>/dev/null
-. "$MODDIR/mount.sh" 2>/dev/null
-# ⚠️ 必须判存在再 source：POSIX 里 `.` 打不开文件是**致命错误**，会直接把整个 fontctl 退出
-#    （exit 2，连一行输出都没有）—— 主项目的写法是 `. "$MODDIR/ttcwrap.sh" 2>/dev/null`，
-#    看起来"找不到就跳过"，其实**整个界面都会废掉**（不是只少个 .ttc 功能）。
-#    ttcwrap.sh 是新增文件，最容易在打包时漏掉，所以这里加一道守卫：
-#    万一包里没有它，只有 .ttc 合集功能不可用，其它一切照常。
+# ⚠ 这里的 `.` 不能写成 `. "$MODDIR/x.sh" 2>/dev/null`：
+#   POSIX 里 `.` 是**特殊内建**，打不开文件是**致命错误** —— `2>/dev/null` 只是把报错信息
+#   藏起来，挡不住它把整个脚本带走（实测 busybox sh：`. /不存在的文件 2>/dev/null` 之后
+#   后面的命令一行都不执行，退出码 2）。
+#   后果不是"少个功能"：fontctl.sh 是界面的唯一入口，它当场退出 = 卡片空白、切不了字体、
+#   诊断打不开、所有开关失效，而且用户拿不到任何线索。
+#   （2026-10-11 姊妹项目同步 v1.0.5 时抓到的，原来是 `. ... 2>/dev/null`）
+for _mf in common.sh slots.sh mount.sh; do
+  [ -f "$MODDIR/$_mf" ] || { echo "ERROR:模块文件缺失（$_mf）—— 请重新安装模块"; exit 3; }
+  . "$MODDIR/$_mf"
+done
+unset _mf
+# ttcwrap.sh（.ttc 合集生成器）是**可选**的：老包/不完整包里可能没有。
+# 缺了只是"合集替换"这条功能不可用，绝不能让整个 fontctl 退出 ——
+# apply 里会为这种槽位记一笔 via=no-generator（见下面的 .ttc 分支）。
 [ -f "$MODDIR/ttcwrap.sh" ] && . "$MODDIR/ttcwrap.sh"
 mkdir -p "$LIB" 2>/dev/null
 export TMPDIR="$LIB"
@@ -52,7 +55,8 @@ export TMPDIR="$LIB"
 APPLIED="$MODDIR/slots.applied"
 MODID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
 # 兜底：module.prop 读不到时（异常情况）扫一下本机装的是哪个配色包。
-# ⚠️ 不要写死成主项目的 custom_font_switcher —— 换皮成保时捷后那个 id 根本不存在。
+# ⚠️ 本项目差异（重放项 6）：**不要写死主项目的 custom_font_switcher** ——
+#    换皮成保时捷后那个 id 根本不存在（4 个包 id 是 porsche_font_multi/_718/_911/_gt3）。
 if [ -z "$MODID" ]; then
   for _d in /data/adb/modules/porsche_font_*; do
     [ -f "$_d/module.prop" ] || continue
@@ -370,7 +374,10 @@ refresh_prop() {
   A=$(cur_active); P=$(cur_pending)
   ROM_NAME=$(rom_name "$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')")
   [ -n "$(list_conflicts | head -n1)" ] && warn=" ⚠ 检测到其他字体模块，可能互相覆盖。"
-  # 内置配色版的描述：不说"导入自己的字体"（这一版不给导入），只说当前生效的是哪套配色
+  # ⚠️ 本项目差异（重放项 6 同批）：这段描述是**内置配色版的话**，不要用主项目那句。
+  #    主项目写的是"在 WebUI 导入自己的字体并切换，默认不替换任何字体"——
+  #    本版**不提供导入**（配色是随包发进来的），照抄过去等于在模块卡片上写错话，
+  #    用户会去找一个根本不存在的"导入"按钮。proptest.sh 专门盯着这两个字符串。
   if [ "$A" = "$P" ]; then
     D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")] 内置配色版：素装(无色)/一点红/烈焰 三套一键切换，含在线更新与诊断报告。$warn"
   else
@@ -392,7 +399,17 @@ make_plan() {
   local sel="$1" out="$2" scope kl ks
   _eff_scope "$sel"          # 不用 $(...)：SCOPE_VIA 要留在当前 shell 里给决策记录用
   scope="$EFF_SCOPE"
-  kl=$(cfg_get keep_lang 1); ks=$(cfg_get keep_special 1)
+  kl=$(cfg_get keep_lang 0); ks=$(cfg_get keep_special 0)
+  # 1.0.9：界面已删掉这两个开关（默认全替换）；保留读取只为兼容老配置文件。
+  SEL_FONT="$sel"            # 给 slot_plan/_meta_have 用：拿这个字体的 meta 判字形覆盖
+  # 极端保护：字体完全没有中文字形 → 中文槽位一个都不动
+  # （否则整个界面会变方块，用户连 WebUI 都看不清、没法换回来）。正常字体不会命中。
+  CJK_GUARD=0
+  if [ -f "$LIB/$sel.meta" ] && \
+     [ "$(sed -n 's/^cjk=//p' "$LIB/$sel.meta" 2>/dev/null | tail -n1 | tr -d '\r\n')" = 0 ]; then
+    CJK_GUARD=1
+  fi
+  export CJK_GUARD
   if [ "$scope" = combo ]; then
     slot_plan "$MODDIR" all "$kl" "$ks" > "$out"
   else
@@ -564,7 +581,7 @@ do_apply() {
     scope="$PLAN_SCOPE"
     {
       echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=$sel"
-      echo "plan=$(grep -c . "$plan" 2>/dev/null) scope=$scope 判定依据=${SCOPE_VIA:-?} keep_lang=$(cfg_get keep_lang 1) keep_special=$(cfg_get keep_special 1)"
+      echo "plan=$(grep -c . "$plan" 2>/dev/null) scope=$scope 判定依据=${SCOPE_VIA:-?} keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0)"
     } > "$LIB/ttc.log" 2>/dev/null
     if [ ! -s "$plan" ]; then
       rm -f "$plan"
@@ -594,6 +611,14 @@ do_apply() {
       # 生成失败就跳过这个槽位、保持系统原样 —— 绝不挂一个坏文件上去。
       case "$rel" in
         *.ttc|*.TTC)
+          # 生成器不在（包不完整 / 老包）→ **明确记一笔再跳过**。
+          # 不这么写的话，用户看到的是"开关亮着、中文一点没变"，而报告里也看不出为什么
+          # （ttc_faces_of / isnum 都在 ttcwrap.sh 里，没它连 faces 都读不出来）。
+          if ! command -v ttc_wrap_mix >/dev/null 2>&1; then
+            printf '%s %s via=no-generator detail=缺少 ttcwrap.sh（包不完整，请重新安装模块）\n' \
+              "$id" "$rel" >> "$LIB/ttc.log" 2>/dev/null
+            continue
+          fi
           nf=$(ttc_faces_of "/$rel" 2>/dev/null)
           isnum "$nf" || continue
           [ "$nf" -ge 1 ] 2>/dev/null || continue
@@ -685,7 +710,7 @@ do_report() {
   A=$(cur_active); P=$(cur_pending)
   # 一键体检的结论放最前面（见 diag.sh）
   [ -f "$MODDIR/diag.sh" ] && sh "$MODDIR/diag.sh" brief 2>/dev/null
-  echo "== 自定义字体切换模块 诊断报告 =="
+  echo "== 保时捷字体（内置配色版） 诊断报告 =="
   echo "模块版本: $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null) ($(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null))"
   echo "设备: $(getp ro.product.brand) $(getp ro.product.model) | Android $(getp ro.build.version.release) (SDK $(getp ro.build.version.sdk))"
   echo "系统: $(detect_rom) / $(rom_name "$(detect_rom)")"
@@ -699,8 +724,10 @@ do_report() {
     [ -f "$LIB/$id.ttf" ] || continue
     echo "  $(name_of "$id"): $(( $(wc -c < "$LIB/$id.ttf") / 1024 )) KB | 范围 $(effective_scope "$id") | 元数据 $(meta_compact "$id")"
   done
-  echo "设置: keep_lang=$(cfg_get keep_lang 1) keep_special=$(cfg_get keep_special 1) mount_mode=$(mount_mode)"
-  echo "字体库: $(lib_font_ids | grep -c . ) 个，占用 $(du -sk "$LIB" 2>/dev/null | cut -f1) KB"
+  echo "设置: keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode)"
+  # ⚠️ 本项目差异（重放项 1）：用 lib_font_ids 数，别 glob f*.ttf ——
+  #    自带配色是 builtin_*.ttf，只数 f<数字> 的话这里永远显示 0 个。
+  echo "字体库: $(lib_font_ids 2>/dev/null | grep -c .) 个，占用 $(du -sk "$LIB" 2>/dev/null | cut -f1) KB"
   echo "---- 槽位 ----"
   echo "字体目录: $(slot_dirs | tr '\n' ' ')"
   echo "字体配置: $(slot_xml_files | tr '\n' ' ')"
@@ -739,6 +766,11 @@ case "${1:-}" in
     echo "PM=$(cat "$MODDIR/payload.mode" 2>/dev/null | tr -d '[:space:]')"
     echo "RM=$(root_manager)"
     echo "V=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)"
+    # ⚠️ VC 是给界面做**版本比较**用的（2026-10-13 加）：
+    #    更新检查必须拿"数字 versionCode"比大小，不能只凭 update.sh 的 HAS ——
+    #    否则自己内测时（本地 1.0.8、线上还是 1.0.7）界面会显示「1.0.7（已是最新）」，
+    #    看着像更新功能坏了。见 webroot/index.html 里 verNum() 那段说明。
+    echo "VC=$(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null | tr -d '[:space:]')"
     echo "MO=$(mount_result | tr ' ' ',')"
     echo "VF=$(payload_verify "$MODDIR" | tr ' ' ',')"
     if [ -f "$MODDIR/mount_missed" ]; then echo "MM=1"; else echo "MM=0"; fi
@@ -770,9 +802,9 @@ case "${1:-}" in
     done
     ;;
   list)
-    # ⚠️ 这里必须用 lib_font_ids（同时认 f<时间戳> 和 builtin_*），
-    #    直接写 f*.ttf 会把内置配色全漏掉 → 界面一张配色卡片都没有。
-    lib_font_ids | while IFS= read -r id; do
+    # ⚠️ 本项目差异（重放项 1）：必须走 lib_font_ids（同时认 f<数字> 和 builtin_*）。
+    #    只 glob f*.ttf 的话，界面上一个配色都列不出来（3 套配色全是 builtin_*）。
+    for id in $(lib_font_ids); do
       f="$LIB/$id.ttf"
       [ -f "$f" ] || continue
       echo "$id|$(name_of "$id")|$(wc -c < "$f" | tr -d ' ')|$(meta_compact "$id")"
@@ -852,8 +884,8 @@ case "${1:-}" in
             case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
           theme_fonts)
             # 是否连"设置 → 字体样式"里选的字体（主题字体目录）也一起替换。
-            # 默认 0：换掉它就等于盖掉用户在设置里的选择，还会毁掉「字体粗细」调节
-            #（用户选小米兰亭 Pro 就是为了那个可变字重轴）—— 真机反馈过。
+            # 默认 0：换掉它就等于盖掉用户在设置里的选择 —— 用户明确反馈过"我在设置里选的
+            # 字体不该被动"。开着的好处是替换得更全（不用再去设置里切回「默认」）。
             case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
           ttc_replace)
             # auto = 交给自动判断（三星开、其它关）；界面上的开关写 0/1，写进去就是手动指定
@@ -866,7 +898,7 @@ case "${1:-}" in
         ;;
       *)
         # ttc_replace 回显的是**生效值**：这类机型即使没手动设过，界面开关也该是亮的
-        echo "keep_lang=$(cfg_get keep_lang 1) keep_special=$(cfg_get keep_special 1) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0)"
+        echo "keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0) "
         ;;
     esac
     ;;
@@ -908,7 +940,8 @@ case "${1:-}" in
     ;;
   diag)
     if [ -f "$MODDIR/diag.sh" ]; then
-      # 原样转发后面所有参数：diag bg force fast / diag textpage 60000 60000 / diag state ...
+      # 原样转发后面所有参数：diag bg force / diag textpage 60000 60000 / diag state ...
+# （1.0.9 起不再有 fast 口径；万一旧界面传了 fast，diag.sh 会忽略它）
       shift
       [ -n "${1:-}" ] || set -- full
       sh "$MODDIR/diag.sh" "$@"
