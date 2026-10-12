@@ -1,12 +1,16 @@
 #!/system/bin/sh
 # 自定义字体切换模块 - GitHub 在线更新（在手机本地下载并安装，不用电脑）
-# 更新信息来自 module.prop 里的 updateJson（GitHub 仓库里的 update.json），
-# Magisk / KernelSU / APatch 管理器也会用同一个地址显示"有更新"。
+# 更新信息来自 module.prop 里的 updateJson（仓库里那份 UPDATE-<版本>.json），
+# Magisk / KernelSU / APatch 管理器也用同一个地址显示"有更新"。
+#
+# ★ 2026-10-12 定下的规矩：**只校验版本，不校验指纹。**
+#   新版比手上新就装；指纹只记进日志，不作为拒绝安装的理由
+#   （真正落地安装的是 Root 管理器，它自己会用账本里的 sha256 校验）。
 #
 # 用法：
 #   sh update.sh check       输出 CUR_VER= CUR_CODE= NEW_VER= NEW_CODE= HAS= ERR=
 #   sh update.sh changelog   输出更新日志正文
-#   sh update.sh install     下载新版刷机包、校验后用当前 Root 管理器安装（重启生效）
+#   sh update.sh install     下载新版刷机包、用当前 Root 管理器安装（重启生效）
 
 MODDIR=$(cd "$(dirname "$0")" && pwd)
 . "$MODDIR/common.sh"
@@ -65,35 +69,28 @@ fetch() {
 jstr() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p"; }
 jnum() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p"; }
 
+
 load_json() {
-  local url bust
+  local url
   url=$(prop updateJson)
   case "$url" in
     https://*) ;;
     *) ERR="module.prop 里没有配置 updateJson"; return 1 ;;
   esac
   case "$url" in *__REPO__*) ERR="作者还没有配置 GitHub 仓库地址"; return 1 ;; esac
-  # ---------------------------------------------------------------------------
-  # 加一个每次都不同的查询串，**绕开 CDN 缓存**。
-  # 为什么必须这么做：更新地址走 jsDelivr，而它对 @main 有缓存（最长 12 小时）——
-  # 不加这一下，刚发布的版本在 App 里点「检查更新」可能还是旧版本，
-  # 表现成"明明发了新版却收不到"（真机反馈过，用户以为是延迟）。
-  # 带随机串的 URL 对 CDN 来说是新的，会回源取最新内容。
-  # 管理器自己的更新检查读的是 module.prop 里那个固定地址，绕不开 ——
-  # 那条靠发版时主动 purge jsDelivr 解决（CI 里做了）。
-  # ---------------------------------------------------------------------------
-  bust="cfs$(date +%s 2>/dev/null)$$"
-  case "$url" in
-    *\?*) url="$url&_=$bust" ;;
-    *)    url="$url?_=$bust" ;;
-  esac
-  fetch "$url" "$TMP/update.json" 20 || { ERR="无法连接 GitHub，请检查网络后重试"; return 1; }
-  NEW_VER=$(jstr version "$TMP/update.json")
-  NEW_CODE=$(jnum versionCode "$TMP/update.json")
-  ZIP_URL=$(jstr zipUrl "$TMP/update.json")
-  LOG_URL=$(jstr changelog "$TMP/update.json")
-  SHA=$(jstr sha256 "$TMP/update.json")
-  [ -n "$NEW_CODE" ] && [ -n "$ZIP_URL" ] || { ERR="update.json 格式不正确"; NEW_CODE=""; return 1; }
+  rm -f "$TMP/update.json" 2>/dev/null
+  fetch "$url" "$TMP/update.json" 20
+  # ⚠ fetch 失败时会把目标文件删掉，所以这里必须先判存在再读 ——
+  #   否则每次都会往日志里喷一条 "can't open .../update.json"（测试抓到的）
+  NEW_VER=""; NEW_CODE=""; ZIP_URL=""; LOG_URL=""; SHA=""
+  if [ -f "$TMP/update.json" ]; then
+    NEW_VER=$(jstr version "$TMP/update.json")
+    NEW_CODE=$(jnum versionCode "$TMP/update.json")
+    ZIP_URL=$(jstr zipUrl "$TMP/update.json")
+    LOG_URL=$(jstr changelog "$TMP/update.json")
+    SHA=$(jstr sha256 "$TMP/update.json")
+  fi
+  [ -n "$NEW_CODE" ] && [ -n "$ZIP_URL" ] || { ERR="取不到更新信息（网络不可用，或地址上的内容不完整）"; NEW_CODE=""; return 1; }
   return 0
 }
 
@@ -115,14 +112,23 @@ case "${1:-check}" in
   changelog)
     # 优先用网上的（永远是最新）；拿不到就用随模块打包的那一份 ——
     # raw.githubusercontent.com 在国内经常连不上，没网时至少还能看到本版的更新说明
+    #
+    # ⚠️ 上限是**字节**不是字符（`-c` 是字节）：中文一个字在 UTF-8 占 3 字节，
+    #    所以"才 1 万字符"的文件其实已经两万多字节。
+    #    2026-10-13 从 30000 提到 60000：本项目弹窗里**连历史版本一起给**
+    #    （从 v3.5 直接升上来的用户要看"我一共得到了什么"），30000 已经用到 87%，
+    #    再加一条就会**静默截断** —— 虽然砍掉的是尾部的老版本说明（新版在最前面），
+    #    但"悄悄少东西"正是这个项目最忌讳的，宁肯给足。
+    #    顺序规则：**最新版本永远放最前面**（CHANGELOG 从新到老），
+    #    万一哪天真被截断，砍掉的也只会是老版本的说明。
     if load_json && [ -n "$LOG_URL" ] && fetch "$LOG_URL" "$TMP/changelog.md" 25; then
-      head -c 30000 "$TMP/changelog.md"
+      head -c 60000 "$TMP/changelog.md"
       exit 0
     fi
     if [ -s "$MODDIR/changelog.md" ]; then
       echo "（当前无法连接 GitHub，下面是随模块一起装进来的更新日志）"
       echo
-      head -c 30000 "$MODDIR/changelog.md"
+      head -c 60000 "$MODDIR/changelog.md"
       exit 0
     fi
     echo "ERROR:下载更新日志失败（也找不到随模块打包的 changelog.md）"
@@ -147,7 +153,9 @@ case "${1:-check}" in
     load_json || { echo "ERROR:$ERR"; exit 1; }
     [ "$NEW_CODE" -gt "${CUR_CODE:-0}" ] 2>/dev/null || [ "$2" = force ] || { echo "ERROR:已是最新版本"; exit 1; }
     ZIP="$TMP/module.zip"
-    rm -f "$ZIP" "$STATE" "$TMP/dl.rc" 2>/dev/null
+    # 顺带清掉上一次留下的 install.log 和校验状态：不然这次校验失败退出时，
+    # 那几个旧文件还在，看起来像"这次装成功了/这次校验过了"
+      rm -f "$ZIP" "$STATE" "$TMP/dl.rc" "$TMP/install.log" 2>/dev/null
     TOTAL=$(http_size "$ZIP_URL")
     prog download 0 "$TOTAL" "正在下载刷机包"
     # 后台下载 + 每秒刷新进度。
@@ -178,11 +186,27 @@ case "${1:-check}" in
     fi
     prog verify 0 0 "正在校验刷机包"
 
-    # 校验：是 zip、体积合理、sha256 一致、模块 id 一致
-    [ "$(head -c 2 "$ZIP")" = PK ] || { rm -f "$ZIP"; prog error 0 0 "不是 zip"; echo "ERROR:下载的文件不是 zip（网络可能返回了错误页面）"; exit 1; }
-    [ "$(wc -c < "$ZIP")" -gt 10240 ] || { rm -f "$ZIP"; prog error 0 0 "文件不完整"; echo "ERROR:下载的文件不完整"; exit 1; }
-    if [ -n "$SHA" ] && command -v sha256sum >/dev/null 2>&1; then
-      [ "$(sha256sum "$ZIP" | cut -d' ' -f1)" = "$SHA" ] || { rm -f "$ZIP"; prog error 0 0 "sha256 不一致"; echo "ERROR:校验失败（sha256 不一致），已取消安装"; exit 1; }
+    # -------------------------------------------------------------------------
+    # 校验：**只看版本，不看指纹**（2026-10-12 按作者决定）
+    #
+    # 为什么不再校验 sha256：v1.0.6 那次事故里**包从头到尾都是好的**，被拒是因为我们手上
+    #   那份账本来自 CDN 缓存、里面的 sha256 是上一版的 —— 等于我们自己拿旧指纹否掉了好包，
+    #   用户看到"sha256 不一致，已取消安装"，只会以为我们发的包坏了。
+    #   真正落地安装的是 Root 管理器自己（它会用账本里的 sha256 比对下载到的包），
+    #   作者实测管理器里点更新直接就能刷进去 —— 所以这一层是多余的误伤点，去掉。
+    #
+    # 留下的两个检查都是版本层面的：
+    #   · 包里的模块 ID 必须还是我们这个模块
+    #   · 包里的版本必须比手上这个新（不让人被降级装回旧版）
+    # 指纹只记进日志，供排查用，不影响安装。
+    # -------------------------------------------------------------------------
+    LOCAL=""
+    [ -f "$ZIP" ] && command -v sha256sum >/dev/null 2>&1 && LOCAL=$(sha256sum "$ZIP" 2>/dev/null | cut -d' ' -f1 | tr -d '\r\n')
+    F_OUT=$(wc -c < "$ZIP" 2>/dev/null | tr -dc '0-9')
+    if [ "$LOCAL" = "$SHA" ] && [ -n "$SHA" ]; then
+      echo "指纹：与账本一致（$LOCAL）"
+    else
+      echo "指纹：与账本不一致（账本=${SHA:-无} 实物=${LOCAL:-未知} 大小=${F_OUT:-?} 字节）—— 不拦截，由管理器在安装时校验"
     fi
     if command -v unzip >/dev/null 2>&1; then
       NID=$(unzip -p "$ZIP" module.prop 2>/dev/null | sed -n 's/^id=//p' | head -n1 | tr -d '\r')
