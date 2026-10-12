@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 自定义字体切换模块 - GitHub 在线更新（在手机本地下载并安装，不用电脑）
+# 保时捷字体（内置配色版） - GitHub 在线更新（在手机本地下载并安装，不用电脑）
 # 更新信息来自 module.prop 里的 updateJson（仓库里那份 UPDATE-<版本>.json），
 # Magisk / KernelSU / APatch 管理器也用同一个地址显示"有更新"。
 #
