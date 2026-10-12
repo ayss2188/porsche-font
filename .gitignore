@@ -2,3 +2,5 @@ dist/
 *.zip
 module/builtin/*.ttf
 
+# CI 在打包前生成的离线兜底（随包发给用户），不是源码
+module/changelog.md
