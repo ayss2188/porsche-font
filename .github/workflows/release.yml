@@ -9,9 +9,13 @@ permissions:
   contents: write
 
 env:
-  # ⚠️ 建好仓库后，把「字体素材」Release 里那个三合一 zip 的附件链接粘到这里
-  #    形如 https://github.com/ayss2188/porsche-font/releases/download/fonts-v1/xxx.zip
-  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v1/porsche-font-profiles-v1.zip"
+  # ⚠️ 这里指向「字体素材」Release 的附件（三合一 zip，里面是 profiles/*.ttf）。
+  #    fonts-v2 = **修好字体身份**的那一版（v3.6 起必须用这个）：
+  #      旧版三份字体的 name 表是坏的（postscript 名 = "未定义"），
+  #      一加 ColorOS 这类"按 postscriptName 找字体"的 ROM 会满屏方块。
+  #      v1 仍然在线（老 tag 的包要能重打），但**不要再退回去**。
+  #    换 fonts-v2 之前请确认该 Release 已经建好、附件已上传，否则 CI 会在取字体那步失败。
+  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v2/porsche-font-profiles-v2.zip"
 
 jobs:
   build:
@@ -67,9 +71,32 @@ jobs:
 
       - name: 打 4 个包
         run: |
+          # ⚠️ 打包**之前**把本版说明放进 module/changelog.md —— 这是"离线兜底"：
+          #    update.sh 的 changelog 命令优先读网上的 UPDATE-<版本>.md，
+          #    但国内 raw.github 常被墙、jsDelivr 也可能超时；那时代码会退回读
+          #    "$MODDIR/changelog.md"（随模块一起装进来的那份）。
+          #    以前 CI 从不生成这个文件 → 那个兜底**从来没生效过**，
+          #    用户在弱网下点「更新日志」只会看到一片空白。
+          #    放在这里（打 4 个包之前）而不是更早：这样 build-multi.sh 复制
+          #    module/ 时会把它带进每一个变体包。
+          if [ -f "UPDATE-${{ steps.ver.outputs.ver }}.md" ]; then
+            cp "UPDATE-${{ steps.ver.outputs.ver }}.md" module/changelog.md
+            echo "已放入 module/changelog.md（$(wc -c < module/changelog.md) 字节）作为离线兜底"
+          else
+            echo "::warning::仓库里没有 UPDATE-${{ steps.ver.outputs.ver }}.md，离线兜底将缺失（弱网下用户点更新日志会空白）"
+          fi
           sh scripts/build-multi.sh module dist
           echo "---- 产物 ----"
           ls -lh dist/
+          echo "---- 确认离线兜底进了包 ----"
+          for z in dist/*.zip; do
+            if unzip -l "$z" | grep -q 'changelog.md'; then
+              echo "  OK  $(basename "$z") 含 changelog.md"
+            else
+              echo "::error::$(basename "$z") 里没有 changelog.md（离线兜底没进包）"
+              exit 1
+            fi
+          done
 
       - name: 提取本版更新说明（Release 页 + 管理器弹窗都用它）
         run: |
@@ -111,12 +138,26 @@ jobs:
           # ⚠️ changelog 用 jsDelivr CDN，不要用 raw.githubusercontent.com：
           #    raw 域名在国内经常被墙，管理器弹窗会显示 "Not Found"（真机踩过）。
           #    内容指向 UPDATE-<版本>.md ——
-          #    update.json 的 changelog 会被管理器弹窗直接显示，不能塞完整版 CHANGELOG.md
-          #    （用户看不完）。短版这里**由 CI 自己从本版说明里取前 20 行生成**，
-          #    所以不用手动维护，也不会出现"忘了更新短日志"。
-          #    Release 页仍然用完整版（dist/notes.md）。
-          head -n 20 dist/notes.md > "UPDATE-$VER.md"
-          echo "---- UPDATE-$VER.md（$(wc -l < "UPDATE-$VER.md") 行）----"
+          #    update.json 的 changelog 会被管理器弹窗直接显示。
+          #
+          # ⚠️ 这里**不要用 `head -n 20 dist/notes.md` 覆盖**（2026-10-13 订正）：
+          #    · "20 行"从来不是显示上限 —— 管理器读的是**这个文件本身**，
+          #      WebUI 那条路是 `update.sh changelog` 的 `head -c 30000`（3 万字符）+ 可滚动；
+          #    · 所以按 20 行切只会把说明**断在半句话上**（真机上就是这样，很难看）；
+          #    · 而且本项目希望在弹窗里**连历史版本一起给用户看**（从 v3.5 直接升上来的用户
+          #      需要知道"我从 3.5 到 3.9 都得到了什么"），那份文件手写在仓库里。
+          #    现在的规则：**仓库里已经有 UPDATE-<版本>.md 就原样保留**；
+          #    没有才用本版说明兜底生成（保证绝不会出现"弹窗空白"）。
+          if [ -s "UPDATE-$VER.md" ]; then
+            echo "UPDATE-$VER.md 已存在于仓库（$(wc -l < "UPDATE-$VER.md") 行 / $(wc -c < "UPDATE-$VER.md") 字符）—— 原样保留，不覆盖"
+          else
+            cp dist/notes.md "UPDATE-$VER.md"
+            echo "仓库里没有 UPDATE-$VER.md，已用 dist/notes.md 兜底生成（$(wc -l < "UPDATE-$VER.md") 行）"
+          fi
+          _LEN=$(wc -c < "UPDATE-$VER.md")
+          if [ "$_LEN" -gt 30000 ]; then
+            echo "::warning::UPDATE-$VER.md 有 $_LEN 字符，超过 update.sh 的 30000 显示上限，用户会看不全"
+          fi
           while IFS='|' read -r key id zipname upfile sum; do
             [ -n "$key" ] || continue
             printf '{\n  "version": "%s",\n  "versionCode": %s,\n  "zipUrl": "%s/%s/releases/download/%s/%s",\n  "changelog": "https://cdn.jsdelivr.net/gh/%s@main/UPDATE-%s.md",\n  "sha256": "%s"\n}\n' \
@@ -148,18 +189,49 @@ jobs:
             exit 1
           fi
 
-      - name: 刷新 jsDelivr 缓存（purge）
+      - name: 主动刷新 CDN 缓存（重试 + 自查，让用户尽快收到更新）
         env:
           VER: ${{ steps.ver.outputs.ver }}
         run: |
-          # 更新地址走 jsDelivr（cdn.jsdelivr.net/gh/...@main/...），而它对 @main 有缓存
-          # （最长 12 小时）。不 purge 的话，刚发完版用户点「检查更新」可能还是旧版本 ——
-          # 真机上表现为"明明发了新版却收不到"，用户以为是延迟。
-          # 这里把刚改动的文件主动刷一遍。**失败不算错**（CDN 抖动不该让发版失败）。
-          for f in update.json update-none.json update-colon.json update-flair.json \
-                   "UPDATE-$VER.md" CHANGELOG.md README.md; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' \
-              "https://purge.jsdelivr.net/gh/$GITHUB_REPOSITORY@main/$f" || echo 000)
-            echo "purge $f -> HTTP $code"
+          # 更新地址走 jsDelivr（cdn.jsdelivr.net/gh/...@main/...）。不刷缓存的话，
+          # 刚发完版用户点「检查更新」可能还是旧版本 —— 表现成"明明发了新版却收不到"。
+          #
+          # ⚠️ jsDelivr 有**两层**缓存（主项目 2026-10-12 踩了三轮才搞清，本项目照搬）：
+          #   · 文件内容层：purge 的语义是"删这份缓存、下次回源"，这一层**有效**；
+          #   · **main 分支名 → 哪个提交** 的解析缓存：purge **清不掉**它 ——
+          #     所以有时 purge 完回源拿到的还是旧内容（别名还指着旧提交）。
+          #   主项目发 1.0.8 时真遇到：CI 的 purge 那步 success，但 CDN 仍给 1.0.7，
+          #   手动再 purge 一次才跳过去。
+          # 所以这里改成**多轮重试 + 每轮自查**：能刷到就提前结束；刷不到只告警、不当失败
+          #   （CDN 抖动不该让发版失败；最长约 12 小时它会自愈）。
+          #
+          # ⚠️ 本项目有 **4 条更新通道**（三合一 + 3 个单色包），各读自己那份账本 ——
+          #    所以每轮要把 4 个 update*.json **全部** purge，并且**逐个回读自查**：
+          #    只查 update.json 的话，单色包那三条可能还停在旧版本。
+          FILES="update.json update-none.json update-colon.json update-flair.json UPDATE-$VER.md CHANGELOG.md README.md"
+          MINE="update.json update-none.json update-colon.json update-flair.json"
+          ok=0
+          for i in 1 2 3 4 5 6; do
+            for f in $FILES; do
+              curl -sS --max-time 25 "https://purge.jsdelivr.net/gh/$GITHUB_REPOSITORY@main/$f" >/dev/null 2>&1 || true
+            done
+            sleep 12
+            bad=""
+            for f in $MINE; do
+              GOT=$(curl -sS --max-time 25 "https://cdn.jsdelivr.net/gh/$GITHUB_REPOSITORY@main/$f" 2>/dev/null \
+                    | sed -n 's/.*"version"[^"]*"\([^"]*\)".*/\1/p' | head -n1)
+              [ "$GOT" = "$VER" ] || bad="$bad $f=${GOT:-读不到}"
+            done
+            if [ -z "$bad" ]; then
+              echo "第 $i 轮：4 条通道都已刷新到 $VER"
+              ok=1; break
+            fi
+            echo "第 $i 轮：还没跟上 ——$bad（期望 $VER）"
           done
-          echo "（purge 只是刷新缓存；返回 200/404 都正常，404 表示该文件还没进 CDN）"
+          if [ "$ok" = 1 ]; then
+            echo "CDN 已刷新：用户现在检查更新就能看到 $VER"
+          else
+            echo "::warning::CDN 还没完全跟上（jsDelivr 的 main 别名缓存，最长约 12 小时自愈）。"
+            echo "  · 不影响手动下载安装（Release 页那条路不走 CDN）；"
+            echo "  · 不影响包与账本的正确性（仓库里已经是对的）。"
+          fi
