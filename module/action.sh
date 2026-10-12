@@ -37,7 +37,7 @@ echo " "
 if [ -f "$MODDIR/diag.sh" ]; then
   echo "正在生成诊断报告（一般 1~2 分钟，字体多或机型慢时更久；生成时会主动降优先级，"
   echo "所以比全速跑慢一些，但不影响你用手机）..."
-  echo "报告会保存到 Download/完整体检报告.txt（快速体检时是 快速体检报告.txt）"
+  echo "报告会保存到 Download/完整体检报告.txt"
   echo " "
   sh "$MODDIR/diag.sh" install 2>&1
   echo " "
