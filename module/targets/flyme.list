@@ -1,8 +1,9 @@
 # Flyme / 魅族 字体槽
 # 拉丁/数字/谷歌部分为标准 AOSP 命名；中文 flyme 槽为常见命名，
 # 安装时会扫描真机目录补全 FlymeSans/MeizuSans 等实际存在的文件。
-# 注意：魅族另有 /data/customizecenter/font/flymeFont.ttf 个性化字体机制，
-# 简单 system/fonts 覆盖无法接管该路径，本清单只覆盖系统字体链路。
+# 注意：魅族另有 /data/customizecenter/font/ 个性化字体机制（flymeFont.ttf 就在那里，
+# 用户在主题商店下主题时生成）。本清单只覆盖系统字体链路；那个目录由 slots.sh 的
+# theme_slots() 单独收（不按名字匹配），并且只在用户打开「也替换设置里选的字体」时才动。
 Roboto-Thin.ttf
 Roboto-ExtraLight.ttf
 Roboto-Light.ttf
