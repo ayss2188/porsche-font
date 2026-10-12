@@ -65,15 +65,27 @@ payload_mount() {
   #     合集没换不影响这次开机：本来一个槽位都没挂上，现在至少把普通字体挂上；
   #     完整的一次（含合集）由 service 阶段在开机完成后补做。
   if [ ! -s "$map" ]; then
-    local _p _pm
+    local _p _pm _ttc_prev
     _p=$(tr -d '[:space:]' 2>/dev/null < "$moddir/pending_font")
     case "$_p" in ""|none) return 0 ;; esac
     _pm=$(tr -d '[:space:]' 2>/dev/null < "$moddir/payload.mode")
     [ "$_pm" = manager ] && return 0
     [ -f "$moddir/fontctl.sh" ] || return 0
     echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 没有挂载计划（slots.map 为空），尝试重新生成（只补轻量部分，跳过合集合成）" >> "$LIB/mount.log" 2>/dev/null
-    CFS_NO_TTC=1 _to_s 20 sh "$moddir/fontctl.sh" apply "$_p" >/dev/null 2>&1
+    _ttc_prev=${CFS_NO_TTC-__unset__}
+    export CFS_NO_TTC=1
+    _to_s 20 sh "$moddir/fontctl.sh" apply "$_p" >/dev/null 2>&1
     _rc=$?
+    # 还原：不用 `CFS_NO_TTC=1 函数名` 那种写法 —— POSIX 对"赋值前缀 + 函数"的作用域
+    # 措辞是 **unspecified**（busybox ash 实测是临时的，但真机跑的是 mksh，不赌这个）。
+    # 万一它留在当前 shell，这次开机后面所有 ttc_enabled 都会判成"跳过合集"。
+    # （2026-10-11 姊妹项目同步时提出，我这边改成不依赖未定义行为）
+    if [ "$_ttc_prev" = __unset__ ]; then
+      unset CFS_NO_TTC
+    else
+      CFS_NO_TTC=$_ttc_prev
+      export CFS_NO_TTC
+    fi
     if [ ! -s "$map" ]; then
       # 退出码 124 = 被上面那个 20 秒上限掐断了
       echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 重新生成后仍然没有挂载计划（退出码 $_rc），本次不挂载（请把诊断报告发给作者）" >> "$LIB/mount.log" 2>/dev/null
