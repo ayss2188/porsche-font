@@ -20,8 +20,11 @@ ui_print "*****************************************"
 mkdir -p "$LIB"
 
 # ---------------------------------------------------------------------------
-# 内置字体：把模块自带的配色注入字体库（硬链接，同一分区不额外占空间），
+# 【重放项 4】内置字体：把模块自带的配色注入字体库（硬链接，同一分区不额外占空间），
 # 并把其它保时捷模块标记为重启后卸载（4 个包 id 各不相同，同时装会互相抢字体）
+#
+# ⚠️ 位置有讲究：必须在**恢复上次选择（fontctl.sh apply）之前**做完 ——
+#    那条路要用到字体库里的 builtin_*.ttf，注入晚了就会报"找不到字体"。
 # ---------------------------------------------------------------------------
 MODDIR="$MODPATH"                      # 注意：这是暂存目录！已安装目录是 $OLD
 if [ -f "$MODPATH/builtin.sh" ]; then
@@ -32,20 +35,34 @@ if [ -f "$MODPATH/builtin.sh" ]; then
   builtin_clean_legacy
 fi
 
+# 1.0.9：识别机型要读全部系统属性、还要找厂商目录，会花一两秒。
+#   特意把话说在前面，免得用户看管理器"卡在那儿不动"以为死机了。
+#   这一阶段等一下完全没问题 —— 它不是开机流程，不影响开机时间。
+ui_print "- 正在检测你的机型与字体配置，请稍等…"
 ROM_ID=$(detect_rom)
 ROM_NAME=$(rom_name "$ROM_ID")
 RM=$(root_manager)
 echo "$ROM_ID" > "$MODPATH/current_rom"
+ui_print "- 已识别：$ROM_NAME"
 
 # 旧版设置在模块目录里，迁移到字体库目录（以后更新不会丢）
 [ -f "$SETTINGS" ] || { [ -f "$OLD/settings.conf" ] && cp -f "$OLD/settings.conf" "$SETTINGS"; }
+
+# 注：「也替换设置里选的字体」（theme_fonts）本项目**原样跟随主项目**，不在这里写默认值。
+#     主项目 v1.0.9 的默认是 auto = 按机型自动判（_theme_auto_ok）：
+#       hyperos 先看 /data/system/theme/fonts 里有没有**可变字体**，有就不碰 ——
+#       用户在设置里选「小米兰亭 Pro」正是为了用它那条 wght 轴调粗细，
+#       而那份就是可变字体，所以自动判会放过它，「字体粗细」照常能调。
+#     2026-10-12 作者确认过这一点，并明确要求"跟着主项目走"。
+#     ⚠️ 曾经在这里写过 `cfg_set theme_fonts 0`（默认关），已按作者要求撤回。
+#        别再改回去：判据 = 主项目怎么写，本项目就怎么写。
 
 # 上次的选择：优先字体库记录，其次已安装模块的待生效记录
 LAST=$(tr -d '[:space:]' 2>/dev/null < "$LIB/last_selection")
 [ -n "$LAST" ] || LAST=$(tr -d '[:space:]' 2>/dev/null < "$OLD/pending_font")
 [ -n "$LAST" ] || LAST=none
 
-for f in common.sh slots.sh mount.sh fontctl.sh ttcwrap.sh update.sh google_font.sh action.sh \
+for f in common.sh slots.sh mount.sh fontctl.sh ttcwrap.sh update.sh google_font.sh gms_cache.sh nameclone.sh action.sh \
          diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh; do
   chmod 755 "$MODPATH/$f" 2>/dev/null
 done
@@ -74,7 +91,7 @@ if [ "$LAST" != none ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 选初始配色（音量键；只有一个配色时自动选中）
+# 【重放项 4】选初始配色（音量键；只有一个配色时自动选中）
 #
 # ⚠️ 必须在写 pending_font **之前**调用：
 #    builtin_menu 靠"已安装目录里 pending_font 是否为空"判断要不要打扰用户
@@ -86,7 +103,7 @@ if command -v builtin_menu >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# 装完自检：选了配色就必须留下挂载计划（slots.map）
+# 【重放项 4】装完自检：选了配色就必须留下挂载计划（slots.map）
 #
 # 为什么要有这一段：真机上出过一次"选了配色、也报了 OK，但 slots.map 没落盘"，
 # 结果开机后一个槽位都挂不上，界面上只写「本次开机未挂载」，用户完全不知道哪一步坏了。
@@ -178,9 +195,9 @@ GM="无"; { command -v magisk >/dev/null 2>&1 || [ -e /data/adb/magisk ]; } && G
 ui_print " "
 ui_print "- 设备：$(getprop ro.product.brand) $(getprop ro.product.model) / Android $(getprop ro.build.version.release)"
 ui_print "- 门禁速查：已禁用=$GD  待激活=$GU  安全模式=$GS  Magisk共存=$GM"
-ui_print "- 需要诊断报告时（一分钟内出结果）：在 WebUI 里点「查看诊断报告」，"
-ui_print "  或点模块卡片上的「操作」按钮（不用再手动保存，生成完会自动落到 Download）；"
-ui_print "  快速体检写到 Download/快速体检报告.txt，完整报告写到 完整体检报告.txt"
+ui_print "- 需要诊断报告时：在 WebUI 里点「查看诊断报告」，"
+ui_print "  或点模块卡片上的「操作」按钮（不用手动保存，生成完会自动存到 Download）。"
+ui_print "  报告只产出一个文件：Download/完整体检报告.txt"
 if [ -f "$MODPATH/diag.sh" ]; then
   cp -f "$MODPATH/diag.sh" /data/local/tmp/font_diag.sh 2>/dev/null
   chmod 755 /data/local/tmp/font_diag.sh 2>/dev/null
@@ -189,7 +206,7 @@ ui_print "===================================="
 ui_print "- 完成"
 
 set_perm_recursive "$MODPATH" 0 0 0755 0644
-for f in common.sh slots.sh mount.sh fontctl.sh ttcwrap.sh update.sh google_font.sh action.sh \
+for f in common.sh slots.sh mount.sh fontctl.sh ttcwrap.sh update.sh google_font.sh gms_cache.sh nameclone.sh action.sh \
          diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh; do
   set_perm "$MODPATH/$f" 0 0 0755
 done
