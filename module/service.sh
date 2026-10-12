@@ -47,6 +47,29 @@ if [ -f "$MODDIR/fontctl.sh" ] && [ ! -s "$MODDIR/slots.map" ]; then
   esac
 fi
 
+# ---------------------------------------------------------------------------
+# 谷歌字体兼容：GMS（Play 服务）被更新后会把我们对"下载字体组件"的停用**重置**掉
+# —— 表现就是用户反馈的"英数过一阵子又变回谷歌默认"。这里在开机完成后补一次。
+#
+# 为什么放在这儿、而且做得这么小心：
+#   · 只有**我们自己有记录**时才查（没开过这个功能的用户，这里一行都不跑）；
+#   · 只有"组件确实被顶回原状态 **且** GMS 的版本变大（或同版本但更新时间变新、安装路径变了）"
+#     才重新停用 —— 用户自己手动关掉的，我们不去跟他抢；
+#   · 让路：renice/ionice + 90 秒上限，绝不拖住开机（这个阶段开机已经完成了）。
+# ---------------------------------------------------------------------------
+if [ -f "$LIB/.gms_journal.conf" ] && [ -f "$MODDIR/google_font.sh" ]; then
+  beat service "谷歌字体兼容：检查是否被 GMS 更新重置"
+  command -v renice >/dev/null 2>&1 && renice 10 $$ >/dev/null 2>&1
+  [ -x /system/bin/ionice ] && /system/bin/ionice -c2 -n7 $$ >/dev/null 2>&1
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 90 sh "$MODDIR/google_font.sh" reconcile
+    [ -f "$MODDIR/gms_cache.sh" ] && timeout 90 sh "$MODDIR/gms_cache.sh" on >/dev/null 2>&1
+     >/dev/null 2>&1
+  else
+    sh "$MODDIR/google_font.sh" reconcile >/dev/null 2>&1
+  fi
+fi
+
 # 自带挂载模式下选了字体，但本次开机没有挂载记录 -> 提示用户
 # （主挂载在 post-fs-data，所以这一般意味着"Root 管理器开机时没运行模块脚本"：
 #   临时 root / 需要手动再激活一次的 root / 模块被禁用 / 安全模式）
