@@ -11,6 +11,9 @@
 #   （只是标记没删掉），这种情况绝不能误清用户的字体。
 
 MODDIR=${0%/*}
+# 商店缓存桥接：必须在 zygote 起来之前挂，应用（含商店）才看得到
+[ -f "$MODDIR/gms_cache.sh" ] && timeout 60 sh "$MODDIR/gms_cache.sh" on >/dev/null 2>&1
+
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
 [ -f "$MODDIR/mount.sh" ] && . "$MODDIR/mount.sh"
 
