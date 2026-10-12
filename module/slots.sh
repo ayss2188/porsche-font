@@ -23,29 +23,41 @@ _lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # 真实存在的字体目录（输出绝对路径，不含 FSROOT）
 # ---------------------------------------------------------------------------
 slot_dirs() {
-  local d p parent
-  {
-    for d in /system/fonts /system_ext/fonts /product/fonts /vendor/fonts /odm/fonts /oem/fonts \
-             /my_product/fonts /my_region/fonts /my_company/fonts /my_carrier/fonts /my_stock/fonts \
-             /my_heytap/fonts /my_manifest/fonts /my_bigball/fonts /mi_ext/fonts /hw_product/fonts \
-             /prism/fonts /optics/fonts /product/vivo/fonts /system_ext/vivo/fonts /vendor/vivo/fonts \
-             /oplus_product/fonts /oplus_engineering/fonts /oplus_version/fonts /oplus_region/fonts; do
-      [ -d "$FSROOT$d" ] && echo "$d"
-    done
-    # 未知厂商分区自动发现：/xxx/fonts 与 /xxx/yyy/fonts
-    for d in "$FSROOT"/*/fonts "$FSROOT"/*/*/fonts; do
-      [ -d "$d" ] || continue
-      parent=${d%/fonts}
-      [ -L "$parent" ] && continue          # /system/product 之类的符号链接，避免重复
-      p=${d#"$FSROOT"}
-      case "$p" in
-        /data/*|/sdcard/*|/storage/*|/mnt/*|/proc/*|/sys/*|/dev/*|/apex/*|/linkerconfig/*|\
-        /config/*|/metadata/*|/cache/*|/acct/*|/debug_ramdisk/*|/second_stage_resources/*|\
-        /system/etc/*|/system/usr/*|/system/app/*|/system/priv-app/*) continue ;;
-      esac
-      echo "$p"
-    done
-  } | sort -u
+  # ★ 1.0.9.2：**加进程内缓存**（SLOT_DIRS_CACHE）。
+  #   这个函数每次调用都要遍历所有分区、用 glob 找 `*/fonts` 目录
+  #   （`"$FSROOT"/*/fonts "$FSROOT"/*/*/fonts`）。而它在一次运行里被调用 **6 次以上**
+  #   （slot_candidates、slot_scan_candidates、slot_plan、报告第 5 节、字体目录映射…）。
+  #   "设备上有哪些字体目录"在一次运行内不会变 —— 重复扫描纯属浪费，
+  #   在真机（分区多、目录多）上尤其明显。这是第 1 步里最容易被忽略的一块固定开销。
+  if [ -n "${SLOT_DIRS_CACHE+x}" ]; then
+    printf '%s\n' "$SLOT_DIRS_CACHE" | grep -v '^[[:space:]]*$'
+    return 0
+  fi
+  SLOT_DIRS_CACHE=$(
+    {
+      for d in /system/fonts /system_ext/fonts /product/fonts /vendor/fonts /odm/fonts /oem/fonts \
+               /my_product/fonts /my_region/fonts /my_company/fonts /my_carrier/fonts /my_stock/fonts \
+               /my_heytap/fonts /my_manifest/fonts /my_bigball/fonts /mi_ext/fonts /hw_product/fonts \
+               /prism/fonts /optics/fonts /product/vivo/fonts /system_ext/vivo/fonts /vendor/vivo/fonts \
+               /oplus_product/fonts /oplus_engineering/fonts /oplus_version/fonts /oplus_region/fonts; do
+        [ -d "$FSROOT$d" ] && echo "$d"
+      done
+      # 未知厂商分区自动发现：/xxx/fonts 与 /xxx/yyy/fonts
+      for d in "$FSROOT"/*/fonts "$FSROOT"/*/*/fonts; do
+        [ -d "$d" ] || continue
+        parent=${d%/fonts}
+        [ -L "$parent" ] && continue          # /system/product 之类的符号链接，避免重复
+        p=${d#"$FSROOT"}
+        case "$p" in
+          /data/*|/sdcard/*|/storage/*|/mnt/*|/proc/*|/sys/*|/dev/*|/apex/*|/linkerconfig/*|\
+          /config/*|/metadata/*|/cache/*|/acct/*|/debug_ramdisk/*|/second_stage_resources/*|\
+          /system/etc/*|/system/usr/*|/system/app/*|/system/priv-app/*) continue ;;
+        esac
+        echo "$p"
+      done
+    } | sort -u
+  )
+  printf '%s\n' "$SLOT_DIRS_CACHE" | grep -v '^[[:space:]]*$'
 }
 
 # ---------------------------------------------------------------------------
@@ -135,13 +147,21 @@ ttc_cn_indices() {
   pairs=$(ttc_cn_pairs 2>/dev/null | awk -v f="$want" '$1 == f { print $3 ":" $2 }' | sort -u)
   if [ -n "$pairs" ]; then
     TTC_CN_SRC="xml"     # 依据：字体配置里的 zh-* 引用
-    # 「保留繁体」开着（默认）时**不动繁体那一号**：用户的字体常缺繁体字形，换了就变方块。
-    # 这和 .ttf 槽位的语义保持一致（那边繁体槽位也是保留的，以前合集这条漏了）。
+    # 繁体那一号要不要跳过 —— 1.0.8 起按"用户有没有自己调过 + 字体有没有繁体字形"判：
+    #   · 用户自己调过 keep_lang  → 完全按他的（1=保留繁体 / 0=连繁体一起换）
+    #   · 没调过 → 看字体 meta：没有繁体字形（hant=0）就跳过繁体那一号（免得变方块），有就一起换
     # 例外：如果这个合集**只**被繁中引用（纯繁体用户），就照换 —— 否则中文一点都不会变。
-    if [ "$(cfg_get keep_lang 1)" = 1 ]; then
+    _skip_hant=0
+    _kl_user=$(sed -n 's/^keep_lang=//p' "$SETTINGS" 2>/dev/null | tail -n1 | tr -d '\r\n')
+    if [ -n "$_kl_user" ]; then
+      [ "$_kl_user" = 1 ] && _skip_hant=1
+    else
+      _meta_have hant || _skip_hant=1
+    fi
+    if [ "$_skip_hant" = 1 ]; then
       hans=$(printf '%s\n' "$pairs" | grep -vi 'hant\|bopo')
       if [ -n "$hans" ]; then
-        TTC_CN_DETAIL="$(printf '%s' "$pairs" | tr '\n' ' ')（已按「保留繁体」跳过繁体那一号）"
+        TTC_CN_DETAIL="$(printf '%s' "$pairs" | tr '\n' ' ')（已跳过繁体那一号：你的字体没有繁体字形）"
         pairs="$hans"
       fi
     fi
@@ -184,6 +204,80 @@ _trim() {
   while case "$s" in ' '*) true ;; *) false ;; esac; do s=${s# }; done
   while case "$s" in *' ') true ;; *) false ;; esac; do s=${s% }; done
   TRIM_OUT="$s"
+}
+
+# ---------------------------------------------------------------------------
+# 【1.0.9 新增】自适应扫描：从**设备自己的字体配置**挖出"哪种语言用哪个字体文件"
+#
+# 为什么需要（作者要求）：
+#   作者手上只有小米机器，适配别的机型全靠别人的真机报告。诊断报告**最核心的价值**
+#   就是回答"他这台系统的字体到底靠什么生效"。以前这条信息散在第 5/6 节的原始 XML 里，
+#   得人肉去读；这一版直接把它整理成"语言 → 字体文件"的清单。
+#
+#   另外：**角色判定必须看配置里的语言标签**，不能看文件名。
+#   实测教训：UnknownHant-Regular.ttf 这种名字一眼能看出是繁体，但真实机型上
+#   中文主字体常常叫 SysSans-Hans-Regular.ttf / VivoFont.ttf / SECCJK-Regular.ttc ——
+#   文件名里根本没有 hans/hant/kana 这些字样，猜不出来。配置里的 lang="zh-Hans" 才是实锤。
+#
+# 输出（每行）："<角色> <文件名> <语言标签>"，角色由 family 的 lang 决定：
+#   lang 含 zh-Hant/zh-Bopo/zh-HK/zh-TW/zh-MO → lang   （繁体那份，归"保留日韩等文字"管）
+#   lang 含 zh                                 → cjk    （简中 / CJK 主字体）
+#   lang 含 ja                                 → kana   （日文）
+#   lang 含 ko                                 → hangul （韩文）
+#   lang 为空                                  → main   （无语言的通用主字体）
+#   lang 含 en / und-Latn                      → latin  （拉丁）
+#   其它语言（阿拉伯、泰文、天城文…）           → 跳过   （不归我们碰）
+#   family 名带 Emoji/Symbol/Clock/Serif…      → 跳过   （装饰/符号，_xml_family_ok 挡掉）
+# 性能：整份 XML 只起 2 个进程（tr + sed），结果在同一进程里缓存（SCAN_NAMES_CACHE）。
+# ---------------------------------------------------------------------------
+slot_scan_names() {
+  local x fam hdr body rest name n l role
+  if [ -z "${SCAN_NAMES_CACHE+x}" ]; then
+    SCAN_NAMES_CACHE=$(
+      for x in $(slot_xml_files); do
+        [ -f "$x" ] || continue
+        tr '\n\r\t' '   ' 2>/dev/null < "$x" | sed 's/<family/\n<family/g' \
+          | while IFS= read -r fam || [ -n "$fam" ]; do
+              case "$fam" in '<family'*) ;; *) continue ;; esac
+              hdr=${fam%%>*}
+              n=""; l=""
+              case "$hdr" in *' name="'*) n=${hdr#*' name="'}; n=${n%%\"*} ;; esac
+              case "$hdr" in *' lang="'*) l=${hdr#*' lang="'}; l=${l%%\"*} ;; esac
+              # 装饰/符号/等宽/衬线这类不碰（和主文字族同一套判定）
+              _xml_family_ok "$n" "" || continue
+              # ★ 按"配置里的语言标签"定角色（这是实锤；文件名只能算线索，见上面说明）
+              l=$(_lc "$l")
+              case "$l" in
+                *zh-hant*|*zh-bopo*|*zh-hk*|*zh-tw*|*zh-mo*) role=lang ;;
+                *zh*)                                          role=cjk ;;
+                *ja*)                                          role=kana ;;
+                *ko*)                                          role=hangul ;;
+                "")                                            role=main ;;
+                *en*|*und-latn*)                               role=latin ;;
+                *)                                             role="" ;;   # 其它语言：不碰
+              esac
+              [ -n "$role" ] || continue
+              body=${fam#*>}
+              rest=$body
+              while :; do
+                case "$rest" in
+                  *'>'*'<'*) ;;
+                  *) break ;;
+                esac
+                rest=${rest#*>}
+                name=${rest%%<*}
+                rest=${rest#*<}
+                _trim "$name"; name="$TRIM_OUT"
+                case "$name" in *.[Tt][Tt][Ff]|*.[Oo][Tt][Ff]) ;;
+                  *) continue ;;
+                esac
+                printf '%s %s %s\n' "$role" "${name##*/}" "${l:-und}"
+              done
+            done
+      done | sort -u
+    )
+  fi
+  printf '%s\n' "$SCAN_NAMES_CACHE" | grep -v '^[[:space:]]*$'
 }
 
 # 从 XML 里取主文字族引用的字体文件名
@@ -307,9 +401,74 @@ _role_set() {
 # 对外接口：输入原始文件名，输出角色
 slot_role() { _role_set "$(_lc "$1")"; echo "$ROLE"; }
 
+# ---------------------------------------------------------------------------
+# 自动让路（2026-10-12 新增）—— 1.0.8 的核心
+#
+# 背景：以前"日文/韩文/繁体"和"时钟/斜体/衬线"默认**保留系统字体**，理由是"怕用户字体缺字形"。
+#   但作者指出：**用户装了字体就是想全变**，默认保守反而让人以为"模块没生效"；
+#   而"缺字形"这件事**导入时就已经测出来了**（界面用 JS 探针把 latin/cjk/hant/kana/hangul
+#   写进 $LIB/<id>.meta），根本不用等用户看到方块再回来关开关。
+#
+# 所以改成：**默认全替换**；只有"字体确实没有那一类字形"时，才**自动**把那部分留给系统字体。
+#   · meta 说没有韩文     → 韩文槽位自动保留（不会造方块）
+#   · meta 说都有         → 全部替换（用户要的"全局生效"）
+#   · 老字体没有 meta     → 保守保留（宁可少换，也不给用户造方块）
+# 用户不需要懂这些；报告里会写清"哪些没换、因为你的字体没有那些字形"。
+# ---------------------------------------------------------------------------
+_meta_have() {   # $1=latin|cjk|hant|kana|hangul  → 0=可以换（有字形，或未知）/ 1=字体确实没有
+  local k="$1" id v
+  case "$k" in latin|cjk|hant|kana|hangul) ;; *) return 0 ;; esac
+  [ -n "${LIB:-}" ] || return 0
+  # 选中的字体：优先用外面传进来的（make_plan 会设），否则读 pending_font（开机脚本也用得上）
+  id="${SEL_FONT:-}"
+  [ -n "$id" ] || id=$(tr -d '[:space:]' 2>/dev/null < "${MODDIR:-}/pending_font")
+  case "$id" in ""|none) return 0 ;; esac
+  id=${id%%+*}                       # 组合字体（a+b）取主字体做判定
+  # 没有元数据（老字体、导入时没测到）→ 按"有"处理、照换。
+  #   为什么不保守：保守会让用户看到"某处永远不变"，那正是作者最烦的现象；
+  #   而"字体确实缺字形"的情况正常都会被 meta 记下来（hangul=0 这种），不会走到这里。
+  [ -f "$LIB/$id.meta" ] || return 0
+  v=$(sed -n "s/^$k=//p" "$LIB/$id.meta" 2>/dev/null | tail -n1 | tr -d '\r\n')
+  case "$v" in
+    1) return 0 ;;                   # 有 → 可以替换
+    *) return 1 ;;                   # 0 或空 → 让路
+  esac
+}
+
+# 某个槽位需要哪一类字形（用文件名判，够稳且不依赖文件名之外的任何东西）
+#   hangul 韩文 / kana 日文假名 / hant 繁体 / cjk 其它中文（含简体、没写明语言的 CJK 槽）
+_slot_script() {
+  case "$1" in
+    *[Kk]orean*|*[Hh]angul*|*[Kk]ore*)                  echo hangul ;;
+    *[Jj]apan*|*[Kk]ana*)                              echo kana ;;
+    *[Tt][Cc][Vv][Ff]*|*[Tt]raditional*|*[Bb]ig5*)  echo hant ;;
+    *[Ss]erif[Cc][Jj][Kk]*|*[Cc][Jj][Kk]*)              echo cjk ;;
+    *) echo "" ;;
+  esac
+}
+
 # 该角色在当前设置下是否参与替换
+#
+# ★ 1.0.9 简化（作者定的）★
+#   取消「保留日文/韩文/繁体」与「保留时钟/等宽/斜体」两个开关 —— **默认全部替换**，
+#   不给开关、也不再"按字形自动让路"。作者原话："默认就替换这些，不管他是不是方块；
+#   如果有方块，那可能是字体没有这些东西 —— 但现在大家导入的字体一般都正常。"
+#   少一个开关 = 少一个"用户不知道该不该开"的坑，也才真正是"全局生效"。
+#   缺字形这件事**报告里会说清**（第 0 节列出"哪种语言没换、为什么"），不靠开关兜底。
+#
+#   唯一保留的**极端保护**在 slot_plan 里：字体完全没有中文字形时中文槽位不动 ——
+#   否则整个界面全变方块，用户连 WebUI 都看不清、没法换回来。
+#   （参数 keep_lang / keep_special 保留只为兼容旧调用方，本函数不再使用它们。）
 _role_wanted() {
-  local role="$1" scope="$2" keep_lang="$3" keep_special="$4"
+  local role="$1" scope="$2" keep_lang="$3" keep_special="$4" name="${5:-}"
+  # ★ 极端保护（唯一的保留规则）：字体完全没有中文字形 → **除符号槽外一律不换**。
+  #   为什么必须管住 main/latin 这些"看着跟中文无关"的角色：
+  #     · 很多设备的通用主字体族（无语言的 <family>）**本身就是渲染中文的那个族**；
+  #     · 一旦换掉，整个界面（连 WebUI 自己）会变方块，用户连「换回无字体」都点不到。
+  #   所以这条是"整体不换"，不是"只不换中文槽"。正常字体（有中文字形）不会命中，一律全替换。
+  if [ "${CJK_GUARD:-0}" = 1 ]; then
+    return 1
+  fi
   case "$role" in
     # ttc = .ttc 合集槽位（三星简中这类）。合集里同时装着 ja/ko/zh 好几套字形，
     # 只有用户选的是"中英文/全覆盖"字体时替换才合理，所以限定 scope=all。
@@ -318,18 +477,259 @@ _role_wanted() {
       return 0 ;;
     sym) return 1 ;;
     lang)
-      # 其他文字体系只在"全部范围 + 明确关闭保留"时才会被替换（字体需自带这些文字）
-      [ "$keep_lang" = 1 ] && return 1
       [ "$scope" = all ] || return 1
       return 0 ;;
     italic|serif|mono|clock|display)
-      [ "$keep_special" = 1 ] && return 1 ;;
+      : ;;    # 1.0.9：不再有"保留特殊槽"开关 —— 直接参与替换
   esac
   case "$scope" in
     latin) case "$role" in latin|italic|serif|mono|clock|display) return 0 ;; esac; return 1 ;;
     cjk)   [ "$role" = cjk ] && return 0; return 1 ;;
     *)     return 0 ;;
   esac
+}
+
+# ---------------------------------------------------------------------------
+# 【1.0.9 新增】扫描来的候选：把 slot_scan_names 的结果跟"设备上真实存在的文件"配对
+# 输出与 slot_candidates 同格式："角色 目录 文件名"
+# 规则（保守，避免乱换）：
+#   · 依赖设备自己的字体配置（有引用才认），不靠猜
+#   · 排除 Emoji/符号/纯图标字体（_role_set 已经判成 sym 的跳过）
+#   · 只输出"配置引用了、且文件确实在某个字体目录里"的项
+# ---------------------------------------------------------------------------
+slot_scan_candidates() {
+  local role name lang l d dirs
+  dirs=$(slot_dirs)
+  # ⚠ 必须读三个字段：slot_scan_names 每行是 "角色 文件名 语言标签"。
+  #   只写 `read -r role name` 的话，sh 会把**剩下的整段**塞进最后一个变量
+  #   （name 变成 "UnknownHangul-Regular.ttf ko"），后缀判定随即失败 → 整个函数什么都不输出。
+  #   这个坑很难看出来，改输出格式时务必同步改这里。
+  slot_scan_names | while IFS=' ' read -r role name lang; do
+    [ -n "$role" ] && [ -n "$name" ] || continue
+    case "$name" in *'*'*) continue ;; esac
+    l=$(_lc "$name")
+    case "$l" in *.ttf|*.otf) ;; *) continue ;; esac
+    # 名字看着是符号/表情的，绝不换（换了就是满屏怪符号）
+    # 注：这里写成 if 而不是 `[ ... ] && continue`，纯粹是为了可读性与稳妥 ——
+    #     本次真正的 bug 在下面 read 的字段数上（见函数开头注释）。
+    _role_set "$l"
+    if [ "$ROLE" = sym ]; then continue; fi
+    for d in $dirs; do
+      [ -f "$FSROOT$d/$name" ] && printf '%s %s %s\n' "$role" "$d" "$name"
+    done
+  done
+}
+
+# 从扫描结果里查某个文件的"确定性脚本"（配置里的语言标签 → 脚本）
+#   输出：cjk / kana / hangul / hant / ""（空 = 配置没说，或这文件不在配置里）
+#   为什么不用文件名猜：真机上中文主字体常叫 SysSans-Hans-Regular.ttf / VivoFont.ttf /
+#   SECCJK-Regular.ttc，文件名里没有 hans/hant 字样 —— 配置里的 lang 才是实锤。
+_scan_script_of() {
+  local want="$1"
+  [ -n "${SCAN_NAMES_CACHE+x}" ] || slot_scan_names >/dev/null 2>&1
+  # ★ 1.0.9.2：**先把"文件名→脚本"建成一张内存表**，之后纯内存查。
+  #   原来这里是 `printf '%s\n' "$SCAN_NAMES_CACHE" | while read ...` ——
+  #   每调用一次就起一个子 shell 管道、再逐行比对。而它被**每个候选各调一次**
+  #   （作者机器 75 个候选 → 75 个子 shell + 75×N 次字符串比较），
+  #   在手机上这是 sec0（报告第 0 节）里最贵的一块。
+  #   现在：建表只做一次（SCAN_SCRIPT_MAP，进程内缓存），查询是纯 shell 模式匹配、不起进程。
+  if [ -z "${SCAN_SCRIPT_MAP+x}" ]; then
+    SCAN_SCRIPT_MAP=$(printf '%s\n' "$SCAN_NAMES_CACHE" | while IFS=' ' read -r _sr _sn _sl; do
+      [ -n "$_sn" ] || continue
+      case "$_sr:$_sl" in
+        cjk:*)             _ss=cjk ;;
+        kana:*)            _ss=kana ;;
+        hangul:*)          _ss=hangul ;;
+        lang:*zh-hant*|lang:*zh-bopo*|lang:*zh-hk*|lang:*zh-tw*|lang:*zh-mo*) _ss=hant ;;
+        lang:*)            _ss=lang ;;
+        *)                 _ss="" ;;
+      esac
+      [ -n "$_ss" ] && printf '|%s=%s' "$_sn" "$_ss"
+    done)
+  fi
+  case "$SCAN_SCRIPT_MAP" in
+    *"|$want="*) _SS_T=${SCAN_SCRIPT_MAP#*"|$want="}; printf '%s' "${_SS_T%%|*}" ;;
+    *)           printf '%s' "" ;;
+  esac
+}
+
+# 某个角色在候选里已经有几个（用来决定"要不要用扫描结果补"）
+# 用 grep 数"以该角色开头的行"，精确且不受文件名里出现同名字符串干扰
+_role_count() {
+  printf '%s\n' "$CANDS_TMP" | grep -c "^$1 " 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# 【1.0.9 新增】解释"某个槽位为什么没进计划"（进报告第 0 节）
+#
+# 目的：让作者**只看报告**就能定位问题，不用来回问用户。
+#   以前报告只说"在/不在计划里"，看不出是"用户关了开关"还是"字体缺字形自动让路"——
+#   这两种原因的修法完全相反（一个让用户开开关，一个要让用户换字体）。
+#
+# 判定用的就是**真实计划逻辑**（_role_wanted + _meta_have），不是另写一套猜的。
+# 输出：一句能直接给用户看的话。
+# ---------------------------------------------------------------------------
+slot_why() {   # $1=角色 $2=文件名 $3=scope $4=keep_lang $5=keep_special
+  local role="$1" name="$2" scope="$3" kl="$4" ks="$5" script
+  # ① 先看"角色开关"放不放它（这一步和计划完全一致）
+  if ! _role_wanted "$role" "$scope" "$kl" "$ks" "$name"; then
+    case "$role" in
+      lang)
+        case "$(_slot_script "$name")" in
+          kana)   echo "被保留：开了「保留日文」，日文继续用系统字体" ;;
+          hangul) echo "被保留：开了「保留韩文」，韩文继续用系统字体" ;;
+          hant)   echo "被保留：开了「保留繁体」，繁体继续用系统字体" ;;
+          *)      echo "被保留：「保留日文/韩文/繁体」开着" ;;
+        esac ;;
+      clock) echo "被保留：开了「保留时钟/等宽/斜体等特殊槽」" ;;
+      mono)  echo "被保留：开了「保留等宽槽」（终端那类）" ;;
+      italic) echo "被保留：开了「保留斜体槽」" ;;
+      serif) echo "被保留：开了「保留衬线槽」" ;;
+      ttc)   echo "被保留：「替换 .ttc 合集」没打开（这类机型的中文在合集里）" ;;
+      sym)   echo "刻意不动：符号/表情字体换了会显示异常" ;;
+      *)     echo "被保留：不在本次替换范围（范围=$scope）" ;;
+    esac
+    return 0
+  fi
+  # ② 角色开关放行 → 那就是"自动让路"按字形挡住了（字体没有这类字形）
+  script=$(_slot_script "$name")
+  [ -n "$script" ] || script=$(_scan_script_of "$name")
+  case "$script" in
+    kana|hangul|hant|cjk)
+      echo "自动让路：你的字体里没有「$script」这类字形，这处留给系统字体（避免方块）" ;;
+    "") echo "不在计划里（角色开关放行了，但计划里没有它 —— 请把这份报告发给作者）" ;;
+    *)  echo "不在计划里（脚本=$script）" ;;
+  esac
+}
+#
+# 这是作者最需要的一段：他只有小米机器，适配别的机型全靠别人的报告。
+# 以前"这台系统靠什么生效"要人肉去读第 6 节的原始 fonts.xml；现在直接列出来。
+# 输出（每行）："zh-Hans|中文简体|SysSans-Hans-Regular.ttf|在计划里/不在计划里|理由"
+# ---------------------------------------------------------------------------
+slot_scan_report() {
+  local role name lang label plan why base_l
+  local base="${1:-}" scope="${2:-all}" kl="${3:-0}" ks="${4:-0}"
+  # ★★ 1.0.9.2 第三次提速（真机实测这一节 253 秒 → 目标几秒）：
+  #   原因：这一节对**每个**"不替换"的字体都调一次 `slot_why`，而 slot_why 里又有
+  #   `$(...)` 形式的子进程（_slot_script / _scan_script_of 各一次）。
+  #   作者机器上配置引用 279 个字体 → **500 多个进程**，每个进程在手机上要排队几十毫秒
+  #   —— 累起来就是 250 秒。
+  #   现在：**整节不起任何子进程**：判定和理由全部用纯 shell 的 case 完成。
+  #
+  # ① 计划表（一次建好）
+  if [ -z "${PLAN_NAME_MAP+x}" ]; then
+    PLAN_NAME_MAP=$(printf '%s\n' "$base" | while IFS= read -r _pl; do
+      [ -n "$_pl" ] || continue
+      _pn=${_pl##*/}
+      [ -n "$_pn" ] && printf '|%s|' "$_pn"
+    done)
+  fi
+  # ② 脚本表（文件 → 文字体系），一次建好，查询纯匹配
+  if [ -z "${SCAN_SCRIPT_MAP+x}" ]; then
+    printf '%s\n' "$SCAN_NAMES_CACHE" | while IFS=' ' read -r _sr _sn _sl; do
+      [ -n "$_sn" ] || continue
+      case "$_sr:$_sl" in
+        cjk:*)             _ss=cjk ;;
+        kana:*)            _ss=kana ;;
+        hangul:*)          _ss=hangul ;;
+        lang:*zh-hant*|lang:*zh-bopo*|lang:*zh-hk*|lang:*zh-tw*|lang:*zh-mo*) _ss=hant ;;
+        lang:*)            _ss=lang ;;
+        *)                 _ss="" ;;
+      esac
+      [ -n "$_ss" ] && printf '|%s=%s' "$_sn" "$_ss"
+    done > "${TMPD:-/data/local/tmp}/.scanmap.$$" 2>/dev/null
+    SCAN_SCRIPT_MAP=$(cat "${TMPD:-/data/local/tmp}/.scanmap.$$" 2>/dev/null)
+    rm -f "${TMPD:-/data/local/tmp}/.scanmap.$$" 2>/dev/null
+  fi
+  printf '%s\n' "$SCAN_NAMES_CACHE" | while IFS=' ' read -r role name lang; do
+    [ -n "$name" ] || continue
+    case "$lang" in
+      zh-hans|zh-hans-cn) label="中文（简体）" ;;
+      zh-hant|zh-hant-tw|zh-hant-hk|zh-bopo) label="中文（繁体）" ;;
+      ja)   label="日文" ;;
+      ko)   label="韩文" ;;
+      und|"") label="通用（无语言）" ;;
+      *)    label="$lang" ;;
+    esac
+    # 在不在计划里：两次短模式匹配（纯 shell，零进程）
+    case "$PLAN_NAME_MAP" in
+      *"|$name|"*) _inplan=1 ;;
+      *)           _inplan=0 ;;
+    esac
+    if [ "$_inplan" = 1 ]; then
+      plan="✅ 会替换" ; why="—"
+    else
+      plan="❌ 不替换"
+      # ---- 以下替代 slot_why：全部纯 shell，零子进程 ----
+      # 先看角色放不放行
+      _rw=1
+      case "$role" in
+        sym) _rw=0 ;;                                   # 符号/emoji 刻意不动
+        ttc|lang) [ "$scope" = all ] || _rw=0 ;;
+      esac
+      case "$scope" in
+        latin) case "$role" in latin|italic|serif|mono|clock|display) ;; *) _rw=0 ;; esac ;;
+        cjk)   [ "$role" = cjk ] || _rw=0 ;;
+      esac
+      if [ "$_rw" = 0 ]; then
+        case "$role" in
+          sym)   why="刻意不动：符号/表情字体换了会显示异常" ;;
+          ttc)   why="被保留：替换范围不是 all（合集槽只在全替换时参与）" ;;
+          lang)  why="被保留：这个角色只在「全替换」时参与" ;;
+          *)     why="被保留：不在本次替换范围（范围=$scope）" ;;
+        esac
+      else
+        # 角色放行了却不在计划里 → 看它的文字体系，给出原因
+        _ss=""
+        case "$SCAN_SCRIPT_MAP" in
+          *"|$name="*) _ss=${SCAN_SCRIPT_MAP#*"|$name="}; _ss=${_ss%%|*} ;;
+        esac
+        case "$_ss" in
+          kana|hangul|hant|cjk) why="不在计划里（脚本=$_ss，可能是该字体没被模板覆盖到最后一步" ;;
+          "")                   why="不在计划里（角色放行了，但计划里没有它 —— 请把这份报告发给作者）" ;;
+          *)                    why="不在计划里（脚本=$_ss）" ;;
+        esac
+      fi
+    fi
+    printf '%-9s %-13s %-40s %-9s %s\n' "$lang" "$label" "$name" "$plan" "$why"
+  done | sort -u
+}
+
+# ---------------------------------------------------------------------------
+# 【1.0.9 新增】自适应补齐：只用**确定性信息**补，不做任何猜测
+#
+# 判定分两层：
+#   ① 角色层（cjk / kana / hangul / hant）：模板一路完全没覆盖到才补。
+#      补进来的是"设备自己的配置里、带对应语言标签的字体文件"。
+#   ② 脚本层（同一个槽位由几个脚本共用时的去重）：也用配置里的语言标签，
+#      而不是文件名 —— 这样 SysSans-Hans-Regular.ttf 这种"名字看不出来"的中文槽位
+#      也能被正确识别。
+#
+# 保守原则：**只补空缺，绝不动模板已经管到的角色**。
+#   模板命中的那些是"这个机型真正的主字体"，优先级高于"配置里引用到的一切"；
+#   无脑全加会把装饰字体、地区专用字体一起换掉 —— 那不是自适应，是乱来。
+# ---------------------------------------------------------------------------
+slot_adaptive_extra() {
+  local base="$1" role n scan
+  CANDS_TMP="$base"
+  # ★ 1.0.9.2：**用调用方已经算好的候选，别再自己算一遍**。
+  #   原来这里 `scan=$(slot_scan_candidates)` —— 而调用它的 slot_plan 前面刚做过
+  #   `CAND_RAW=$(slot_candidates ...)`，两者都要解析全部字体配置 + 逐文件判定，
+  #   等于**同一件重活干两遍**（作者机器上 C4「算槽位计划」28 秒，P2「候选枚举」只要 1 秒，
+  #   差的这一段主要就是这次重复计算）。
+  #   现在：base 非空时直接用；为空才回退去算（保持兼容旧调用方）。
+  # ⚠️ 本项目差异（重放项 6）：兜底路径**不能写死主项目的 id** ——
+  #    保时捷这边 4 个包 id 是 porsche_font_multi/_718/_911/_gt3。
+  #    正常调用方（slot_plan）一定会传 base，所以这行基本走不到；
+  #    但走不到不代表可以写错：真走到时它会去找一个不存在的目录 → 候选为空 → 静默少换。
+  [ -n "$base" ] || base=$(slot_candidates "${MODDIR:-/data/adb/modules/porsche_font_multi}")
+  scan="$base"
+  [ -n "$scan" ] || return 0
+  for role in cjk kana hangul lang hant; do
+    n=$(_role_count "$role")
+    [ "$n" -gt 0 ] && continue          # 这个角色模板已经管到了 → 不补
+    printf '%s\n' "$scan" | grep "^$role " 2>/dev/null
+  done | sort -u
 }
 
 # ---------------------------------------------------------------------------
@@ -370,6 +770,7 @@ slot_candidates() {
   fi
 }
 
+
 # ---------------------------------------------------------------------------
 # 生成槽位计划
 # ---------------------------------------------------------------------------
@@ -391,10 +792,81 @@ slot_candidates() {
 #       「字体粗细」直接调不动了（真机反馈："小米兰亭pro 已经字体都不生效了"）
 #     · 挂载落在**符号链接**上本身也不可靠（同一台机器上"实际生效"校验会少一个）
 #   所以改成可选：界面上的「也替换设置里选的字体」开关，默认关。
+# 某个目录里有没有"可变字体"（带 fvar 轴的表）—— 小米那台用于调「字体粗细」的就是它。
+# 只看文件头部的表目录（前 4KB），不做全文件扫描：够用且快。
+_has_varfont() {
+  local d="$1" f
+  for f in "$FSROOT$d"/*.ttf "$FSROOT$d"/*.otf "$FSROOT$d"/*.TTF "$FSROOT$d"/*.OTF; do
+    [ -f "$f" ] || continue
+    case "${f##*/}" in *'*') continue ;; esac
+    if head -c 4096 "$f" 2>/dev/null | grep -qa 'fvar'; then return 0; fi
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# 1.0.8：主题字体目录（"设置里选的那个字体"）要不要一起替换 —— **自动判，不要用户操心**
+#
+# 为什么删掉那个开关：实测那个开关是"静默空转" —— theme_slots 只挑「名字和系统槽位完全相同」
+#   的文件，而各家目录里常常是 flymeFont.ttf、MiuiEx-*.ttf 这类对不上的名字，开关开着也什么都不做，
+#   用户还以为"多挂了一个目录"。改成按机型/按事实自动判，判不出来就**不动**（保守）。
+#
+# 判据（全部来自真机报告，见 跨项目同步表 10.41 / 1.0.8-设计稿 第六节）：
+#   flyme    /data/customizecenter/font  → 无条件的"主题字体"，一起换（魅族那台已验证）
+#   hyperos  /data/system/theme/fonts    → ★ 先看有没有**可变字体**：
+#                                          有 → 那是用户拿来调「字体粗细」的，**不碰**（真机教训）
+#                                          没有 → 一起换
+#   samsung  /data/overlays/font         → 一起换
+#   originos /data/vfonts                → 一起换（VivoFont.ttf 是指向它的符号链接，会挂真身）
+#   其它/判不出                            → **不动**
+# ---------------------------------------------------------------------------
+_theme_auto_ok() {
+  local rom d
+  rom=$(_rom_cached)
+  case "$rom" in
+    flyme)
+      [ -d "$FSROOT/data/customizecenter/font" ] && return 0
+      return 1 ;;
+    hyperos)
+      d=/data/system/theme/fonts
+      [ -d "$FSROOT$d" ] || return 1
+      _has_varfont "$d" && return 1      # 有可变字体 → 尊重用户在设置里调的粗细，不动
+      return 0 ;;
+    samsung)
+      [ -d "$FSROOT/data/overlays/font" ] && return 0
+      return 1 ;;
+    originos)
+      [ -d "$FSROOT/data/vfonts" ] && return 0
+      return 1 ;;
+  esac
+  return 1
+}
+
 theme_slots() {
   local base="$1" names d tdir f n real
   [ "$(mount_mode 2>/dev/null)" = manager ] && return 0
-  [ "$(cfg_get theme_fonts 0)" = 1 ] || return 0
+  # 1.0.8：不再要用户点开关 —— 按机型**自动判**。三条路：
+  #   theme_fonts=1 / 0  ：用户在界面上手动指定过，照办
+  #   未设置（默认）      ：自动 —— 见下面 _theme_auto_ok
+  #
+  # ★ 本项目（保时捷字体）**原样跟随主项目**，不改成"默认关"★
+  #   （2026-10-12 作者确认：主项目新版这套判据不影响「字体粗细」，跟着走即可）
+  #
+  #   为什么不影响粗细 —— 关键在 hyperos 那一支：
+  #     _theme_auto_ok 里 hyperos 会先查 /data/system/theme/fonts 里**有没有可变字体**，
+  #     有就 return 1（不碰）。用户在「设置 → 字体样式」里选「小米兰亭 Pro」这类字体，
+  #     正是为了用它那条 wght 轴调粗细 —— 而那份就是可变字体，所以自动判**会放过它**，
+  #     粗细照常能调。真正会被一起换的，是"设置里选了个静态字体"的机器，
+  #     那种情况本来也没有轴可调，不存在"换掉就调不动"。
+  #   另外本模块自带的三套配色本身就是同一套可变字体（vf=1），
+  #   所以"换上去的那份有没有轴"这件事不会成为变量。
+  #   ⚠️ 曾经把这里改成"默认关"（理由是 v3.5 的旧承诺），作者明确要求跟随主项目后已撤回。
+  #      别再改回去 —— 判据 = 主项目怎么写，本项目就怎么写。
+  case "$(cfg_get theme_fonts auto)" in
+    1) ;;
+    0) return 0 ;;
+    *) _theme_auto_ok || return 0 ;;
+  esac
   names=$(printf '%s\n' "$base" | while read -r _r _p; do
             [ -n "$_p" ] || continue
             printf '%s\n' "${_p##*/}"
@@ -404,6 +876,7 @@ theme_slots() {
   #   data/system/theme/fonts  MIUI / HyperOS
   #   data/overlays/font       三星
   #   data/vfonts              vivo —— /system/fonts/VivoFont.ttf 就是指向这里的**符号链接**
+  #   data/customizecenter/font  魅族 Flyme —— ★ 这一家是**不按名字匹配**的，见下面 datafont_any
   for d in data/system/theme/fonts data/overlays/font data/vfonts; do
     tdir="$FSROOT/$d"
     [ -d "$tdir" ] || continue
@@ -433,13 +906,62 @@ theme_slots() {
       esac
     done
   done
+  # ---------------------------------------------------------------------------
+  # 魅族 Flyme：/data/customizecenter/font/ —— **不按名字匹配**
+  #
+  # 为什么单独写一段：用户报告里这个文件叫 flymeFont.ttf（18 位十六进制前缀的
+  # f1791638786.ttf 那种名字根本对不上），而且系统字体目录里**没有**任何同名槽位，
+  # 上面那套"名字要相同"的规则在这里永远不会命中。
+  # 真机依据（Redmi M098FE / Flyme 12.6 / Android 16，2026-10-12 报告）：
+  #   · 用户在主题商店下了免费主题（设置里 using_font_name=静静字体）→ 这个文件就出现了；
+  #   · 同一时刻 /system/fonts 里 FlymeSansVF.ttf、Roboto-Regular.ttf 等 7 个主字体
+  #     全都变成**同样大小 17143856 字节 / 同样 mtime** —— 就是这份字体被主题机制铺进去的。
+  #   所以这个文件**至少**是"用户选过的字体"的落点，替换它 = 让主题商店/个性字体链路也走用户的字体。
+  # ⚠️ 老实说清楚：**它到底会不会盖过 /system/fonts，我们没在真机上验过**
+  #   （那份报告里 dumpsys 显示框架读的是 /system/fonts/FlymeSansVF.ttf，配置里也没有指向这里的引用）。
+  #   所以这条**只跟着用户手动打开的开关走**，默认关；关着的时候一个字都不碰。
+  # ---------------------------------------------------------------------------
+  if [ -d "$FSROOT/data/customizecenter/font" ]; then
+    for f in "$FSROOT"/data/customizecenter/font/*.ttf  "$FSROOT"/data/customizecenter/font/*.TTF \
+             "$FSROOT"/data/customizecenter/font/*.otf  "$FSROOT"/data/customizecenter/font/*.OTF; do
+      [ -f "$f" ] || continue
+      n=${f##*/}
+      case "$n" in *'*') continue ;; esac          # glob 没匹配到会原样留着
+      printf 'theme data/customizecenter/font/%s\n' "$n"
+    done
+  fi
 }
 
 slot_plan() {
-  local moddir="$1" scope="${2:-all}" keep_lang="${3:-1}" keep_special="${4:-1}"
+  # 1.0.9：默认（也是唯一）口径 = **全替换**。日韩繁体、时钟/斜体/衬线都换，
+  #   不再有"保留 XX"开关、也不再按字形自动让路（作者定的：不给开关，省心）。
+  #   参数 scope/keep_lang/keep_special 保留只为兼容旧调用方（fontctl / diag）。
+  local moddir="$1" scope="${2:-all}" keep_lang="${3:-0}" keep_special="${4:-0}"
   local role d name base
-  base=$(slot_candidates "$moddir" | while read -r role d name; do
-           _role_wanted "$role" "$scope" "$keep_lang" "$keep_special" || continue
+  #------------------------------------------------------------------------
+  # 唯一的**极端保护**：字体里完全没有中文字形时，中文槽位一个都不动。
+  #   为什么留这一条：那种情况下替换会把整个界面（含 WebUI 自己）变成方块，
+  #   用户连"换回无字体"都点不到 —— 属于"会把人卡死"的情况，必须挡。
+  #   正常字体（有中文字形）一律全替换，不做任何其它保留。
+  #------------------------------------------------------------------------
+  # （极端保护的实现放在 _role_wanted 里：所有调用方共享同一套判定，
+  #   诊断报告解释"为什么没换"时口径也一致。）
+  #------------------------------------------------------------------------
+  # ★ 1.0.9 自适应扫描 ★
+  #   先按老规矩（XML 主文字族 + 模板 + OEM 规则）枚举候选；**再补上"设备自己的字体配置
+  #   里引用到、但模板一路没覆盖到的角色"** —— 这样没适配过的 ROM 也能本地自适应，
+  #   不用等我们加 targets/*.list。补的规则在 slot_adaptive_extra 里（只补空缺角色）。
+  CAND_RAW=$(slot_candidates "$moddir")
+  CAND_EXTRA=$(slot_adaptive_extra "$CAND_RAW")
+  if [ -n "$CAND_EXTRA" ]; then
+    CAND_RAW=$(printf '%s\n%s\n' "$CAND_RAW" "$CAND_EXTRA" | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+  # 让诊断报告/界面能看到"这次有没有靠自适应补的、补了几个"（供报告展示）
+  ADAPTIVE_N=$(printf '%s\n' "$CAND_EXTRA" | grep -c . 2>/dev/null)
+  [ -n "$ADAPTIVE_N" ] || ADAPTIVE_N=0
+  export ADAPTIVE_N
+  base=$(printf '%s\n' "$CAND_RAW" | while read -r role d name; do
+           _role_wanted "$role" "$scope" "$keep_lang" "$keep_special" "$name" || continue
            printf '%s %s/%s\n' "$role" "${d#/}" "$name"
          done | sort -u -k2,2)
   [ -n "$base" ] || return 0
