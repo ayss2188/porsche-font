@@ -98,7 +98,14 @@ payload_mount() {
     echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 没有挂载计划（slots.map 为空），尝试重新生成（只补轻量部分，跳过合集合成）" >> "$LIB/mount.log" 2>/dev/null
     _ttc_prev=${CFS_NO_TTC-__unset__}
     export CFS_NO_TTC=1
-    _to_s 20 sh "$moddir/fontctl.sh" apply "$_p" >/dev/null 2>&1
+    # ★ 上限 20 → 40 秒（2026-10-14，与主项目同步）。
+    #   为什么改：`slot_plan` 现在会**真的跑一遍自适应扫描**（以前那段被一个 bug 静默关掉了，
+    #   见 slots.sh 的 slot_adaptive_extra）。真机上这一步约 1~2 秒，20 秒本来够；
+    #   但 Windows 沙箱里"起一个进程"要 47ms，`slot_plan` 本身就要 17~21 秒，
+    #   刚好被 20 秒掐断 → 自愈失效（回归测试 newfix-test 第 2 节就是这么红的）。
+    #   自愈是**开机后台**动作，等 40 秒不影响用户；而"自愈没生效"会让字体整轮不挂载。
+    #   宁可多等，不要静默失败。
+    _to_s 40 sh "$moddir/fontctl.sh" apply "$_p" >/dev/null 2>&1
     _rc=$?
     # 还原：不用 `CFS_NO_TTC=1 函数名` 那种写法 —— POSIX 对"赋值前缀 + 函数"的作用域
     # 措辞是 **unspecified**（busybox ash 实测是临时的，但真机跑的是 mksh，不赌这个）。
