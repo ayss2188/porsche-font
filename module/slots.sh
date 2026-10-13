@@ -718,11 +718,20 @@ slot_adaptive_extra() {
   #   等于**同一件重活干两遍**（作者机器上 C4「算槽位计划」28 秒，P2「候选枚举」只要 1 秒，
   #   差的这一段主要就是这次重复计算）。
   #   现在：base 非空时直接用；为空才回退去算（保持兼容旧调用方）。
-  # ⚠️ 本项目差异（重放项 6）：兜底路径**不能写死主项目的 id** ——
-  #    保时捷这边 4 个包 id 是 porsche_font_multi/_718/_911/_gt3。
-  #    正常调用方（slot_plan）一定会传 base，所以这行基本走不到；
-  #    但走不到不代表可以写错：真走到时它会去找一个不存在的目录 → 候选为空 → 静默少换。
-  [ -n "$base" ] || base=$(slot_candidates "${MODDIR:-/data/adb/modules/porsche_font_multi}")
+  # ★ 内置配色版差异：不用主项目那个写死的目录 —— 用当前模块目录，
+  #   实在没有才回退去扫本机装着的配色包（4 个 id 是 porsche_font_*）
+  if [ -z "$base" ]; then
+    _sd="${MODDIR:-}"
+    [ -n "$_sd" ] && [ -d "$_sd" ] || {
+      for _d in /data/adb/modules/porsche_font_*; do
+        [ -f "$_d/module.prop" ] || continue
+        _sd=$_d
+        break
+      done
+    }
+    [ -n "$_sd" ] || _sd=/data/adb/modules/porsche_font_multi
+    base=$(slot_candidates "$_sd")
+  fi
   scan="$base"
   [ -n "$scan" ] || return 0
   for role in cjk kana hangul lang hant; do
@@ -848,20 +857,6 @@ theme_slots() {
   # 1.0.8：不再要用户点开关 —— 按机型**自动判**。三条路：
   #   theme_fonts=1 / 0  ：用户在界面上手动指定过，照办
   #   未设置（默认）      ：自动 —— 见下面 _theme_auto_ok
-  #
-  # ★ 本项目（保时捷字体）**原样跟随主项目**，不改成"默认关"★
-  #   （2026-10-12 作者确认：主项目新版这套判据不影响「字体粗细」，跟着走即可）
-  #
-  #   为什么不影响粗细 —— 关键在 hyperos 那一支：
-  #     _theme_auto_ok 里 hyperos 会先查 /data/system/theme/fonts 里**有没有可变字体**，
-  #     有就 return 1（不碰）。用户在「设置 → 字体样式」里选「小米兰亭 Pro」这类字体，
-  #     正是为了用它那条 wght 轴调粗细 —— 而那份就是可变字体，所以自动判**会放过它**，
-  #     粗细照常能调。真正会被一起换的，是"设置里选了个静态字体"的机器，
-  #     那种情况本来也没有轴可调，不存在"换掉就调不动"。
-  #   另外本模块自带的三套配色本身就是同一套可变字体（vf=1），
-  #   所以"换上去的那份有没有轴"这件事不会成为变量。
-  #   ⚠️ 曾经把这里改成"默认关"（理由是 v3.5 的旧承诺），作者明确要求跟随主项目后已撤回。
-  #      别再改回去 —— 判据 = 主项目怎么写，本项目就怎么写。
   case "$(cfg_get theme_fonts auto)" in
     1) ;;
     0) return 0 ;;

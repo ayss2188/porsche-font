@@ -39,6 +39,12 @@ builtin_files() {
   [ -d "$bdir" ] || return 0
   for f in "$bdir"/*.otf "$bdir"/*.OTF "$bdir"/*.ttf "$bdir"/*.TTF; do
     [ -f "$f" ] || continue
+    # ★ 只返回**有效**字体。放在这里而不是各个调用点，是因为 builtin_count / builtin_menu /
+    #   builtin_apply_first 全都走这个函数 —— 在这里挡住，菜单就不会列出坏选项、
+    #   计数也不会把坏文件算进去（否则用户选了、apply 才发现不行）。
+    #   校验函数由 fontcheck.sh 提供；载不进来时**不放行**（宁可少一份，也不给系统坏文件）。
+    if ! command -v valid_font >/dev/null 2>&1; then return 0; fi
+    valid_font "$f" || continue
     echo "$f"
   done
 }
@@ -84,6 +90,24 @@ builtin_import() {
     id=${info%%|*}; nm=${info#*|}
     [ -n "$id" ] || continue
     dst="$LIB/$id.ttf"
+
+    # ★★ 必须校验！**这一步以前漏了，导致坏字体被挂上系统槽 → 卡开机。**
+    #   用户导入的字体走 fontctl.sh 的 store_font()，那里会调 valid_font 验表目录
+    #   （表数量、每张表的偏移+长度是否落在文件内、必需的 cmap/head/hhea/hmtx/maxp 是否齐）。
+    #   而内置字体走的是**硬链接**，绕过了那一整套校验 —— 一个 2KB 的假文件
+    #   照样被注入字体库、被 builtin_apply_first 自动选中、被挂到系统字体槽上，
+    #   结果就是"卡开机第二屏"。
+    #   现在：不合法就**跳过这一份**，宁可不注入，也绝不把坏文件交给系统。
+    # 校验函数由 fontcheck.sh 提供（customize.sh / fontctl.sh 都会先载入它）。
+    # 真载不进来时也**不能放行** —— 宁可整份跳过，也不把没验过的文件交给系统。
+    if ! command -v valid_font >/dev/null 2>&1; then
+      ui_print "  ⚠ 缺少 fontcheck.sh，无法校验自带配色「$n」——已跳过（不注入、不挂载）"
+      continue
+    fi
+    if ! valid_font "$f"; then
+      ui_print "  ⚠ 自带配色「$n」不是有效的字体文件（损坏/截断/假文件）——已跳过，不注入也不挂载"
+      continue
+    fi
 
     # 本模块自带的三套配色都是可变字体（带 wght 字重轴）→ 写进 meta 供报告/界面判断
     if builtin_is_vf "$f"; then vf=1; else vf=0; fi
@@ -238,10 +262,32 @@ builtin_menu() {
   # 覆盖安装：只在**已安装目录**里已有有效选择时才早退。
   # ⚠️ 别读 $MODDIR/pending_font —— 安装时它是暂存目录，而且 customize.sh 会先写成 none，
   #    在那儿判永远判不出"有选择"，菜单每次都会弹（老用户随手按一下就把配色换掉了）。
-  case "$(tr -d '[:space:]' 2>/dev/null < "$OLD/pending_font")" in
-    ''|none) : ;;
-    *) return 0 ;;
-  esac
+  #
+  # ★★ 第二个坑（真机上就是这样"更新完字体变了"的）：
+  #    **`active_font` 也必须看**。用户正常用着的时候，`pending_font` 就是 `none`
+  #    （选完重启后 pending 归 none、active 才是真正生效的那套）。
+  #    只看 pending 的话，每一次更新都会弹菜单 → 用户随手按音量[上] →
+  #    配色被静默换成第一项。这正是"3.5 用着喜欢的字体，更新后变成别的"的机制。
+  #    所以：pending 或 active **任一**指向真实字体，就说明用户有选择，别打扰他。
+  _prev_p=$(tr -d '[:space:]' 2>/dev/null < "$OLD/pending_font")
+  _prev_a=$(tr -d '[:space:]' 2>/dev/null < "$OLD/active_font")
+  case "$_prev_p" in ''|none) _prev_p="" ;; esac
+  case "$_prev_a" in ''|none) _prev_a="" ;; esac
+  if [ -n "$_prev_p" ] || [ -n "$_prev_a" ]; then
+    # ★ 措辞交给调用方决定：恢复**成功**才叫"沿用"，恢复失败（改用了内置配色）
+    #   就不能说"沿用" —— 否则日志里会出现
+
+    #   「没找到你上次选的 X」+「沿用你上次的配色选择」
+
+    #   这种自相矛盾（作者本人吐槽过）。
+    #   调用方在进菜单之前设 BUILTIN_MENU_NOTE=... 就能覆盖这句话。
+    if [ -n "${BUILTIN_MENU_NOTE:-}" ]; then
+      ui_print "- $BUILTIN_MENU_NOTE"
+    else
+      ui_print "- 沿用你上次的配色选择（不弹菜单；想换配色请在 WebUI 里点）"
+    fi
+    return 0
+  fi
 
   # 上一次选的配色（老包的数字 / 字体库的 id 都认）
   last=$(builtin_last_choice)
@@ -343,6 +389,139 @@ builtin_menu() {
     break
   done
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# ★ 关键：把「用户上次选的那份字体」认成**内置的哪一套**
+#
+# 为什么需要（作者一句话点破）：
+#   从老版本升上来时，**字体原文件换了**（旧版的字体库 id 跟新版的 builtin_* 不是一回事），
+#   所以 `apply $LAST` 必然找不到 —— 这**不是 bug，是必然**。
+#   但既然"没找到就能自动改用一套"，那就该改用到**用户原来那套**，
+#   而不是闭着眼睛挑排序第一的（那样每个从旧版升上来的用户都会被换成 911·一点红）。
+#
+# 判据（都是"这份字体到底是不是同一份"的直接证据）：
+#   ① 文件名里就带型号（老包可能存成 718.ttf / colon.ttf / none.ttf…）
+#   ② **文件大小**（三套真字体的大小各不相同，实测 44,844,664 / 796 / 868，只差几十字节 —— 够用）
+#   ③ 字体库里的 `last_selection` 记录（老包可能写的是数字 1/2/3 或直接是型号名）
+# 输出：内置的字体 id（builtin_xxx）；认不出返回空。
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ★★ 最可靠的一招：**读已安装模块的 module.prop 描述**
+#
+# 为什么这个最优先（作者点破的，比按文件大小猜干净得多）：
+#   老版本是**正常在用**的，而 refresh_prop 每次切换都会把"当前生效的是哪套"
+#   写进 module.prop 的描述里：
+#       description=[系统：自动识别 | 当前生效：718素装版（无色版）] 内置配色版：…
+#   所以覆盖安装时读 **$OLD/module.prop**（= 升级前那份）就能直接知道用户原来用哪套，
+#   不用去猜文件、也不用管 id 换没换。
+#
+# 注意：读 $OLD 而不是 $MODDIR —— 安装时 $MODDIR 是暂存目录，里面是新包的描述。
+# 输出：内置字体 id（builtin_xxx）；读不到/认不出返回空（调用方会退回别的判据）。
+# ---------------------------------------------------------------------------
+builtin_map_from_prop() {
+  local desc cur
+  [ -f "$OLD/module.prop" ] || { printf '%s' ""; return 0; }
+  desc=$(sed -n 's/^description=//p' "$OLD/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
+  [ -n "$desc" ] || { printf '%s' ""; return 0; }
+  # 取「当前生效：」到「，」或「]」之间的那段
+  cur=$(printf '%s' "$desc" | sed -n 's/.*当前生效：\([^]，]*\).*/\1/p')
+  [ -n "$cur" ] || { printf '%s' ""; return 0; }
+  # 交给型号名判据去认（它认 none/无色/素装/718、colon/一点红/911、flair/烈焰/gt3）
+  builtin_map_from_prev "$cur"
+}
+
+builtin_map_from_prev() {
+  local last="$1" f b info id sz bsz
+  # ① 记录里直接就是型号名（老包 / 手工改过的情况）
+  case "$last" in
+    *none*|*无色*|*素装*|*718*)  builtin_id_of none  | cut -d'|' -f1; return 0 ;;
+    *colon*|*一点红*|*911*)      builtin_id_of colon | cut -d'|' -f1; return 0 ;;
+    *flair*|*烈焰*|*gt3*|*GT3*)  builtin_id_of flair | cut -d'|' -f1; return 0 ;;
+  esac
+  # ② 老包 v2.0 的数字：1=素装(none) 2=一点红(colon) 3=烈焰(flair)
+  case "$last" in
+    1) builtin_id_of none  | cut -d'|' -f1; return 0 ;;
+    2) builtin_id_of colon | cut -d'|' -f1; return 0 ;;
+    3) builtin_id_of flair | cut -d'|' -f1; return 0 ;;
+  esac
+  # ③ 按"文件大小"认：用户上次选的那个文件，和三套自带字体比大小
+  #    ⚠️ 必须在**删掉它之前**比 —— 所以调用方要放在 builtin_clean_legacy 前面
+  for id in $(printf '%s' "$last" | tr '+' '\n'); do
+    [ -f "$LIB/$id.ttf" ] || continue
+    sz=$(wc -c < "$LIB/$id.ttf" 2>/dev/null | tr -d ' \t\r\n')
+    case "$sz" in ''|*[!0-9]*) continue ;; esac
+    for f in $(builtin_files); do
+      [ -f "$f" ] || continue
+      bsz=$(wc -c < "$f" 2>/dev/null | tr -d ' \t\r\n')
+      [ "$bsz" = "$sz" ] || continue
+      b=${f##*/}; b=${b%.*}
+      id=$(builtin_id_of "$b" | cut -d'|' -f1)
+      [ -n "$id" ] && { printf '%s' "$id"; return 0; }
+    done
+  done
+  printf '%s' ""
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# 兜底：恢复上次选择**失败**时，自动挑一套可用配色（绝不让模块静默空转）
+#
+# 为什么必须有它（2026-10-14，真机踩到）：
+#   覆盖安装时 customize.sh 会用 `fontctl.sh apply "$LAST"` 恢复上次的配色。
+#   老代码一旦这步失败，只把 pending_font 写成 none 就结束 —— 结果是：
+#   **模块装上了、但什么都不替换**。用户重启看到"没生效"，
+#   却不知道是恢复失败（他以为在测新包，其实这个包等于没启用）。
+#
+# 正确做法：恢复失败就退一步，**自动挑一套自带配色用上**，
+#   并在管理器里把原因说清楚。宁可"配色不是你上次那套"，也不要"整个模块空转"。
+# ---------------------------------------------------------------------------
+builtin_apply_first() {
+  local f b info id nm out
+  # ★ 先试着"认出用户上次用的是哪一套"，认出来就直接用那一套（而不是排序第一的）。
+  #   调用方会把"上次的原始记录"放在 BUILTIN_PREV（因为此时 $1 已经是失败的那个 id）。
+  #   必须在 builtin_clean_legacy **之前**调用本函数 —— 那个函数可能已经把旧文件清掉了。
+  if [ -n "${BUILTIN_PREV:-}" ]; then
+    _mapped=$(builtin_map_from_prev "$BUILTIN_PREV")
+    if [ -n "$_mapped" ] && [ -f "$LIB/$_mapped.ttf" ]; then
+      out=$(sh "$MODDIR/fontctl.sh" apply "$_mapped" 2>&1 | tail -n1)
+      case "$out" in
+        OK:*)
+          printf '%s' "$_mapped" > "$MODDIR/pending_font" 2>/dev/null
+          nm=$(builtin_id_of "$(printf '%s' "$_mapped" | sed 's/^builtin_//')" | cut -d'|' -f2)
+          ui_print "  ✓ 认出你上次用的就是这一套：$nm（$(echo "$out" | cut -d: -f3) 个槽位）"
+          BUILTIN_MAPPED=1
+          return 0
+          ;;
+      esac
+    fi
+  fi
+  # 认不出来 → 退回"挑第一套能用的"（保证模块不空转）
+  for f in $(builtin_files); do
+    [ -f "$f" ] || continue
+    b=${f##*/}; b=${b%.*}
+    info=$(builtin_id_of "$b")
+    id=${info%%|*}; nm=${info#*|}
+    [ -n "$id" ] || continue
+    [ -f "$LIB/$id.ttf" ] || continue          # 字体库里没有这份 → 换下一个
+    out=$(sh "$MODDIR/fontctl.sh" apply "$id" 2>&1 | tail -n1)
+    case "$out" in
+      OK:*)
+        printf '%s' "$id" > "$MODDIR/pending_font" 2>/dev/null
+        ui_print "  ✓ 已自动改用「$nm」（$(echo "$out" | cut -d: -f3) 个槽位）"
+        return 0
+        ;;
+    esac
+  done
+  # ⚠️ 一次都没进循环时 $out 从未赋值 → 老写法会打印「自动兜底也失败了：」后面空白，
+  #    看不出到底是"没有候选"还是"apply 失败"（真机上"恢复失败：（空）"就是这么来的）。
+  if [ -z "$out" ]; then
+    ui_print "  ✗ 自动兜底失败：没有可用候选（模块 builtin/ 里没有字体，或字体库里一份都没有）"
+    ui_print "     字体库现有：$(ls "$LIB"/builtin_*.ttf 2>/dev/null | wc -l | tr -d ' ') 份；模块自带：$(builtin_count) 份"
+    return 1
+  fi
+  ui_print "  ✗ 自动兜底也失败了：${out#ERROR:}"
+  return 1
 }
 
 # ---------------------------------------------------------------------------

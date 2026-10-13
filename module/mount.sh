@@ -1,6 +1,30 @@
 #!/system/bin/sh
 # mount.sh - 模块自带挂载（不依赖元模块，覆盖 my_product / mi_ext 等厂商分区）
 #
+# ★ 自带字体校验（fontcheck.sh）——**必须在这里自己载入，不能指望调用方**。
+#   为什么：post-fs-data.sh / post-mount.sh 只 source 了 common.sh + mount.sh，
+#   而下面 payload_mount 里要用 valid_font 挡住坏字体。如果等调用方载入，
+#   `command -v valid_font` 会判为假 → **校验被静默跳过、等于没写**。
+#   （同类坑这个项目踩过两次：一次是 valid_font 定义在 fontctl.sh 却被 builtin.sh 调用，
+#     一次就是这里。规则：**校验工具必须由使用它的脚本自己保证可用**。）
+if ! command -v valid_font >/dev/null 2>&1; then
+  _mdfd="${MODDIR:-${0%/*}}"
+  [ -f "$_mdfd/fontcheck.sh" ] && . "$_mdfd/fontcheck.sh" 2>/dev/null
+  # 仍然没有 → 用一个最小实现兜底（宁可判得粗，也不能放行"没验过"的文件）
+  if ! command -v valid_font >/dev/null 2>&1; then
+    valid_font() {
+      [ -f "$1" ] || return 1
+      _vf_sz=$(wc -c < "$1" 2>/dev/null | tr -d ' ')
+      case "$_vf_sz" in ''|*[!0-9]*) return 1 ;; esac
+      [ "$_vf_sz" -ge 4096 ] 2>/dev/null || return 1
+      _vf_m=$(head -c 4 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+      case "$_vf_m" in 00010000|4f54544f|74727565) return 0 ;; esac
+      return 1
+    }
+  fi
+fi
+
+#
 # 原理：开机时把字体库里的字体文件直接 bind mount 到每个真实字体槽上，
 #       不在模块目录生成任何副本（一份字体，零额外占用，也不受模块目录是镜像分区的影响）；
 #       模块带 skip_mount，管理器不会重复挂载。
@@ -105,6 +129,26 @@ payload_mount() {
     if [ ! -f "$src" ] || [ ! -f "$dst" ]; then
       skip=$((skip+1)); continue
     fi
+    # ★★ 最外层防线：**挂之前再验一次字体文件本身**。
+    #
+    #   为什么要有这一道（真机上付出过代价）：
+    #     曾经有个 2KB 的假文件被当成配色注入字体库、又被自动选中，
+    #     结果被 bind 到系统字体槽上 → **卡开机第二屏**。
+    #     上游各处虽然都加了校验（fontcheck.sh），但这是**唯一无论如何都会经过的地方** ——
+    #     计划可能是旧的、别的版本留下的、或者手工改过的。**坏文件绝不能盖到系统槽上。**
+    #
+    #   只验单个字体文件（.ttf/.otf）；我们自己合成的 .ttc 合集不在这里验 ——
+    #   它的有效性由 ttcwrap.sh 在生成时保证，而且容器格式和单文件不同。
+    case "$src" in
+      *.ttc|*.TTC) ;;
+      *)
+        if command -v valid_font >/dev/null 2>&1 && ! valid_font "$src"; then
+          skip=$((skip+1))
+          echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 跳过无效字体（不挂到系统槽上）: $src -> $dst" >> "$LIB/mount.log" 2>/dev/null
+          continue
+        fi
+        ;;
+    esac
     # 幂等：已经指向我们的文件了就别再叠一层
     # （post-fs-data 和 post-mount 万一都跑到，或者被重复调用，会叠出多层挂载且再也数不清）
     if [ "$(stat -L -c '%d:%i' "$src" 2>/dev/null)" = "$(stat -L -c '%d:%i' "$dst" 2>/dev/null)" ]; then

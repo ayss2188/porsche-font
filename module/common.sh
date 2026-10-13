@@ -1,86 +1,45 @@
 #!/system/bin/sh
-# 保时捷字体（内置配色版）- 公共函数库（换皮自主项目的 custom_font_switcher）
+# 保时捷字体（内置配色版）- 公共函数库
 # 提供：系统识别 / 系统名称 / Root 管理器识别 / 持久化设置 / 挂载路径映射
 # 槽位发现见 slots.sh，自带挂载见 mount.sh；脚本中通过 source 引入
 #
-# ⚠️ 本项目对主项目源码的固定改动，同步主项目时**必须重放**（清单见 _lab\同步映射表-v109.md）：
-#    1. 本文件：lib_font_ids / lib_font_files（内置配色是 builtin_*.ttf，主项目只认 f<数字>）
-#    2. module.prop：id / name / version / versionCode / description / updateJson
-#    3. builtin.sh + builtin/（内置配色注入 + 刷入时音量键选配色）
-#    4. customize.sh：接 builtin_* 的四处调用 + 菜单顺序 + 装完自检
-#    5. webroot/index.html：内置配色版界面（去掉导入/改名/多选删除）+ 模块目录运行时探测
-#       + localStorage 按模块 id 隔离（4 个包同源，不隔离会读到别的包的更新缓存）
-#    6. fontctl.sh / diag.sh：模块 id 兜底扫 porsche_font_*（别写死主项目的 id）
-#       + fontctl.sh 的 refresh_prop 描述要用"内置配色版"的说法（这一版不给导入）
-#    7. uninstall.sh：字体库共用判断扫 porsche_font_*
+# ===========================================================================
+# ⚠️ 本项目对主项目（custom_font_switcher）源码的固定改动 —— 同步主项目时必须逐条重放
+# ===========================================================================
+#   换皮的做法是"用主项目的干净底 + 这些固定改动"，所以每次把主项目新版的脚本
+#   搬过来，下面每一条都要重新做一遍。**漏掉任何一条都会出真问题**：
 #
-# 注意：LIB 路径两边**完全一样**（/data/adb/custom_font_lib）—— 4 个包共用同一个字体库，
-#       这是 variants.conf 的设计，不需要改。
+#   1. 本文件：lib_font_ids / lib_font_files —— 同时认 `f<数字>` 和 `builtin_*`
+#      只认一种会出大事：报告里写"字体库 0 个"，用户以为模块装坏了。
+#   2. 模块 id 不要写死主项目的 custom_font_switcher。本项目 4 个包 id 是
+#      porsche_font_multi / _718 / _911 / _gt3；写死的话那些目录根本不存在
+#      → 诊断报告打不开、槽位候选为空、静默少换。涉及：
+#      diag.sh / fontctl.sh / slots.sh（各自的 id 兜底处）
+#   3. module.prop：id / name / version / versionCode / description / updateJson
+#   4. builtin.sh + builtin/：内置配色注入（硬链接，不额外占空间）
+#      + 刷入时音量键选配色 + **注入前必须 valid_font 校验**（坏字体挂上去会卡开机）
+#   5. customize.sh：接 builtin_* 的调用（导入 → 认出上次配色 → 恢复 → 菜单 → 自检）
+#      注意顺序：**认出上次配色必须在 builtin_import / builtin_clean_legacy 之前**
+#      （它要读旧字体文件的大小；先导入会覆盖同名文件 → 认错）
+#   6. mount.sh：真正挂载前再校验一次字体（最外层防线，坏文件绝不盖到系统槽上）
+#   7. webroot/index.html：
+#      · 去掉导入 / 改名 / 多选删除（内置配色版只在本模块自带配色间切换）
+#      · 模块目录**运行时探测**（4 个包 id 不同，写死会导致界面一条命令都调不到）
+#      · localStorage 按模块 id 隔离（4 个包同源，不隔离会读到别的包的更新缓存）
+#      · 主色调改保时捷红；卡片不显示字重/同族标签；模块名从 module.prop 读
+#   8. uninstall.sh：字体库共用判断扫 porsche_font_*（写死主项目 id 的话，
+#      卸任意一个配色包会把共用字体库删掉，另外三个连带坏掉）
+#   9. update.sh：**换掉主项目的更新地址相关文字**，并保留 `head -c 60000`
+#      （主项目早期是 30000；本项目更新日志含历史版本，30000 会静默截断）
+#
+#   注意：LIB 路径两边**完全一样**（/data/adb/custom_font_lib）——
+#   4 个包共用同一个字体库，所以"删字体"这类操作一定要先判有没有别的包还活着。
+# ===========================================================================
 
 LIB=${LIB:-/data/adb/custom_font_lib}
 SETTINGS="$LIB/settings.conf"
 
 getp() { getprop "$1" 2>/dev/null | tr -d '\r\n'; }
-
-# ---------------------------------------------------------------------------
-# 【重放项 1】字体库枚举：库里"算数的字体"有哪些
-#
-# ⚠️ 内置配色版必须同时认两种命名，只认一种会出大事：
-#     f<时间戳>     用户导入的（fontctl.sh 的 new_id 生成）—— 主项目只有这一种
-#     builtin_xxx   本模块自带的配色（builtin.sh 的 builtin_import 注入）
-#   如果哪里只 glob f*.ttf，界面就列不出任何配色、诊断报告也会写"字体库 0 个"，
-#   用户会以为模块装坏了。所以统一走这两个函数，别再各处手写 glob。
-#
-# 放在 common.sh 的原因：fontctl.sh 和 diag.sh 都要用，而 diag.sh 只 source
-# common.sh / slots.sh / mount.sh，**不 source fontctl.sh**。
-# ---------------------------------------------------------------------------
-lib_font_ids() {
-  local f
-  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
-    [ -f "$f" ] || continue
-    basename "$f" .ttf
-  done
-}
-
-lib_font_files() {
-  local f
-  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
-    [ -f "$f" ] || continue
-    echo "$f"
-  done
-}
-
-# ---------------------------------------------------------------------------
-# 小工具：判断是否纯数字 / 取当前秒数
-#
-# now_s 为什么放在 common.sh（1.0.9.2 修正）：
-#   它原来只定义在 diag.sh 里。但 app_side_probe（/proc 抽样那段的超时判断）
-#   也要用它 —— 而回归测试只 source 了 common.sh / slots.sh，
-#   于是测试里报 `now_s: not found`，整个 /proc 抽样静默失败
-#   （真机报告中表现为"App 侧抽样一个都没采到"）。
-#   这类"函数只定义在某个脚本里、却被别的脚本依赖"的坑，放共享文件里最稳妥。
-# ---------------------------------------------------------------------------
-isnum() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
-now_s() { _NS_D=$(date +%s 2>/dev/null); isnum "$_NS_D" && printf '%s' "$_NS_D" || printf '0'; }
-
-# ---------------------------------------------------------------------------
-# 「完整性声明」的记账函数（1.0.9.2）
-#   任何一节被超时/跳过都要记一笔，报告最前面会列出来 —— 规则：宁可难看，不许静默。
-#   放在 common.sh 而不是 diag.sh：app_side_probe 里的 /proc 抽样超时要用它，
-#   而回归测试是从 diag.sh 里**抠函数**出来跑的（diag.sh 有主流程，不能直接 source），
-#   抠出来的函数拿不到 diag.sh 里的其它函数。放共享文件里，谁 source 谁就有。
-#
-#   为什么必须有它：报告最怕的是"静默少东西" —— 用户看到"没问题"，
-#   其实那一节因为超时压根没跑。宁可报告上明写"第 11 节被跳过了、这么补回来"。
-# ---------------------------------------------------------------------------
-DIAG_SKIPS=""
-skip_note() {   # skip_note <小节名> <为什么> [怎么补回来]
-  DIAG_SKIPS="$DIAG_SKIPS$1|$2|${3:-}
-"
-  return 0
-}
-
-skip_count() { printf '%s' "$DIAG_SKIPS" | grep -c . 2>/dev/null; }
 
 # ---------------------------------------------------------------------------
 # 识别当前 ROM：
@@ -325,6 +284,62 @@ find_busybox() {
   done
   command -v busybox 2>/dev/null
 }
+
+# ---------------------------------------------------------------------------
+# 小工具：判断是否纯数字 / 取当前秒数
+#
+# now_s 为什么放在 common.sh（1.0.9.2 修正）：
+#   它原来只定义在 diag.sh 里。但 app_side_probe（/proc 抽样那段的超时判断）
+#   也要用它 —— 而回归测试只 source 了 common.sh / slots.sh，
+#   于是测试里报 `now_s: not found`，整个 /proc 抽样静默失败
+#   （真机报告中表现为"App 侧抽样一个都没采到"）。
+#   这类"函数只定义在某个脚本里、却被别的脚本依赖"的坑，放共享文件里最稳妥。
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 字体库清单：**同时认两种命名**（内置配色版专属）
+#
+# ⚠️ 只认一种会出大事：
+#     f<时间戳>     用户导入的（fontctl.sh 的 new_id 生成）—— 主项目只有这一种
+#     builtin_xxx   本模块自带的配色（builtin.sh 的 builtin_import 注入）
+#   如果哪里只 glob f*.ttf，界面就列不出任何配色、诊断报告也会写"字体库 0 个"，
+#   用户会以为模块装坏了。所以统一走这两个函数，别再各处手写 glob。
+#
+# 放在 common.sh 的原因：fontctl.sh 和 diag.sh 都要用，而 diag.sh 只 source
+# common.sh / slots.sh / mount.sh，**不 source fontctl.sh**。
+# ---------------------------------------------------------------------------
+lib_font_ids() {
+  local f
+  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
+    [ -f "$f" ] || continue
+    basename "$f" .ttf
+  done
+}
+
+lib_font_files() {
+  local f
+  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
+    [ -f "$f" ] || continue
+    echo "$f"
+  done
+}
+
+isnum() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
+now_s() { _NS_D=$(date +%s 2>/dev/null); isnum "$_NS_D" && printf '%s' "$_NS_D" || printf '0'; }
+
+# ---------------------------------------------------------------------------
+# 「完整性声明」的记账函数（1.0.9.2）
+#   任何一节被超时/跳过都要记一笔，报告最前面会列出来 —— 规则：宁可难看，不许静默。
+#   放在 common.sh 而不是 diag.sh：app_side_probe 里的 /proc 抽样超时要用它，
+#   而回归测试是从 diag.sh 里**抠函数**出来跑的（diag.sh 有主流程，不能直接 source），
+#   抠出来的函数拿不到 diag.sh 里的其它函数。放共享文件里，谁 source 谁就有。
+# ---------------------------------------------------------------------------
+DIAG_SKIPS=""
+skip_note() {   # skip_note <小节名> <为什么> [怎么补回来]
+  DIAG_SKIPS="$DIAG_SKIPS$1|$2|${3:-}
+"
+  return 0
+}
+skip_count() { printf '%s' "$DIAG_SKIPS" | grep -c . 2>/dev/null; }
 
 # ---------------------------------------------------------------------------
 # 持久化设置：保存在字体库目录，更新模块不会丢（卸载时一并删除）

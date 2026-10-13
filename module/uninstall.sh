@@ -16,6 +16,27 @@
 #     —— 硬卡住卸载在这里做不到（管理器的卸载钩子无法阻止删除模块目录），所以做成"留痕 + 可自愈"。
 
 LIB=/data/adb/custom_font_lib
+
+# ---------------------------------------------------------------------------
+# ★ 内置配色版差异（重放项）：**不能写死模块 id** ——
+#   本项目有 4 个包、4 个 id（porsche_font_multi / _718 / _911 / _gt3），
+#   它们**共用同一个字体库**。只要还装着任意一个，字体库就不能删。
+#   同时要扫 modules_update（刚刷了新包还没重启，模块在那边）。
+#
+# ⚠️ 主项目写死的是 /data/adb/modules/custom_font_switcher —— 在本项目里
+#   那个目录**永远不存在**，于是卸载任意一个配色包都会删掉共用字体库，
+#   另外三个包连带坏掉（字体全没、要重新刷）。
+# ---------------------------------------------------------------------------
+_sibling_alive() {
+  local d
+  for d in /data/adb/modules/porsche_font_* /data/adb/modules_update/porsche_font_*; do
+    [ -d "$d" ] || continue
+    [ -f "$d/remove" ] && continue     # 它自己也在等待被卸载，不算"还活着"
+    return 0
+  done
+  return 1
+}
+
 JOURNAL="$LIB/.gms_journal.conf"
 LEGACY="$LIB/.gms_owned"
 C="com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider"
@@ -46,21 +67,7 @@ if [ -f "$JOURNAL" ] || [ -f "$LEGACY" ]; then
       sleep 2; i=$((i+1))
     done
     [ -n "$(getprop sys.powerctl)$(getprop sys.shutdown.requested)" ] && exit 0
-    # 模块又装回来了（用户取消了卸载 / 重新安装）：绝对不能删字体库，交给模块自己恢复
-    #
-    # ⚠️ 本项目差异（重放项 7）：这里**不能写死模块 id**。
-    #    主项目只有一个 id（custom_font_switcher），保时捷这边有 4 个包、4 个 id
-    #    （porsche_font_multi / _718 / _911 / _gt3），它们**共用同一个字体库**。
-    #    只要还装着**任意一个**配色包，字体库就不能删 —— 写死某一个 id 的话，
-    #    卸载另一个配色包时这里永远命中不了，会把还在用的字体库 rm -rf 掉。
-    #    同时要扫 modules_update（刚刷了新包还没重启，模块在那边）。
-    _sibling_alive() {
-      local d
-      for d in /data/adb/modules/porsche_font_* /data/adb/modules_update/porsche_font_*; do
-        [ -d "$d" ] && return 0
-      done
-      return 1
-    }
+    # 还有兄弟配色包装着（或刚刷了还没重启）→ 绝对不能删字体库
     _sibling_alive && exit 0
     sleep 5
     [ -n "$(getprop sys.powerctl)$(getprop sys.shutdown.requested)" ] && exit 0
@@ -102,7 +109,10 @@ if [ -f "$JOURNAL" ] || [ -f "$LEGACY" ]; then
     fi
   ) >/dev/null 2>&1 &
 else
-  rm -rf "$LIB"
+  # 没有 gms 记录要恢复：只在"没有兄弟包活着"时才删字体库
+  if ! _sibling_alive; then
+    rm -rf "$LIB"
+  fi
 fi
 
 exit 0

@@ -26,14 +26,14 @@
 
 **下载页（推荐）**：https://github.com/ayss2188/porsche-font/releases/latest
 
-**直接下（v3.9.1）**：
+**直接下（v3.9.2）**：
 
 | 包 | 下载 | 体积 |
 |---|---|---|
-| 🤍❤️🔥 **三合一**（推荐） | [porsche-font-multi-v3.9.1.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-multi-v3.9.1.zip) | 约 63MB |
-| 🤍 **718素装**（无色） | [porsche-font-718-v3.9.1.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-718-v3.9.1.zip) | 约 21MB |
-| ❤️ **911经典**（一点红） | [porsche-font-911-v3.9.1.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-911-v3.9.1.zip) | 约 21MB |
-| 🔥 **GT3烈焰** | [porsche-font-gt3-v3.9.1.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-gt3-v3.9.1.zip) | 约 21MB |
+| 🤍❤️🔥 **三合一**（推荐） | [porsche-font-multi-v3.9.2.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-multi-v3.9.2.zip) | 约 63MB |
+| 🤍 **718素装**（无色） | [porsche-font-718-v3.9.2.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-718-v3.9.2.zip) | 约 21MB |
+| ❤️ **911经典**（一点红） | [porsche-font-911-v3.9.2.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-911-v3.9.2.zip) | 约 21MB |
+| 🔥 **GT3烈焰** | [porsche-font-gt3-v3.9.2.zip](https://github.com/ayss2188/porsche-font/releases/latest/download/porsche-font-gt3-v3.9.2.zip) | 约 21MB |
 
 怎么选：
 
@@ -109,7 +109,7 @@
 卸载旧模块重新安装
 ```
 
-v3.9.1 的变化（对方便理解升级后表现有帮助）：
+v3.9.2 的变化（对方便理解升级后表现有帮助）：
 
 - **诊断报告快多了**：以前慢的机型要等接近半小时，现在几分钟。报告内容一行没少
 - **点报告后可以选「全速生成」或「慢慢生成」**：两种模式**内容完全一样**，只是快慢和"占不占手机"

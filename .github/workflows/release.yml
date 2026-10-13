@@ -15,7 +15,7 @@ env:
   #      一加 ColorOS 这类"按 postscriptName 找字体"的 ROM 会满屏方块。
   #      v1 仍然在线（老 tag 的包要能重打），但**不要再退回去**。
   #    换 fonts-v2 之前请确认该 Release 已经建好、附件已上传，否则 CI 会在取字体那步失败。
-  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v2/porsche-font-profiles-v2.zip"
+  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v3/porsche-font-profiles-v3.zip"
 
 jobs:
   build:
@@ -155,8 +155,8 @@ jobs:
             echo "仓库里没有 UPDATE-$VER.md，已用 dist/notes.md 兜底生成（$(wc -l < "UPDATE-$VER.md") 行）"
           fi
           _LEN=$(wc -c < "UPDATE-$VER.md")
-          if [ "$_LEN" -gt 30000 ]; then
-            echo "::warning::UPDATE-$VER.md 有 $_LEN 字符，超过 update.sh 的 30000 显示上限，用户会看不全"
+          if [ "$_LEN" -gt 60000 ]; then
+            echo "::warning::UPDATE-$VER.md 有 $_LEN 字节，超过 update.sh 的 60000 显示上限（注意 -c 是**字节**，中文一个字占 3 字节），用户会看不全"
           fi
           while IFS='|' read -r key id zipname upfile sum; do
             [ -n "$key" ] || continue

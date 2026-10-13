@@ -1,6 +1,7 @@
 #!/system/bin/sh
-# 保时捷字体（内置配色版）- 字体库管理 / 应用脚本（供 WebUI、安装脚本调用）
-# 换皮自主项目的 custom_font_switcher；同步主项目时本文件的固定改动见 common.sh 顶部清单。
+# 自定义字体切换模块 - 字体库管理 / 应用脚本（供 WebUI、安装脚本调用）
+
+# ⚠️ 本文件对主项目（custom_font_switcher）有固定改动 —— 同步主项目时见 common.sh 顶部的重放清单。
 # 用法：
 #   sh fontctl.sh status                      输出 A=<生效> P=<待生效> R=<系统> 等状态
 #   sh fontctl.sh list                        列出字体库：id|名称|字节数|元数据
@@ -54,9 +55,8 @@ export TMPDIR="$LIB"
 
 APPLIED="$MODDIR/slots.applied"
 MODID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
-# 兜底：module.prop 读不到时（异常情况）扫一下本机装的是哪个配色包。
-# ⚠️ 本项目差异（重放项 6）：**不要写死主项目的 custom_font_switcher** ——
-#    换皮成保时捷后那个 id 根本不存在（4 个包 id 是 porsche_font_multi/_718/_911/_gt3）。
+# ★ 内置配色版差异（重放项）：module.prop 读不到时扫本机实际装着的配色包。
+#   **不要写死 custom_font_switcher** —— 那 4 个 id 是 porsche_font_*。
 if [ -z "$MODID" ]; then
   for _d in /data/adb/modules/porsche_font_*; do
     [ -f "$_d/module.prop" ] || continue
@@ -157,65 +157,14 @@ label_of() {
 cur_active()  { local v; v=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font"); echo "${v:-none}"; }
 cur_pending() { local v; v=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font"); echo "${v:-$(cur_active)}"; }
 
-# 只接受 TTF / OTF（TTC 合集不能直接替换单文件槽位）
-# ⚠ 光看魔数不够：**截断/损坏的文件魔数也是对的**，而把坏字体挂到系统字体槽上，
-#   轻则文字显示异常，重则开机后系统字体加载失败（真机反馈过"卡开机后黑屏"）。
-#   所以这里把表目录也验一遍：
-#     · 表数量合理、目录长度落在文件内
-#     · 每条表的 偏移+长度 都落在文件内（截断文件必然过不了这一关）
-#     · 必需的几张表都在（cmap/head/hhea/hmtx/maxp + glyf/loca 或 CFF）
-valid_font() {
-  local f="$1" m sz b num tot bytes v c tag off ln
-  local has_cmap=0 has_head=0 has_hhea=0 has_hmtx=0 has_maxp=0 has_glyf=0 has_cff=0
-  [ -f "$f" ] || return 1
-  sz=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
-  case "$sz" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$sz" -ge 512 ] 2>/dev/null || return 1
-  m=$(head -c 4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')
-  case "$m" in
-    00010000|4f54544f|74727565) ;;
-    *) return 1 ;;
-  esac
-  b=$(od -An -tu1 -j4 -N2 "$f" 2>/dev/null); set -- $b
-  [ $# -ge 2 ] || return 1
-  num=$(( $1 * 256 + $2 ))
-  [ "$num" -ge 5 ] 2>/dev/null || return 1
-  [ "$num" -le 512 ] 2>/dev/null || return 1
-  tot=$(( 12 + 16 * num ))
-  [ "$tot" -le "$sz" ] 2>/dev/null || return 1
-  bytes=$(od -An -tu1 -j0 -N"$tot" "$f" 2>/dev/null | tr -s ' \n' ' ')
-  set -- $bytes
-  [ $# -ge "$tot" ] || return 1
-  v=0; while [ "$v" -lt 12 ]; do shift; v=$((v+1)); done
-  v=0
-  while [ "$v" -lt "$num" ]; do
-    [ $# -ge 16 ] || return 1
-    tag=""
-    # 只认要用的那几张表，省掉字符串比较
-    [ "$1" = 99 ]  && [ "$2" = 109 ] && [ "$3" = 97 ]  && [ "$4" = 112 ] && tag=cmap
-    [ "$1" = 104 ] && [ "$2" = 101 ] && [ "$3" = 97 ]  && [ "$4" = 100 ] && tag=head
-    [ "$1" = 104 ] && [ "$2" = 104 ] && [ "$3" = 101 ] && [ "$4" = 97 ]  && tag=hhea
-    [ "$1" = 104 ] && [ "$2" = 109 ] && [ "$3" = 116 ] && [ "$4" = 120 ] && tag=hmtx
-    [ "$1" = 109 ] && [ "$2" = 97 ]  && [ "$3" = 120 ] && [ "$4" = 112 ] && tag=maxp
-    [ "$1" = 103 ] && [ "$2" = 108 ] && [ "$3" = 121 ] && [ "$4" = 102 ] && tag=glyf
-    [ "$1" = 67 ]  && [ "$2" = 70 ]  && [ "$3" = 70 ]  && [ "$4" = 32 ]  && tag=cff
-    shift 8
-    off=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 )); shift 4
-    ln=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 )); shift 4
-    # 截断文件在这里必然露馅
-    [ $(( off + ln )) -le "$sz" ] 2>/dev/null || return 1
-    case "$tag" in
-      cmap) has_cmap=1 ;; head) has_head=1 ;; hhea) has_hhea=1 ;;
-      hmtx) has_hmtx=1 ;; maxp) has_maxp=1 ;; glyf) has_glyf=1 ;; cff) has_cff=1 ;;
-    esac
-    v=$((v+1))
-  done
-  [ "$has_cmap" = 1 ] && [ "$has_head" = 1 ] && [ "$has_hhea" = 1 ] && \
-  [ "$has_hmtx" = 1 ] && [ "$has_maxp" = 1 ] || return 1
-  # 轮廓数据：TrueType 用 glyf，OpenType/CFF 用 CFF —— 两个都没有就是空壳
-  [ "$has_glyf" = 1 ] || [ "$has_cff" = 1 ] || return 1
-  return 0
-}
+# valid_font 现在在 fontcheck.sh 里（拆出去是为了不依赖加载顺序）
+. "$MODDIR/fontcheck.sh" 2>/dev/null
+# ⚠️ 别写成 `. "$MODDIR/fontcheck.sh" 2>/dev/null` 就以为安全 ——
+#   `.` 打不开文件会**直接结束整个脚本**（POSIX 行为，2>/dev/null 挡不住）。
+#   所以下面再加一道：真载不进来就自己定义一遍最小实现（宁可有，不可无）。
+if ! command -v valid_font >/dev/null 2>&1; then
+  valid_font() { [ -f "$1" ] && [ "$(wc -c < "$1" 2>/dev/null | tr -d ' ')" -ge 512 ] 2>/dev/null; }
+fi
 
 # 可用空间（KB）。取不到（路径不存在、df 输出格式不同）就返回空 —— 调用方按"查不到就不拦"处理
 free_kb() {
@@ -374,14 +323,10 @@ refresh_prop() {
   A=$(cur_active); P=$(cur_pending)
   ROM_NAME=$(rom_name "$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')")
   [ -n "$(list_conflicts | head -n1)" ] && warn=" ⚠ 检测到其他字体模块，可能互相覆盖。"
-  # ⚠️ 本项目差异（重放项 6 同批）：这段描述是**内置配色版的话**，不要用主项目那句。
-  #    主项目写的是"在 WebUI 导入自己的字体并切换，默认不替换任何字体"——
-  #    本版**不提供导入**（配色是随包发进来的），照抄过去等于在模块卡片上写错话，
-  #    用户会去找一个根本不存在的"导入"按钮。proptest.sh 专门盯着这两个字符串。
   if [ "$A" = "$P" ]; then
-    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")] 内置配色版：素装(无色)/一点红/烈焰 三套一键切换，含在线更新与诊断报告。$warn"
+    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")] 在 WebUI 导入自己的字体并切换，默认不替换任何字体。$warn"
   else
-    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")，待重启后生效：$(label_of "$P")] 内置配色版：素装(无色)/一点红/烈焰 三套一键切换，含在线更新与诊断报告。$warn"
+    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")，待重启后生效：$(label_of "$P")] 在 WebUI 导入自己的字体并切换，默认不替换任何字体。$warn"
   fi
   PROP_FILE="$MODDIR/module.prop"
   [ -f "$PROP_FILE" ] || return 0
@@ -469,9 +414,8 @@ grp_load() {
   GRP_PAIRS="$pairs"
   fam=$(meta_get "$leader" fam)
   case "$fam" in ""|none) return 0 ;; esac
-  for m in "$LIB"/f*.meta; do
-    [ -f "$m" ] || continue
-    id=${m##*/}; id=${id%.meta}
+  # ⚠️ 用 lib_font_ids 而不是 glob f*.meta —— 否则内置配色（builtin_*）配不到一起
+  for id in $(lib_font_ids 2>/dev/null); do
     [ "$id" = "$leader" ] && continue
     fam2=$(meta_get "$id" fam)
     [ "$fam2" = "$fam" ] || continue
@@ -710,7 +654,7 @@ do_report() {
   A=$(cur_active); P=$(cur_pending)
   # 一键体检的结论放最前面（见 diag.sh）
   [ -f "$MODDIR/diag.sh" ] && sh "$MODDIR/diag.sh" brief 2>/dev/null
-  echo "== 保时捷字体（内置配色版） 诊断报告 =="
+  echo "== 自定义字体切换模块 诊断报告 =="
   echo "模块版本: $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null) ($(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null))"
   echo "设备: $(getp ro.product.brand) $(getp ro.product.model) | Android $(getp ro.build.version.release) (SDK $(getp ro.build.version.sdk))"
   echo "系统: $(detect_rom) / $(rom_name "$(detect_rom)")"
@@ -725,8 +669,6 @@ do_report() {
     echo "  $(name_of "$id"): $(( $(wc -c < "$LIB/$id.ttf") / 1024 )) KB | 范围 $(effective_scope "$id") | 元数据 $(meta_compact "$id")"
   done
   echo "设置: keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode)"
-  # ⚠️ 本项目差异（重放项 1）：用 lib_font_ids 数，别 glob f*.ttf ——
-  #    自带配色是 builtin_*.ttf，只数 f<数字> 的话这里永远显示 0 个。
   echo "字体库: $(lib_font_ids 2>/dev/null | grep -c .) 个，占用 $(du -sk "$LIB" 2>/dev/null | cut -f1) KB"
   echo "---- 槽位 ----"
   echo "字体目录: $(slot_dirs | tr '\n' ' ')"
@@ -766,11 +708,6 @@ case "${1:-}" in
     echo "PM=$(cat "$MODDIR/payload.mode" 2>/dev/null | tr -d '[:space:]')"
     echo "RM=$(root_manager)"
     echo "V=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)"
-    # ⚠️ VC 是给界面做**版本比较**用的（2026-10-13 加）：
-    #    更新检查必须拿"数字 versionCode"比大小，不能只凭 update.sh 的 HAS ——
-    #    否则自己内测时（本地 1.0.8、线上还是 1.0.7）界面会显示「1.0.7（已是最新）」，
-    #    看着像更新功能坏了。见 webroot/index.html 里 verNum() 那段说明。
-    echo "VC=$(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null | tr -d '[:space:]')"
     echo "MO=$(mount_result | tr ' ' ',')"
     echo "VF=$(payload_verify "$MODDIR" | tr ' ' ',')"
     if [ -f "$MODDIR/mount_missed" ]; then echo "MM=1"; else echo "MM=0"; fi
@@ -802,11 +739,9 @@ case "${1:-}" in
     done
     ;;
   list)
-    # ⚠️ 本项目差异（重放项 1）：必须走 lib_font_ids（同时认 f<数字> 和 builtin_*）。
-    #    只 glob f*.ttf 的话，界面上一个配色都列不出来（3 套配色全是 builtin_*）。
-    for id in $(lib_font_ids); do
-      f="$LIB/$id.ttf"
+    for f in $(lib_font_files 2>/dev/null); do
       [ -f "$f" ] || continue
+      id=$(basename "$f" .ttf)
       echo "$id|$(name_of "$id")|$(wc -c < "$f" | tr -d ' ')|$(meta_compact "$id")"
     done
     ;;
@@ -831,6 +766,19 @@ case "${1:-}" in
     fi
     out=$(store_font "$PART" "$3" mv); rc=$?
     echo "$out"; exit $rc
+    ;;
+  checkfont)
+    # 校验一个字体 id（或一个文件路径）是不是有效字体。给安装脚本和排障用。
+    # 退出码：0 = 有效；1 = 无效/不存在
+    _cf="$2"
+    case "$_cf" in
+      ""|*[!A-Za-z0-9_]*) ;;                     # 不是 id 形态 → 当作路径试
+      *) [ -f "$LIB/$_cf.ttf" ] && _cf="$LIB/$_cf.ttf" ;;
+    esac
+    [ -f "$_cf" ] || { echo "ERROR:找不到字体：$2"; exit 1; }
+    if valid_font "$_cf"; then echo "OK:有效字体"; exit 0; fi
+    echo "ERROR:不是有效的 TTF/OTF 字体文件（可能已损坏或被截断）"
+    exit 1
     ;;
   rename)
     check_id "$2"

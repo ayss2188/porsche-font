@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>保时捷字体（内置配色版）</title>
+<title>保时捷字体</title>
 <style>
   :root {
-    --accent: #7C5CFF;
+    --accent: #D5001C;              /* 保时捷红（与 v3.5 一致） */
     --pending-blue: #3a8bff;
     --ok: #22c55e;
     --bg: #0e0e10;
@@ -18,7 +18,7 @@
     --border: #2c2c2f;
     --shadow: 0 10px 30px -22px rgba(0,0,0,.7);
     --toast-bg: #2a2a2d;
-    --glow: rgba(124,92,255,.18);
+    --glow: rgba(213,0,28,.16);
     --warn: #f59e0b;
     --danger: #ef4444;
     color-scheme: dark;
@@ -35,8 +35,8 @@
     --border: #e4e4e9;
     --shadow: 0 10px 26px -22px rgba(0,0,0,.35);
     --toast-bg: #1c1c1e;
-    --accent: #6A48F5;
-    --glow: rgba(106,72,245,.10);
+    --accent: #A3001A;              /* 浅色下更深一点，保证对比度 */
+    --glow: rgba(213,0,28,.10);
     --warn: #d97706;
     --danger: #dc2626;
     color-scheme: light;
@@ -156,7 +156,7 @@
     box-shadow: var(--shadow); transition: transform .15s ease;
   }
   .g-btn.primary { background: var(--accent); color: #fff; border: none; }
-  .g-btn.primary-blue { background: var(--pending-blue); color: #fff; border: none; }
+  .g-btn.primary-blue { background: var(--accent); color: #fff; border: none; }
   .g-btn.urgent { background: var(--danger); color: #fff; border: none; animation: urgentPulse 1.6s ease-in-out 8; }
   .g-btn.urgent:disabled { opacity: 1; }
   @keyframes urgentPulse { 0%, 100% { opacity: 1; } 50% { opacity: .7; } }
@@ -403,8 +403,8 @@ try {
 
   <div class="header fade">
     <div>
-      <h1>保时捷字体（内置配色版）</h1>
-      <div class="subtitle">内置配色版 · 素装(无色) / 一点红 / 烈焰</div>
+      <h1 id="modName">保时捷字体</h1>
+      <div class="subtitle">默认不替换字体 · 重启生效</div>
     </div>
     <button class="theme-btn" id="themeBtn" onclick="cycleTheme()" aria-label="切换主题">🌓 自动</button>
   </div>
@@ -456,34 +456,29 @@ try {
   </div>
 
   <div class="section-title fade" style="--d:.05s">
-    <span>内置配色（点击卡片切换）</span>
+    <span>字体库（点击卡片切换）</span>
   </div>
   <div id="fontList"></div>
-  <div class="g-hint fade" id="libHint">
-    这些配色是刷机时随模块装进来的，重启后生效。
-    <b>不支持导入外部字体</b>——这是内置配色版，只在本模块自带的几套之间切换。
-  </div>
+
 
   <div class="divider"></div>
 
-  <div class="section-title fade"><span>替换范围（高级）</span></div>
+  <div class="section-title fade"><span>替换范围</span></div>
+  <div class="g-hint" style="margin-bottom:8px">日文、韩文、繁体、时钟、代码、斜体 —— 全部都会换成你的字体，不用设置。<br>如果某个字没变、或者显示成方块（□），那是<b>你的字体里没有那个字</b>；诊断报告里会列出是哪些。</div>
   <div class="switch-row fade" onclick="toggleSetting('theme_fonts')">
-    <div><div class="t">也替换「设置里选的字体」（主题 / 字体样式）</div><div class="d">MIUI / HyperOS（<code>/data/system/theme/fonts</code>）、三星（<code>/data/overlays/font</code>）、vivo（<code>/data/vfonts</code>）都会把你「设置 → 字体样式」里选的字体放在单独目录，<b>那里的文件优先级高于系统字体目录</b>。<b>不设默认值 = 按机型自动判</b>：<br>· 小米这类机型会先看主题目录里那份字体是不是<b>可变字体</b>：是 → 不碰它（你选「小米兰亭 Pro」正是为了用它的字重轴调「字体粗细」，模块会放过它、粗细照常能调）；<br>· <b>开</b>：这些目录也换成配色字体，好处是不用再去设置里切回「默认」；代价是设置里选的那个字体失效。<br>例外：vivo 的 <code>/system/fonts/VivoFont.ttf</code> 是指向该目录的符号链接，它本身仍按普通槽位替换。</div></div>
+    <div><div class="t">也替换主题里选的字体</div><div class="d">有些机型会把「设置 → 字体样式」或主题商店里选的那份字体单独存一份，它比系统字体优先，不换它就不生效。<br><b>开</b>：那份也换成你的字体，设置里的选择会失效。<br><b>关</b>：只换系统字体（小米想用「字体粗细」调粗细就保持关）。</div></div>
     <div class="sw" id="sw_theme_fonts"></div>
   </div>
   <div class="switch-row fade" onclick="toggleSetting('mount_mode')">
-    <div><div class="t">模块自带挂载（推荐）</div><div class="d"><b>开</b>：模块自己把字体挂上去，不需要装元模块，能覆盖 my_product、mi_ext 等厂商分区。<br><b>关</b>：交给 Root 管理器 / 元模块挂载（传统方式）。</div></div>
+    <div><div class="t">自带挂载</div><div class="d"><b>开</b>：模块自己把字体挂上去（推荐，不用装元模块）。<br><b>关</b>：交给 Root 管理器 / 元模块来挂。</div></div>
     <div class="sw on" id="sw_mount_mode"></div>
   </div>
-  <div class="g-hint">修改后会按当前选择自动重新生成，重启生效。</div>
+  <div class="g-hint">改完会自动重新生成，重启生效。</div>
+  <div class="divider"></div>
+
   <div class="btn-row">
     <button class="g-btn" onclick="showReport()">查看诊断报告</button>
   </div>
-
-  <div class="divider"></div>
-
-  <div class="section-title fade"><span>替换范围说明</span></div>
-  <div class="g-hint" style="margin-bottom:8px">日文、韩文、繁体、时钟、代码、斜体 —— 全部都会换成配色字体，不用设置。<br>如果某个字没变、或者显示成方块（□），那是<b>配色字体里没有那个字</b>；诊断报告里会列出是哪些。</div>
 
   <div class="divider"></div>
 
@@ -530,7 +525,8 @@ try {
   <button class="reboot-btn fade" id="rebootBtn" onclick="doReboot()">立即重启生效</button>
   <div class="hint fade" id="rebootHint">切换字体后不会立刻改变，需要重启手机</div>
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体（内置配色版）· 作者 暗影双生</div>
+  <div class="foot"><span id="modNameFoot">保时捷字体</span> · 作者 暗影双生</div>
+
 
   <div class="modal-mask" id="reportMask">
     <div class="modal">
@@ -610,31 +606,19 @@ try {
   </div>
 
 <script>
-/* ---------- 【重放项 5】模块目录：运行时自动探测，不要写死 ----------
+/* ---------- 模块目录：运行时自动探测，不要写死 ----------
    这份界面是 4 个配色包（三合一 / 718 / 911 / GT3）共用的**同一份模板**，各包 id 不同，
-   而打包脚本 build-multi.sh 只改 module.prop、不会改 HTML —— 所以路径必须运行时自己找。
-   （主项目只有一个固定 id，所以那边写死没问题；这里写死就会出现
-     "整个界面所有命令都调不到脚本" —— 页面能打开，但一片空白、什么都不工作。）
+   而打包脚本 build-multi.sh 只改 module.prop、只注入下面这个 MODULE_HINT —— 所以路径必须运行时自己找。
+   （曾经写死成主项目的 custom_font_switcher，结果保时捷这边整个界面所有命令都调不到脚本。） */
+let MODDIR = "";
+let MODID = "";                              // 本模块自己的 id（探测时一并读回）
+let DIAGWEB = "";                            // 诊断状态/正文的镜像目录（fetch 直接读，不起 shell）
+const MODULE_HINT = "porsche_font_multi";    // 先试这个 id，找不到再扫（打包脚本会按变体改写）
 
-   ⚠️ 探测必须是**同步**的：DIAGWEB 等常量紧接着就要用它算出来。
-   探测不出来（比如没有 root 桥）就兜底成多合一的默认路径。 */
-function ksuExecSync(cmd) {
-  if (typeof ksu === "undefined" || typeof ksu.exec !== "function") return null;
-  const cbName = "__ksu_sync_" + (cbCounter++);
-  let done = false, val = null;
-  window[cbName] = (errno, stdout) => { if (errno === 0) val = stdout; done = true; };
-  try { ksu.exec(cmd, "{}", cbName); } catch (e) { delete window[cbName]; return null; }
-  const t0 = Date.now();
-  while (!done && Date.now() - t0 < 3000) { /* 等回调：ksu.exec 在多数管理器里是同步回调 */ }
-  delete window[cbName];
-  return val;
-}
-
-let MODDIR = "/data/adb/modules/porsche_font_multi";   // 探测失败时的兜底（三合一）
-let MODID = "";
-const MODULE_HINT = "porsche_font_multi";    // 先试这个 id（三合一），找不到再扫
-{
-  const out = ksuExecSync(
+// 用一条 shell 把「模块目录 + id + 版本号 + 自带配色数」一次读回来（尽量少起进程）
+// vc 用来防止选到"上一次安装缓存下来的旧版本"（/data/adb/modules_update 里可能是旧的）
+async function detectModDir() {
+  const out = await ksuExec(
     'for d in /data/adb/modules/' + MODULE_HINT + ' /data/adb/modules_update/' + MODULE_HINT + ' ' +
     '/data/adb/modules/porsche_font_* /data/adb/modules_update/porsche_font_*; do ' +
     '[ -f "$d/module.prop" ] || continue; ' +
@@ -643,38 +627,39 @@ const MODULE_HINT = "porsche_font_multi";    // 先试这个 id（三合一）�
     'b=$(ls "$d"/builtin/*.ttf "$d"/builtin/*.otf 2>/dev/null | wc -l | tr -d " "); ' +
     'echo "$d|$i|$b|$vc"; done'
   );
-  const seen = new Set(), cands = [];
-  String(out || "").split("\n").map(s => s.trim()).filter(Boolean).forEach(l => {
-    const p = l.split("|"), dir = p[0];
-    // 同一条 shell 里同一个目录会被 glob 命中两次（字面量 + 通配符）→ 按目录去重
+  const lines = String(out || "").split("\n").map(s => s.trim()).filter(Boolean);
+  if (!lines.length) return null;
+
+  // 同一条 shell 里同一个目录会被 glob 命中两次（字面量 + 通配符）→ 先按目录去重
+  const seen = new Set();
+  const cands = [];
+  lines.forEach(l => {
+    const q = l.split("|");
+    const dir = q[0];
     if (!dir || seen.has(dir)) return;
     seen.add(dir);
-    cands.push({ id: p[1] || "", builtin: +(p[2] || 0), ver: +(p[3] || 0), dir });
+    cands.push({ dir, id: q[1] || "", builtin: +(q[2] || 0), ver: +(q[3] || 0) });
   });
-  if (cands.length) {
-    // 版本号大的优先：避免选到 /data/adb/modules_update 里缓存的旧版本
-    const maxVer = Math.max(0, ...cands.map(c => c.ver));
-    const fresh = maxVer > 0 ? cands.filter(c => c.ver >= maxVer) : cands;
-    // 优先：id 正好是三合一；其次：自带配色最多的那个包
-    const pick = fresh.find(x => x.id === MODULE_HINT) ||
-                 fresh.slice().sort((a, b) => b.builtin - a.builtin)[0];
-    if (pick && pick.dir) { MODDIR = pick.dir; MODID = pick.id || ""; }
-  }
+
+  // 版本号大的优先：避免选到 /data/adb/modules_update 里缓存的旧版本
+  const maxVer = Math.max(0, ...cands.map(c => c.ver));
+  const fresh = maxVer > 0 ? cands.filter(c => c.ver >= maxVer) : cands;
+
+  // 优先：id 正好是这个变体（打包脚本注入的 MODULE_HINT）；其次：自带配色最多的
+  return fresh.find(x => x.id === MODULE_HINT) ||
+         fresh.slice().sort((a, b) => b.builtin - a.builtin)[0];
 }
-if (!MODID) MODID = MODDIR.split("/").pop() || MODULE_HINT;
 
 const LIB = "/data/adb/custom_font_lib";
-let DIAGWEB = MODDIR + "/webroot/diag";   // 诊断状态/正文的镜像目录（fetch 直接读，不起 shell）
 const NONE_LABEL = "无字体（系统默认）";
 const ROM_NAMES = {hyperos:"澎湃OS/HyperOS/MIUI", coloros:"ColorOS/OPPO/一加/realme", originos:"OriginOS/vivo/iQOO", flyme:"Flyme/魅族", samsung:"三星 One UI（通用适配）", honor:"荣耀 MagicOS（通用适配）", huawei:"华为 EMUI/鸿蒙（通用适配）", nothing:"Nothing OS（通用适配）", aosp:"原生/类原生/谷歌Pixel"};
-const HUGE_FONT = 30 * 1048576;    // 主项目用它拦"导入的字体太大"；内置配色版不用（见 selectFont 注释）
+const HUGE_FONT = 30 * 1048576;    // 超过这个体积应用前要确认
 const SCOPE_TEXT = {all: "中英文", latin: "仅英文/数字", cjk: "仅中文"};
 const THEME_LABELS = {auto:"🌓 自动", light:"☀️ 浅色", dark:"🌙 深色"};
 
 let cbCounter = 0, busy = false, themePref = "auto", toastTimer = null, rebooting = false;
-let fonts = [];            // [{id,name,size}] —— 内置配色（由安装脚本注入字体库）
+let fonts = [];            // [{id,name,size}]
 let activeId = "none", pendingId = "none";
-let curCode = "";          // 本机 versionCode（从 fontctl.sh status 的 VC= 来，用于版本比较）
 
 /* ---------- 基础工具 ---------- */
 function ksuExec(cmd) {
@@ -836,9 +821,13 @@ async function backfillFam() {
   return changed;
 }
 
-// 注：主项目的 pairHint（"导入后告诉用户配对结果"）随导入功能一起去掉了 ——
-// 内置配色没有导入，也就没有"刚导入的这批"这个概念。
-// 多字重配对本身仍然生效（在 fontctl.sh 里），只是不需要在界面上提示。
+// 导入后告诉用户配对结果：同族的多份文件会自动各就各位（粗体用 Bold 那份）
+function pairHint(m, before) {
+  if (!m || !m.fam) return "";
+  const n = (before || []).filter(x => x.meta && x.meta.fam === m.fam).length + 1;
+  if (n < 2) return "";
+  return "\n已和同族的 " + n + " 个字重自动配对：系统要粗体会用 Bold 那份，要细体会用 Light 那份（不用手动设置）";
+}
 
 // 只刷新顶部状态（不重新拉字体列表），开关类操作后用它，避免连发多个 shell 调用把界面卡住
 async function refreshStatusOnly() {
@@ -857,7 +846,6 @@ function applyStatus(st) {
     document.getElementById("missedBanner").classList.toggle("show", g("MM") === "1");
     setValue("romLabel", ROM_NAMES[rom] || rom || "未知");
     setValue("curVerLabel", g("V") || "-");
-    curCode = (g("VC") || "").trim();   // 给"更新检查"做版本比较用（见 verNum 那段说明）
     mountMode = g("M") === "manager" ? "manager" : "self";
     const mo = g("MO").split(",");
     const ml = document.getElementById("mountLabel");
@@ -912,8 +900,7 @@ async function refreshConflicts() {
   } catch (e) {}
 }
 
-/* 注：主项目的 isLocked（"使用中/待生效的字体不能删"）随"删除"功能一起去掉了 ——
-   内置配色版没有删除入口，所以没有"哪个不能删"这个问题。 */
+function isLocked(id) { return selIds(activeId).includes(id) || selIds(pendingId).includes(id); }
 
 function autoScope(meta) {
   if (meta.latin === undefined && meta.cjk === undefined) return null;
@@ -945,15 +932,16 @@ function makeCard(id, name, metaText, f) {
   const ba = document.createElement("span");
   ba.className = "badge active"; ba.textContent = "当前";
   meta.append(m, bp, ba);
-  if (f) {
+  const isBuiltin = /^builtin_/.test(id);      // 自带配色 → 不显示字重/同族标签
+  if (f && !isBuiltin) {
     const addTag = (text, cls) => { const t = document.createElement("span"); t.className = "tag" + (cls ? " " + cls : ""); t.textContent = text; meta.append(t); };
-    if (f.meta.vf === "1") addTag("可变");
-    else if (f.meta.wght) addTag("字重 " + f.meta.wght);
-    // 多字重配对：同族有几个字重，一眼看得出"加粗会不会真的变粗"
-    if (f.meta.fam) {
-      const sib = fonts.filter(x => x.meta.fam === f.meta.fam);
-      if (sib.length > 1) addTag("同族 " + sib.length + " 个字重", "ok");
-    }
+    // ★ 内置配色版：**不显示字重/同族标签**。
+    //   为什么去掉（作者反馈）：三套内置配色用的是同一套可变字体，
+    //   每张卡都显示同样的「字重 330」「同族 3 个字重」—— 对用户是纯噪声，
+    //   而且"字重 330"这个数来自 OS/2 的 usWeightClass，对用户毫无意义。
+    //   用户真正需要知道的信息（能切换、哪个生效）已经在卡片标题和「当前」徽章里了。
+    //   ⚠️ 用户自己导入的字体仍然显示这些 —— 那里"有没有中文字形、加粗会不会变粗"
+    //      确实是选字体时要知道的。判断依据：内置配色的 id 以 builtin_ 开头。
   }
   info.append(n, meta);
   card.append(info);
@@ -972,6 +960,9 @@ function render() {
   const box = document.getElementById("fontList");
   box.textContent = "";
 
+  // ★ 内置配色版：卡片只有"点选切换"一个动作 —— 没有导入、没有改名、没有删除。
+  //   （自带配色是包的一部分，删了/改名了下次开机也会被 builtin_import 恢复，
+  //     给用户这些入口只会造成困惑。）
   const none = makeCard("none", NONE_LABEL, "不替换任何系统字体（默认）");
   none.onclick = () => selectFont("none");
   box.append(none);
@@ -985,9 +976,10 @@ function render() {
   if (!fonts.length) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = "没有读到内置配色。请重新刷一遍本模块 —— 安装时会把自带的三套配色装进字体库。";
+    e.textContent = "没有找到自带配色 —— 请重新刷入一次模块（自带配色由安装脚本注入）";
     box.append(e);
   }
+
 
   const hint = document.getElementById("rebootHint");
   hint.textContent = hasPending
@@ -995,11 +987,9 @@ function render() {
     : "当前没有待生效的更改，重启按钮仍可随时使用";
 }
 
-/* ---------- 说明：内置配色版没有"多选 / 批量删除" ----------
-   本模块的字体是随包发进来的（builtin_none / builtin_colon / builtin_flair），
-   删了下次刷入还会回来。主项目的 toggleManage / toggleSelect / batchDelete
-   在这里是死代码，已随"导入"那一整块一起删掉（见 _lab\同步映射表-v109.md 重放项 5）。
-   要恢复系统默认请选卡片里的「无字体（系统默认）」。 */
+/* ---------- 多选 / 批量删除：内置配色版**没有**这些功能 ----------
+   自带配色是包的一部分，删不掉（下次开机 builtin_import 会恢复），
+   所以整块去掉，避免留下指向已删按钮的引用。 */
 
 function setCardBusy(card, on) {
   if (!card) return;
@@ -1015,14 +1005,20 @@ function setCardBusy(card, on) {
   card.classList.add("busy");
 }
 
-/* ---------- 切换配色（内置配色版：只在这几套之间切） ---------- */
+/* ---------- 切换 / 重命名 / 删除 ---------- */
 async function selectFont(id) {
   if (busy) return;
-  // ⚠️ 内置配色版**关掉了「体积较大」确认框**：
-  //    本模块自带的配色是完整的可变中文字体，**本来就是 44MB 级别**，
-  //    而主项目那边的门槛是 30MB（那是针对"用户自己导入的字体"设的）——
-  //    照搬过来的话，用户每切一次配色都要点一次"仍然使用"，纯属骚扰，
-  //    而且那句"建议先精简 optimize_font.py"在本版根本不适用（配色是随包发的，改不了）。
+  const big = selIds(id).map(x => fonts.find(f => f.id === x)).filter(f => f && f.size >= HUGE_FONT);
+  if (big.length) {
+    const f = big[0];
+    const go = await dialog({
+      title: "字体体积较大",
+      msg: "「" + f.name + "」有 " + fmtSize(f.size) + "。体积很大的字体会占用更多内存、首次加载更慢，低内存手机上可能出现卡顿。" +
+           "建议先精简（刷机包 tools 文件夹里的 optimize_font.py，电脑或手机 Termux 均可运行）。仍要使用吗？",
+      okText: "仍然使用"
+    });
+    if (!go) return;
+  }
   busy = true;
   const card = document.querySelector('.option[data-id="' + id + '"]');
   setCardBusy(card, true);
@@ -1088,6 +1084,218 @@ async function ackStopped() {
   document.getElementById("stoppedBanner").classList.remove("show");
 }
 
+/* ---------- 导入 ---------- */
+/* ---------- 字体体检：读取 cmap，判断覆盖范围 / 是否可变 / 字重 ---------- */
+// 只读取字体的表目录和 cmap 等小表（几十 KB），不经过 WebView 传整个文件
+const PROBES = {
+  latin:  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  digits: "0123456789",
+  han:    "的一是不了人我在有他这中大来上国个到说们为子和你地出道也时年得就那要下以生会自着去之过家学对可她里后小",
+  // 繁体单独探：只有简体字库的字体，繁体那一号槽位/合集就该保留系统字体，否则会出方块
+  hant:   "臺灣體國學會發現點說這麼樣龍馬車門風雲飛鳥書寫語言",
+  kana:   "あいうえおかきくけこさしすせそアイウエオカキクケコ",
+  hangul: "한국어글자가나다라마바사아자차카타파하"
+};
+
+async function readHex(path, offset, length) {
+  const out = await ksuExec(`tail -c +${offset + 1} ${shq(path)} | head -c ${length} | od -An -v -tx1 | tr -d ' \\n'`);
+  const hex = out.trim();
+  const u8 = new Uint8Array(hex.length >> 1);
+  for (let i = 0; i < u8.length; i++) u8[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return u8;
+}
+const u16 = (b, o) => (b[o] << 8) | b[o + 1];
+const u32 = (b, o) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
+
+// 返回 (codepoint) => 是否有字形
+function cmapLookup(buf) {
+  const n = u16(buf, 2);
+  let best = null, bestScore = -1;
+  for (let i = 0; i < n; i++) {
+    const pid = u16(buf, 4 + i * 8), eid = u16(buf, 6 + i * 8), off = u32(buf, 8 + i * 8);
+    if (off + 4 > buf.length) continue;
+    const fmt = u16(buf, off);
+    let score = -1;
+    if ((pid === 3 && eid === 10) || (pid === 0 && (eid === 4 || eid === 6))) score = fmt === 12 ? 4 : -1;
+    else if ((pid === 3 && eid === 1) || (pid === 0 && eid <= 3)) score = fmt === 4 ? 3 : (fmt === 12 ? 2 : -1);
+    if (score > bestScore) { bestScore = score; best = {off, fmt}; }
+  }
+  if (!best) return null;
+  const t = best.off;
+  if (best.fmt === 12) {
+    const groups = u32(buf, t + 12);
+    return cp => {
+      let lo = 0, hi = groups - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1, g = t + 16 + mid * 12;
+        if (g + 12 > buf.length) return false;
+        const s = u32(buf, g), e = u32(buf, g + 4);
+        if (cp < s) hi = mid - 1; else if (cp > e) lo = mid + 1; else return (u32(buf, g + 8) + cp - s) !== 0;
+      }
+      return false;
+    };
+  }
+  if (best.fmt === 4) {
+    const segX2 = u16(buf, t + 6), seg = segX2 >> 1;
+    const endO = t + 14, startO = endO + segX2 + 2, deltaO = startO + segX2, rangeO = deltaO + segX2;
+    return cp => {
+      if (cp > 0xFFFF) return false;
+      for (let i = 0; i < seg; i++) {
+        if (rangeO + i * 2 + 2 > buf.length) return false;
+        const e = u16(buf, endO + i * 2);
+        if (cp > e) continue;
+        const s = u16(buf, startO + i * 2);
+        if (cp < s) return false;
+        const delta = u16(buf, deltaO + i * 2), ro = u16(buf, rangeO + i * 2);
+        if (ro === 0) return ((cp + delta) & 0xFFFF) !== 0;
+        const a = rangeO + i * 2 + ro + (cp - s) * 2;
+        if (a + 2 > buf.length) return false;
+        const gid = u16(buf, a);
+        return gid !== 0 && ((gid + delta) & 0xFFFF) !== 0;
+      }
+      return false;
+    };
+  }
+  return null;
+}
+
+// 从 name 表取"族名"，再压成一个只含 ASCII 的族键（meta_set 只收 [A-Za-z0-9_.-]，
+// 而族名常带空格甚至是中文）。同一个族的多个字重会算出同一个键 —— 多字重配对就靠它。
+function famKeyFromName(buf) {
+  if (!buf || buf.length < 6) return "";
+  const cnt = u16(buf, 2), so = u16(buf, 4);
+  let fam = "", typo = "";
+  for (let i = 0; i < cnt; i++) {
+    const o = 6 + i * 12;
+    if (o + 12 > buf.length) break;
+    const pid = u16(buf, o), nid = u16(buf, o + 6), len = u16(buf, o + 8), off = u16(buf, o + 10);
+    if (nid !== 1 && nid !== 16) continue;
+    if (pid !== 3 && pid !== 0 && pid !== 1) continue;
+    const s = so + off;
+    if (s + len > buf.length || len > 200) continue;
+    let t = "";
+    if (pid === 3 || pid === 0) {                    // UTF-16BE
+      for (let k = 0; k + 1 < len; k += 2) t += String.fromCharCode(u16(buf, s + k));
+    } else {                                          // Mac Roman ≈ ASCII
+      for (let k = 0; k < len; k++) t += String.fromCharCode(buf[s + k]);
+    }
+    t = t.replace(/\u0000/g, "").trim();
+    if (!t) continue;
+    if (nid === 16) typo = t; else if (!fam) fam = t;
+  }
+  const name = typo || fam;
+  if (!name) return "";
+  const ascii = name.replace(/[^A-Za-z0-9_.-]/g, "");
+  if (ascii.length >= 2) return ascii.slice(0, 40).toLowerCase();
+  let h = 0;                                          // 纯中文族名：退化成哈希（同族算出来一样）
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return "h" + h.toString(36);
+}
+
+// 返回元数据对象；失败/不支持时抛出错误
+async function probeFont(path) {
+  const head = await readHex(path, 0, 12);
+  const tag0 = String.fromCharCode(head[0], head[1], head[2], head[3]);
+  if (tag0 === "ttcf") throw new Error("TTC 合集");
+  const num = u16(head, 4);
+  if (!num || num > 64) throw new Error("字体目录异常");
+  const dir = await readHex(path, 12, num * 16);
+  const tables = {};
+  for (let i = 0; i < num; i++) {
+    const o = i * 16;
+    tables[String.fromCharCode(dir[o], dir[o + 1], dir[o + 2], dir[o + 3])] = {off: u32(dir, o + 8), len: u32(dir, o + 12)};
+  }
+  const meta = {vf: tables["fvar"] ? 1 : 0};
+  // ★ 可变字体的**字重可调范围**（fvar 的 wght 轴 min/max）。
+  //   为什么要读它：只显示 OS/2 的 usWeightClass（比如 330）对用户毫无意义 ——
+  //   用户真正想知道的是"系统里的粗细滑杆能不能调、能调到多少"。
+  //   读法：fvar 头 16 字节，然后轴记录（每 20 字节：tag(4) + min/default/max 各 16.16 定点）。
+  if (tables["fvar"]) {
+    try {
+      const fv = await readHex(path, tables["fvar"].off, Math.min(tables["fvar"].len, 16 + 20 * 8));
+      const axOff = u16(fv, 4), axCnt = u16(fv, 8), axSize = u16(fv, 10);
+      for (let i = 0; i < axCnt && i < 8; i++) {
+        const o = axOff + i * axSize;
+        if (o + 20 > fv.length) break;
+        const tag = String.fromCharCode(fv[o], fv[o + 1], fv[o + 2], fv[o + 3]);
+        if (tag !== "wght") continue;
+        const fx = k => ((fv[k] << 24) | (fv[k + 1] << 16) | (fv[k + 2] << 8) | fv[k + 3]) / 65536;
+        const lo = Math.round(fx(o + 4)), hi = Math.round(fx(o + 12));
+        if (lo > 0 && hi > lo) { meta.wghtLo = lo; meta.wghtHi = hi; }
+        break;
+      }
+    } catch (e) { /* 读不到就算了，不影响其它信息 */ }
+  }
+  if (tables["CFF "] || tables["CFF2"]) meta.cff = 1;
+  if (tables["COLR"] || tables["CBDT"] || tables["sbix"]) meta.color = 1;
+  if (tables["maxp"]) meta.glyphs = u16(await readHex(path, tables["maxp"].off + 4, 2), 0);
+  if (tables["OS/2"]) meta.wght = u16(await readHex(path, tables["OS/2"].off + 4, 2), 0);
+  if (tables["name"]) {
+    // 族键：多字重配对的分组依据（同一族的 Regular/Bold/Light 会算出同一个值）
+    try {
+      const nb = await readHex(path, tables["name"].off, Math.min(tables["name"].len, 64 * 1024));
+      const k = famKeyFromName(nb);
+      if (k) meta.fam = k;
+    } catch (e) { /* 没有族名也不影响导入 */ }
+  }
+  if (tables["cmap"]) {
+    const buf = await readHex(path, tables["cmap"].off, Math.min(tables["cmap"].len, 4 * 1024 * 1024));
+    const has = cmapLookup(buf);
+    if (has) {
+      const ratio = s => { const cps = Array.from(s); return cps.filter(c => has(c.codePointAt(0))).length / cps.length; };
+      meta.latin = ratio(PROBES.latin) >= 0.95 && ratio(PROBES.digits) >= 0.99 ? 1 : 0;
+      meta.digits = meta.latin;                      // 数字并进 latin 判定，但单独记一份给界面显示
+      meta.cjk = ratio(PROBES.han) >= 0.9 ? 1 : 0;
+      meta.hant = ratio(PROBES.hant) >= 0.8 ? 1 : 0;
+      meta.kana = ratio(PROBES.kana) >= 0.8 ? 1 : 0;
+      meta.hangul = ratio(PROBES.hangul) >= 0.8 ? 1 : 0;
+    }
+  }
+  return meta;
+}
+// 同族一共有几个字重（含它自己）。>1 就说明"加粗/细体"能各就各位。
+function sibCount(m, before) {
+  if (!m || !m.fam) return 1;
+  return (before || []).filter(x => x.meta && x.meta.fam === m.fam).length + 1;
+}
+
+// 字重提示：这一条直接回答"为什么用模块调粗细没效果"
+//   · 已经同族配对（有 Bold/Light 等多份）→ 交给 pairHint 说，这里不再多嘴
+//   · 可变字体（有 fvar / wght 轴）→ 系统的「字体粗细」滑杆对它有效
+//   · 静态单字重（绝大多数网上下的字体）→ 滑杆和加粗都不会有变化，这是**字体本身的限制**：
+//     系统要 weight=700 时会去同一族里找"700 那份文件"，而我们一个字体铺满了所有槽位，
+//     拿到的还是同一份，所以看不出加粗。主题包（MTZ）之所以能加粗，通常是它额外带了一份 Bold。
+function weightHint(m, before) {
+  if (!m || m.latin === undefined) return "";
+  if (sibCount(m, before) > 1) return "";
+  if (m.vf === 1) return "\n这个字体是可变字体：系统的「字体粗细」调节对它有效";
+  if (m.wght === undefined) return "";   // 老版本导入的字体没采过字重，不猜
+  const w = String(m.wght);
+  return "\n只有一个字重（wght=" + w + "）：系统的「加粗 / 粗细调节」不会有变化（字体本身的限制，" +
+         "不是模块坏了；主题包 MTZ 能加粗通常是因为它另带了一份 Bold，本模块也支持这样配对）";
+}
+
+// 导入完把覆盖范围直接说清楚：缺哪种文字，对应的槽位就会自动保留（不会出方块）
+function coverageText(m, before) {
+  if (!m || m.latin === undefined) return "";
+  const y = v => (v ? "✓" : "✗");
+  let s = "该字体：英文 " + y(m.latin) + "  数字 " + y(m.digits === undefined ? m.latin : m.digits)
+        + "  简体 " + y(m.cjk) + "  繁体 " + y(m.hant)
+        + "  日文 " + y(m.kana) + "  韩文 " + y(m.hangul);
+  const keep = [];
+  if (!m.cjk) keep.push("简体/繁体");
+  else if (!m.hant) keep.push("繁体");
+  if (!m.kana) keep.push("日文");
+  if (!m.hangul) keep.push("韩文");
+  if (keep.length) s += "\n缺 " + keep.join("、") + " → 对应槽位会自动保留系统字体，不会出现方块";
+  else s += "\n六项齐全，全部槽位都会用这个字体";
+  return s + weightHint(m, before) + pairHint(m, before);
+}
+/* ---------- 文件浏览器 / 导入相关代码：内置配色版**已全部移除** ----------
+   本版只在本模块自带的三套配色之间切换，没有「导入字体」这个功能，
+   所以原来的文件浏览器、进度条、导入确认那一整套都不需要了。
+   （保留这段说明是为了让以后同步主项目的人一眼看出：这里是**故意删掉的**，
+     不是漏同步。） */
 /* ---------- 替换范围设置 / 诊断 ---------- */
 const settings = {mount_mode: "self", theme_fonts: "0"};   // 1.0.9：只剩这两个开关
 let mountMode = "self";
@@ -1915,14 +2123,13 @@ async function googleAction(action) {
 
 
 /* ---------- GitHub 更新 ---------- */
-/* 【重放项 5】localStorage 必须按模块 id 隔离 ——
-   4 个配色包（三合一 / 718 / 911 / GT3）共用这一份界面模板，WebUI 又是**同源**的，
-   所以 localStorage 是共用的：装了另一个配色包会读到上一个包缓存的"更新信息 / 重启状态"，
-   表现为"明明装的是 718，却提示 911 的新版本"。
-   主题偏好（cf_theme）故意**不**隔离：那是用户对整个界面的偏好，换包时保持更自然。 */
+// 4 个配色包共用同一份界面模板，localStorage 也是共用的（同源）——
+// 不按模块 id 分开的话，装了 718 的设置会被 911 覆盖（主题、更新缓存、"待重启"标记全串）。
+// 同理还要按**版本号**分开：刷了新版之后不该再读到旧版的更新缓存。
 function lsName(base) { return base + ":" + (MODID || MODULE_HINT); }
-const UPDATE_CHECK_KEY = lsName("cf_update_checked");
-const UPDATE_CACHE_KEY = lsName("cf_update_info");
+function updateCheckKey() { return lsName("cf_update_checked"); }
+function updateCacheKey() { return lsName("cf_update_info"); }
+function updateDoneKey()  { return lsName("cf_update_done"); }
 let updateInfo = null;
 
 function parseKV(out) {
@@ -1949,7 +2156,7 @@ async function checkUpdate(manual) {
     void start;
     if (!out) { setValue("newVerLabel", "检查超时"); lbl.classList.add("off"); if (manual) showToast("检查超时，请稍后再试"); return; }
     const u = parseKV(out);
-    try { localStorage.setItem(UPDATE_CHECK_KEY, String(Date.now())); } catch (e) {}
+    try { localStorage.setItem(updateCheckKey(), String(Date.now())); } catch (e) {}
     lbl.classList.remove("ok", "warn", "off");
     if (!u.NEW_CODE) {
       setValue("newVerLabel", "检查失败");
@@ -1957,15 +2164,9 @@ async function checkUpdate(manual) {
       if (manual) showToast("检查失败：" + (u.ERR || "未知错误"));
       return;
     }
-    try { localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(u)); } catch (e) {}
+    try { localStorage.setItem(updateCacheKey(), JSON.stringify(u)); } catch (e) {}
     renderUpdate(u);
-    if (manual) {
-      // 说人话：手上比仓库新的时候，别报"已是最新版本"（那会让人以为更新坏了）
-      const curN = verNum(u.CUR_CODE), newN = verNum(u.NEW_CODE);
-      if (u.HAS === "1") showToast("发现新版本 " + u.NEW_VER);
-      else if (curN > 0 && newN > 0 && newN < curN) showToast("本地版本（" + (u.CUR_VER || "") + "）比仓库新，无需更新");
-      else showToast("已是最新版本");
-    }
+    if (manual) showToast(u.HAS === "1" ? "发现新版本 " + u.NEW_VER : "已是最新版本");
   } catch (e) {
     setValue("newVerLabel", "检查失败");
     if (manual) showToast("检查失败：" + errText(e));
@@ -1973,10 +2174,9 @@ async function checkUpdate(manual) {
 }
 
 // 已下载安装、等待重启的版本号（存 localStorage，刷新页面后依然显示「重启生效」）
-// 同样按模块 id 隔离（见上面 lsName 的说明）
-function updateDoneCode() { try { return localStorage.getItem(lsName("cf_update_done")) || ""; } catch (e) { return ""; } }
+function updateDoneCode() { try { return localStorage.getItem(updateDoneKey()) || ""; } catch (e) { return ""; } }
 function setUpdateDone(code) {
-  try { if (code) localStorage.setItem(lsName("cf_update_done"), String(code)); else localStorage.removeItem(lsName("cf_update_done")); } catch (e) {}
+  try { if (code) localStorage.setItem(updateDoneKey(), String(code)); else localStorage.removeItem(updateDoneKey()); } catch (e) {}
 }
 // 安装完成后：把「下载并安装」变成红色「立即重启生效」
 function applyRebootButton(ver) {
@@ -2040,11 +2240,7 @@ function startUpdateProgress() {
           updProg("正在下载刷机包 " + fmtSize(cur), Math.min(0.9, cur / (8 * 1048576)));
         }
       } else if (stage === "verify") {
-        // ⚠️ 文案要说实话（1.0.9.2 起）：校验**只看模块 ID 和版本号**，
-        //    **不再用 sha256 拦截**（指纹只写进日志，见 update.sh 里那段说明）。
-        //    以前这里写的是「（sha256 / 模块 ID）」，会让人以为"指纹不对就不给装" ——
-        //    而真实行为恰好相反：指纹不一致也照装（由 Root 管理器在安装时校验）。
-        updProg("正在校验刷机包（模块 ID / 版本号）…", 0.96);
+        updProg("正在校验刷机包（sha256 / 模块 ID）…", 0.96);
       } else if (stage === "install") {
         updProg("正在安装（管理器解包中，请稍等）…", 0.98);
       } else if (stage === "finished") {
@@ -2062,43 +2258,15 @@ function startUpdateProgress() {
   return () => { stop = true; };
 }
 
-/* ---------- 版本比较（【重放/修复】UI 必须自己比，不能只看 HAS） ----------
-   背景（2026-10-13 作者内测时踩到，主项目同样有）：
-     老代码是 `if (!has) 显示 u.NEW_VER + "（已是最新）"` ——
-     **无条件显示"仓库里的那个版本号"**，从不和"我装的版本"比。
-     于是自己内测时（本地 1.0.8、线上还是 1.0.7）界面会说
-     「1.0.7（已是最新）」—— 明明自己更新，却显示了个比手上旧的版本号，
-     看着就像"更新功能坏了 / 被降级了"。
-
-   正确判据：拿**数字 code** 比大小（jnum 已经保证是数字，比字符串可靠）。
-     NEW > CUR → 有更新
-     NEW = CUR → 已是最新
-     NEW < CUR → 手上的比仓库还新（还没发版 / 内测版）→ 显示**手上的版本** */
-function verNum(v) {
-  const n = parseInt(String(v == null ? "" : v).replace(/[^0-9]/g, ""), 10);
-  return isNaN(n) ? -1 : n;
-}
-
 function renderUpdate(u) {
   const lbl = document.getElementById("newVerLabel");
   updateInfo = u;
   const has = u.HAS === "1";
-  const curN = verNum(u.CUR_CODE), newN = verNum(u.NEW_CODE);
-  // 仓库那份比手上旧：说明本地是内测/未发布版，绝不能把它当成"最新版"来显示
-  const ahead = has ? false : (curN > 0 && newN > 0 && newN < curN);
   const done = updateDoneCode();
   const pendingReboot = has && !!done && done === String(u.NEW_CODE);
   if (!has) setUpdateDone("");   // 已经跑上新版了，清掉「待重启」标记
-  // ⚠️【2026-10-13 定下的规矩】这一栏是「最新版本」= **云端（仓库）的版本**，
-  //    所以**永远照实显示云端的 u.NEW_VER**，绝不用本地版本去顶替它 ——
-  //    否则"云端到底是哪个版本"就说不清了（作者内测时正是吃了这个亏：
-  //    本地 1.0.8 / 线上 1.0.7，界面只显示一个版本号，看不出谁新谁旧）。
-  //    本地与云端的关系，一律放进括号里说明。
-  setValue("newVerLabel",
-    pendingReboot ? u.NEW_VER + "（已安装，待重启）"
-    : has ? u.NEW_VER + "（可更新）"
-    : ahead ? u.NEW_VER + "（本机 " + (u.CUR_VER || "") + " 比云端新）"
-    : u.NEW_VER + "（已是最新）");
+  setValue("newVerLabel", pendingReboot ? u.NEW_VER + "（已安装，待重启）"
+    : has ? u.NEW_VER + "（可更新）" : u.NEW_VER + "（已是最新）");
   lbl.classList.remove("ok", "warn", "off");
   lbl.classList.add(has ? "warn" : "ok");
   if (pendingReboot) applyRebootButton(u.NEW_VER); else resetInstallButton(has);
@@ -2120,7 +2288,7 @@ async function installUpdate() {
   if (busy || !updateInfo || updateInfo.HAS !== "1") return;
   const ok = await dialog({
     title: "安装新版本 " + updateInfo.NEW_VER + "？",
-    msg: "将从 GitHub 下载刷机包，核对模块 ID 与版本号后，交给当前 Root 管理器安装（最终校验由管理器完成）。字体库、设置和当前字体选择都会保留，安装完成后重启生效。",
+    msg: "将从 GitHub 下载刷机包，校验后用当前 Root 管理器安装。字体库、设置和当前字体选择都会保留，安装完成后重启生效。",
     okText: "下载并安装"
   });
   if (!ok) return;
@@ -2183,25 +2351,42 @@ async function installUpdate() {
 
 // 初始化：先等状态读回来（要等版本号填好），再决定用哪份更新信息
 // 注意：以前是 refreshAll() 还没回来就去比对 curVerLabel，结果缓存永远对不上、用不上
-//
-// ⚠️ 缓存必须在**新检查回来之前**就用，但要防"陈旧"：
-//    缓存里的 CUR_CODE 是上次检查时**本机**的版本号。
-//    如果用户换了包（装上内测版 / 升降级），它就和现在装的对不上 ——
-//    这时旧缓存（比如"仓库有 1.0.8"）会先被画出来，看着自相矛盾。
-//    所以：CUR_CODE 对不上就**直接丢弃**缓存，宁可先显示"检查中"。
 (async function init() {
+  // ★ 第一件事：把模块目录探测出来。**必须在这里**，因为后面 loadSettings/refreshAll
+  //   都会拼 `sh ${MODDIR}/fontctl.sh ...`，MODDIR 空着的话一条命令都发不出去。
+  try {
+    const found = await detectModDir();
+    if (found && found.dir) {
+      MODDIR = found.dir;
+      if (found.id) MODID = found.id;
+      DIAGWEB = MODDIR + "/webroot/diag";
+    }
+  } catch (e) {}
+  if (!MODDIR) MODDIR = "/data/adb/modules/" + MODULE_HINT;   // 兜底：按注入的 id 猜
+  if (!DIAGWEB) DIAGWEB = MODDIR + "/webroot/diag";
+
+  // ★ 模块名从 module.prop 读（别再写死在 HTML 里）。
+  //   为什么：这份界面是 4 个变体共用的同一份模板，而各变体名字不同
+  //   （三合一 / 718素装版·无色 / 911经典版·一点红 / GT3赛道版·烈焰）。
+  //   以前写死成主项目的「自定义字体切换模块」——装保时捷的人打开界面看到别人的名字，
+  //   会以为自己装错了。
+  try {
+    const nm = String(await ksuExec(
+      'sed -n "s/^name=//p" ' + MODDIR + '/module.prop 2>/dev/null | head -n1 | tr -d "\\r"'
+    ) || "").trim();
+    if (nm) {
+      setValue("modName", nm);
+      setValue("modNameFoot", nm);
+      document.title = nm;
+    }
+  } catch (e) { /* 读不到就用默认的「保时捷字体」 */ }
   loadSettings();
   refreshGoogle();
   await refreshAll();
   let cached = null;
-  try { cached = JSON.parse(localStorage.getItem(UPDATE_CACHE_KEY) || "null"); } catch (e) {}
+  try { cached = JSON.parse(localStorage.getItem(updateCacheKey()) || "null"); } catch (e) {}
   const curVer = (document.getElementById("curVerLabel").textContent || "").trim();
-  // 双保险：缓存的版本号 和 缓存里记的 CUR_CODE，两个都要和"现在装着的"对得上
-  const cacheFresh = cached && cached.NEW_CODE &&
-    cached.CUR_VER === curVer &&
-    String(cached.CUR_CODE || "") === String(curCode || "");
-  if (cacheFresh) renderUpdate(cached);
-  else { try { localStorage.removeItem(UPDATE_CACHE_KEY); } catch (e) {} }
+  if (cached && cached.NEW_CODE && cached.CUR_VER === curVer) renderUpdate(cached);
   // 每次打开页面都联网核对一次
   setTimeout(() => checkUpdate(false), 600);
 })();

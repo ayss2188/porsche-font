@@ -1,5 +1,7 @@
 #!/system/bin/sh
 # diag.sh - 一键体检
+
+# ⚠️ 本文件对主项目（custom_font_switcher）有固定改动 —— 同步主项目时见 common.sh 顶部的重放清单。
 #
 # 目的：把「重启了也不生效 / 字体没变化」的可能原因一次跑完，并给出大白话结论。
 # 特点：
@@ -35,9 +37,10 @@
 # 本脚本永远返回 0，避免影响安装流程。
 
 MODDIR=${0%/*}
-# 兜底：直接执行且 $0 没有目录部分时，找本机实际装着的配色包。
-# ⚠️ 本项目差异（重放项 6）：不要写死主项目的 custom_font_switcher ——
-#    换皮成保时捷后那个 id 根本不存在（4 个包 id 是 porsche_font_multi/_718/_911/_gt3）。
+# ★ 内置配色版差异（重放项）：**不要写死主项目的 custom_font_switcher** ——
+#   本项目 4 个包 id 是 porsche_font_multi / _718 / _911 / _gt3，
+#   写死主项目 id 的话，那个目录根本不存在 → 诊断报告直接打不开。
+#   兜底：$0 没有目录部分时，找本机实际装着的那个配色包。
 if [ -z "$MODDIR" ] || [ ! -f "$MODDIR/module.prop" ]; then
   for _d in /data/adb/modules/porsche_font_*; do
     [ -f "$_d/module.prop" ] || continue
@@ -61,11 +64,15 @@ LIB=${LIB:-/data/adb/custom_font_lib}
 SETTINGS=${SETTINGS:-$LIB/settings.conf}
 
 ID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
-ID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
-# ⚠️ 本项目差异（重放项 6）：兜底用"已安装目录的目录名"，不要写死主项目的 id。
-#    写成 custom_font_switcher 的话 M/UPD 会指向一个不存在的目录，
-#    报告里"已安装 vs 暂存"那几段就全是错的（真机上会被当成"模块没装好"）。
-[ -n "$ID" ] || ID=${MODDIR##*/}
+# ★ 内置配色版差异：读不到 id 时扫本机实际装着的配色包（4 个 id 是 porsche_font_*）
+if [ -z "$ID" ]; then
+  for _d in /data/adb/modules/porsche_font_*; do
+    [ -f "$_d/module.prop" ] || continue
+    ID=${_d##*/}
+    break
+  done
+fi
+[ -n "$ID" ] || ID=porsche_font_multi
 M="/data/adb/modules/$ID"
 [ -d "$M" ] || M="$MODDIR"
 UPD="/data/adb/modules_update/$ID"
@@ -769,16 +776,7 @@ fi
 [ -n "$APPLIED_TTC" ] || APPLIED_TTC=0
 
 # 字体库清单
-# ⚠️ 本项目差异（重放项 1）：必须走 lib_font_ids（同时认 f<数字> 和 builtin_*），
-#    只 glob f*.ttf 的话报告里会写"字体库 0 个"，用户以为模块装坏了。
-#
-# ⚠️ 两个变量别混用（改了输出格式就必须改所有读它的地方 —— 施工单里点名的坑）：
-#      LIB_FONTS = **id** 列表（builtin_none / f1700000000）→ 用来拼 "$LIB/<id>.name"
-#      LIB_FILES = **完整路径**列表                        → 用来 sha256sum / stat / head
-#    主项目那边 LIB_FONTS 存的是路径（ls -1 "$LIB"/f*.ttf），改成 id 之后，
-#    sec8 与打包分支里"当路径用"的地方会全部静默失效（sha256 找不到文件、文件名变空）。
-LIB_FONTS=$(lib_font_ids 2>/dev/null)
-LIB_FILES=$(lib_font_files 2>/dev/null)
+LIB_FONTS=$(lib_font_files 2>/dev/null)
 LIB_N=$(printf '%s\n' "$LIB_FONTS" | grep -c . )
 
 # ---------------------------------------------------------------------------
@@ -2174,14 +2172,14 @@ sec8() {
   ls -lZ /system/fonts 2>/dev/null | head -n 250 | while IFS= read -r L; do echo "      $L"; done
   echo "  /system/fonts 总占用: $(du -sk /system/fonts 2>/dev/null | cut -f1) KB"
   echo "  字体库文件（$(printf '%s\n' "$LIB_FONTS" | grep -c . ) 个）:"
-  # 本项目的字体库有两种命名（f<数字> 与 builtin_*），统一走 lib_font_files（重放项 1）
-  ls -lZ $(lib_font_files) 2>/dev/null | head -n 30 | while IFS= read -r L; do echo "      $L"; done
+  printf '%s\n' "$LIB_FONTS" | while IFS= read -r _lf; do [ -f "$_lf" ] && ls -lZ "$_lf" 2>/dev/null; done | head -n 30 | while IFS= read -r L; do echo "      $L"; done
   echo "  字体库名称/元数据:"
-  for i in $LIB_FONTS; do
+  for f in $LIB_FONTS; do
+    i=${f##*/}; i=${i%.ttf}
     echo "      $i  name=$(cat "$LIB/$i.name" 2>/dev/null | tr -d '\r\n')  meta=$(tr '\n' ',' < "$LIB/$i.meta" 2>/dev/null | sed 's/,$//')"
   done
   echo "  字体库文件首 4 字节与表标签:"
-  for f in $LIB_FILES; do
+  for f in $LIB_FONTS; do
     echo "      ${f##*/}  $(head -c 4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')  标签: $(sfnt_tags "$f")"
   done
   if [ -n "$TTCFIRST" ]; then
@@ -2542,13 +2540,14 @@ pack_extra() {
   subnote "导出字体库指纹"
   echo "@@SECTION:LIBFONTS"
   ls -l "$LIB" 2>/dev/null
-  for f in $LIB_FILES; do
+  for f in $LIB_FONTS; do
     # 字体库文件也在闪存上：轻量模式同样只读前 1 MB（自己的字体常有几十 MB，全读太伤盘）
     # 1.0.9.2：字体库文件走同一个稀疏指纹口径（和字体目录保持一致，便于互相比对），
     # 用于判断“库里这个文件有没有被动过”；不再需要轻量分支。
     printf '%s  %s  %s\n' "$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)" "$(stat -c %s "$f" 2>/dev/null)" "$f"
   done
-  for i in $LIB_FONTS; do
+  for f in $LIB_FONTS; do
+    i=${f##*/}; i=${i%.ttf}
     echo "--- $i  name=$(cat "$LIB/$i.name" 2>/dev/null | tr -d '\r\n')"
     cat "$LIB/$i.meta" 2>/dev/null
   done
@@ -2607,7 +2606,7 @@ pack_extra() {
 
 # ---------------------------------------------------------------------------
 report_full() {
-  echo "== 保时捷字体（内置配色版） · 一键体检报告 =="
+  echo "== 自定义字体切换模块 · 一键体检报告 =="
   collect_once
   conclusion
     sec0
@@ -3566,13 +3565,9 @@ SAVED="$LIB/font_diag.txt"
     echo
     if [ -n "$SAVED" ]; then
       echo "报告已保存到: $SAVED"
-      # ⚠️ 这句以前写的是「另有一份同内容的 font_diag.txt 备用」—— 那句话**已经不成立**：
-      #    · Download 里现在只出一个文件（1.0.9 起不再产"备用名"）；
-      #    · 真保存失败时退到的是**模块目录**里的 $LIB/font_diag.txt（上面 $SAVED 会显示实际路径），
-      #      而不是 Download 里再放一份 —— 所以"另有一份"会让用户去 Download 找第二个文件。
-      #    用户能看到的路径就写在上一行 $SAVED 里，照它去文件管理里找即可。
+      echo "（另有一份同内容的 font_diag.txt 备用；"
       echo "  文件管理 → 内部存储 → Download → 把这一个 txt 发回给作者即可，"
-      echo "  里面已经包含结论、槽位、系统字体配置原文、每个字体的指纹与目录映射。"
+      echo "  里面已经包含结论、槽位、系统字体配置原文、每个字体的 sha256 与目录映射）"
     else
       echo "报告保存失败，请把上面这段截图发回给作者。"
     fi
