@@ -207,6 +207,38 @@ _trim() {
 }
 
 # ---------------------------------------------------------------------------
+# 语言标签精确判定（2026-10-14 新增）
+#
+# 为什么需要它：`_role_set` 原来用 `*ko*` / `*ja*` 这种**子串**判日韩，会误命中：
+#     lang="und-Nkoo"（西非 NKo 文字）  含 "ko" → 被判成**韩文**
+#     lang="und-Java"（爪哇文）          含 "ja" → 被判成**日文**
+# 后果不只是"名字叫错"：自适应补全会把这两种字体当成韩文/日文槽位**换掉**，
+#   而用户字体里没有 NKo / 爪哇字形 → **那两种文字变方块**。
+#
+# 判定规则（精确，不是子串）：
+#     整串必须是 <码> 或 <码>-<地区…> 的形式；
+#     也接受逗号分隔的多个标签（如 `zh-Hant,zh-Bopo`）。
+#     `und-Nkoo` 里的 "nkoo" 是以 `und-` 开头的脚本码，**不算**语言码。
+# ---------------------------------------------------------------------------
+_lang_is() {   # $1=语言标签串  $2=要找的码（如 ko / ja）
+  local _s _t _p
+  _s=$(_lc "${1:-}")
+  _t=$(_lc "$2")
+  [ -n "$_s" ] || return 1
+  while [ -n "$_s" ]; do
+    _p=${_s%%,*}
+    case "$_p" in
+      "$_t"|"$_t"-*) return 0 ;;
+    esac
+    case "$_s" in
+      *,*) _s=${_s#*,} ;;
+      *)   break ;;
+    esac
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
 # 【1.0.9 新增】自适应扫描：从**设备自己的字体配置**挖出"哪种语言用哪个字体文件"
 #
 # 为什么需要（作者要求）：
@@ -246,15 +278,26 @@ slot_scan_names() {
               # 装饰/符号/等宽/衬线这类不碰（和主文字族同一套判定）
               _xml_family_ok "$n" "" || continue
               # ★ 按"配置里的语言标签"定角色（这是实锤；文件名只能算线索，见上面说明）
+              #
+              # ★★ 2026-10-14 修：这里原来是 `*ja*` / `*ko*` **子串**匹配，会误命中：
+              #     lang="und-Nkoo"（西非 NKo 文字）含 "ko" → 判成**韩文**
+              #     lang="und-Java"（爪哇文）        含 "ja" → 判成**日文**
+              #   危害不是"名字叫错"：自适应补全会把这两种字体当韩文/日文槽位**换掉**，
+              #   而用户字体没有 NKo / 爪哇字形 → **那两种文字变方块**。
+              #   （合成一个"没适配过的 ROM"复现过：NKo、Java 两个都被当成日韩补进了计划。）
+              #   现在用 `_lang_is`（完整语言标签判定），`und-Nkoo` 里的 "nkoo" 是以
+              #   `und-` 开头的脚本码，不再算语言码。
               l=$(_lc "$l")
               case "$l" in
                 *zh-hant*|*zh-bopo*|*zh-hk*|*zh-tw*|*zh-mo*) role=lang ;;
                 *zh*)                                          role=cjk ;;
-                *ja*)                                          role=kana ;;
-                *ko*)                                          role=hangul ;;
                 "")                                            role=main ;;
                 *en*|*und-latn*)                               role=latin ;;
-                *)                                             role="" ;;   # 其它语言：不碰
+                *)
+                  if   _lang_is "$l" ja; then role=kana
+                  elif _lang_is "$l" ko; then role=hangul
+                  else role=""          # 其它语言（阿拉伯、天城文、NKo、爪哇…）：不碰
+                  fi ;;
               esac
               [ -n "$role" ] || continue
               body=${fam#*>}
@@ -361,12 +404,38 @@ slot_oem_names() {
 #   cjk     中文专用槽位（Hans / Hant / SC / TC）
 #   main    其他主文字槽位（OEM 中英混合主字体、数字命名权重文件等）
 # ---------------------------------------------------------------------------
+
+
 _role_set() {
-  local l="$1"
+  local l="$1" lang="${2:-}"
   case "$l" in
+    # ★ 2026-10-13 修：`*cond*`（窄体/浓缩体）必须**排在符号规则之前**。
+    #   原因：符号规则里的 `*icon*` 是纯子串匹配，会把 **sem·icon·densed** 命中 ——
+    #   于是 `SFPRO-SemiCondensed{Bold,Light}.otf`（魅族自己的西文/数字字体，
+    #   见 targets/flyme.list）被判成"符号"，而符号**永不替换**。
+    #   实测来源：2 份魅族真机报告（Redmi M098FE / Flyme 12.6）里这两个文件
+    #   都在 /product/fonts、都被配置引用，却一个槽位都没进计划。
+    #   把窄体判定提上来就正常了 —— **顺序在这里就是语义，别随手调**。
+    *condensed*|*cond[-_.]*) ROLE=display; return ;;
     *emoji*|*symbol*|*icon*|*material*|*color*|*flag*|*dingbat*|*lottie*|*braille*|*mathematical*|*music*)
       ROLE=sym; return ;;
-    *kore*|*hangul*|*korean*|*jpan*|*japan*|*kana*|*jp[-_.]*|*kr[-_.]*|\
+    # ★ 2026-10-14 修：日韩改成"**看语言标签**"，不再用 `*ko*`/`*ja*` 子串。
+    #   有语言标签时以它为准（配置里的 lang 才是实锤）；
+    #   没有标签时才退回文件名，且用更严的边界模式（`korean`/`japanese` 这类整词，
+    #   或 `-kr-`/`_kr_`/`.kr.` 这种带分隔符的写法），避免再撞 NKo / Java。
+    *)
+      if _lang_is "$lang" ko || { [ -z "$lang" ] && case "$l" in *korean*|*hangul*|*kore[-_.]*) true ;; *) false ;; esac; }; then
+        ROLE=hangul; return
+      fi
+      if _lang_is "$lang" ja || { [ -z "$lang" ] && case "$l" in *japanese*|*kana*|*japan[-_.]*) true ;; *) false ;; esac; }; then
+        ROLE=kana; return
+      fi
+      case "$l" in
+        *jpan*|*jp[-_.]*|*kr[-_.]*) ROLE=lang; return ;;
+      esac
+      ;;
+  esac
+  case "$l" in
     *arab*|*hebr*|*thai*|*deva*|*beng*|*taml*|*telu*|*gujr*|*guru*|*knda*|*mlym*|*orya*|*sinh*|\
     *khmr*|*khmer*|*laoo*|*mymr*|*myanmar*|*geor*|*armn*|*ethi*|*tibt*|*tibetan*|*cherokee*|\
     *milanpro*|*naskh*|*nastaliq*|*kufi*|*lao[-_.]*)
@@ -379,7 +448,7 @@ _role_set() {
   esac
   case "$l" in
     *lobster*|*dancing*|*comingsoon*|*carrois*|*dela*|*chamberi*|*gulfs*|*neumatic*|*interscaled*|\
-    *bebas*|*beihai*|*silk*|*condensed*|*cond[-_.]*|*rounded*|*square*|*hz[-_.]*|*qinghe*|*mihaus*|\
+    *bebas*|*beihai*|*silk*|*rounded*|*square*|*hz[-_.]*|*qinghe*|*mihaus*|\
     *c800*|*rcf*)
       ROLE=display; return ;;
   esac
@@ -399,7 +468,11 @@ _role_set() {
 }
 
 # 对外接口：输入原始文件名，输出角色
-slot_role() { _role_set "$(_lc "$1")"; echo "$ROLE"; }
+#   $2 = 可选的**语言标签**（配置里那个 family 的 lang 属性）。
+#        给了就用它精确判日韩（`_lang_is`），没有才退回文件名模式。
+#        为什么加这个参数：文件名里 `NKo`/`Java` 这种会撞 `*ko*`/`*ja*`，
+#        而配置里的 lang 标签是权威的 —— 详见 `_lang_is` 的注释。
+slot_role() { _role_set "$(_lc "$1")" "${2:-}"; echo "$ROLE"; }
 
 # ---------------------------------------------------------------------------
 # 自动让路（2026-10-12 新增）—— 1.0.8 的核心
@@ -496,8 +569,24 @@ _role_wanted() {
 #   · 依赖设备自己的字体配置（有引用才认），不靠猜
 #   · 排除 Emoji/符号/纯图标字体（_role_set 已经判成 sym 的跳过）
 #   · 只输出"配置引用了、且文件确实在某个字体目录里"的项
+#
+# ★ 2026-10-14：**加进程内缓存**（SCAN_CANDS_CACHE）。
+#   为什么必须加：`_role_count`/`slot_adaptive_extra` 和 `slot_plan` 都要这份结果，
+#   而这个函数要遍历字体目录**逐文件判定存在性**（起进程）。沙箱实测单次 8 秒、
+#   真机约 1 秒 —— 算两遍会让 `slot_plan` 从 20 秒涨到 29 秒，
+#   而 `payload_mount` 的自愈有 **20 秒超时** → 超时 → 计划空 → 自愈失效。
+#   （这条是回归测试抓到的：newfix-test 第 2 节"自愈没生效"。）
+#   "设备上存在哪些字体文件"在一次运行内不会变，缓存是安全的。
 # ---------------------------------------------------------------------------
 slot_scan_candidates() {
+  if [ -n "${SCAN_CANDS_CACHE+x}" ]; then
+    printf '%s\n' "$SCAN_CANDS_CACHE" | grep -v '^[[:space:]]*$'
+    return 0
+  fi
+  SCAN_CANDS_CACHE=$(_slot_scan_candidates_uncached)
+  printf '%s\n' "$SCAN_CANDS_CACHE" | grep -v '^[[:space:]]*$'
+}
+_slot_scan_candidates_uncached() {
   local role name lang l d dirs
   dirs=$(slot_dirs)
   # ⚠ 必须读三个字段：slot_scan_names 每行是 "角色 文件名 语言标签"。
@@ -510,11 +599,13 @@ slot_scan_candidates() {
     l=$(_lc "$name")
     case "$l" in *.ttf|*.otf) ;; *) continue ;; esac
     # 名字看着是符号/表情的，绝不换（换了就是满屏怪符号）
-    # 注：这里写成 if 而不是 `[ ... ] && continue`，纯粹是为了可读性与稳妥 ——
-    #     本次真正的 bug 在下面 read 的字段数上（见函数开头注释）。
-    _role_set "$l"
+    # 注：这里写成 if 而不是 `[ ... ] && continue`，纯粹是为了可读性与稳妥。
+    _role_set "$l" "$lang"
     if [ "$ROLE" = sym ]; then continue; fi
     for d in $dirs; do
+      # ★ 注意这里输出的是 $role（来自 slot_scan_names 的语言→角色判定），
+      #   **不是** $ROLE —— `_role_set` 只是用来挡符号字体。两者的判据不同：
+      #   scan 那条看配置的 lang（权威），_role_set 看文件名。
       [ -f "$FSROOT$d/$name" ] && printf '%s %s %s\n' "$role" "$d" "$name"
     done
   done
@@ -708,36 +799,111 @@ slot_scan_report() {
 # 保守原则：**只补空缺，绝不动模板已经管到的角色**。
 #   模板命中的那些是"这个机型真正的主字体"，优先级高于"配置里引用到的一切"；
 #   无脑全加会把装饰字体、地区专用字体一起换掉 —— 那不是自适应，是乱来。
+#
+# ★★★ 2026-10-14 修一个"静默失效"的严重 bug ★★★
+#
+#   1.0.9.2 那次性能优化把它改成了：
+#       scan="$base"        # base = 调用方刚算好的 slot_candidates 输出
+#   意图是"别把同一件重活干两遍"。但 **base 里根本没有扫描结果** ——
+#   `slot_candidates` 只汇总 XML 引用 + targets 清单 + OEM 命名规则三路，
+#   **从来不调用 `slot_scan_candidates`**。于是下面那句
+#       printf '%s\n' "$scan" | grep "^$role "
+#   变成"从 base 里挑出 base 里已经有的东西" —— **整段自适应等于被关掉了**。
+#
+#   实测（合成一个"没适配过"的 ROM：配置里只有 lang="ko"/"ja"/"zh-Hans" 三个族）：
+#       候选(base)      = main + cjk
+#       扫描(scan)      = main + cjk + hangul + kana      ← 韩文/日文在这里
+#       自适应补出来的   = **空**                          ← 修之前
+#       最终计划         = main + cjk                      ← 韩文/日文永远不换
+#
+#   代价很隐蔽：**只有"没主动适配过的机型"才会踩到**，而那些机型恰好最需要自适应，
+#   而且报告里看不出来（报告第 0 节只会说"模板已覆盖本机需要的角色"）。
+#
+#   所以这里必须**真的去扫描**。性能上仍保留"一次算好、下面复用"的做法：
+#   `slot_scan_names` / `slot_dirs` 都有进程内缓存，重复调用不再重新解析配置。
+#
+# ★★★ 2026-10-14 第二处修：补的时候**必须再校验语言标签**，不能只看角色名 ★★★
+#
+#   修好上面那个 bug 之后，三星真机上立刻暴露了第二个坑：
+#       hangul /system/fonts NotoSansNKo-Regular.ttf        ← NKo 是西非文字！
+#       kana   /system/fonts NotoSansJavanese-Regular.otf   ← 爪哇文！
+#   原因在 `slot_scan_names` 的角色判定：`*ko*` 会命中 `NKo`（`lang="und-Nkoo"`），
+#   于是 NKo 被判成 hangul；`lang="und-Java"` 之类也会掉进 kana。
+#   这些字体**本来就不该被换**，真换上去那几个文字就变方块了。
+#
+#   所以这里对每个角色**再核一遍它的文字体系**：
+#       hangul → 必须真的是 ko        kana → 必须真的是 ja
+#   `lang` / `hant` 两种不用额外卡：`_xml_family_ok` 已经把它们限死在 zh* 上了。
+#
+#   ★ 用什么核：`_scan_script_of <文件名>` —— 它就是"从扫描缓存里查这个文件的文字体系"，
+#     读的是**配置里的 lang 标签**（权威），而不是文件名。别自己再解析一遍。
+#     注意 `slot_scan_candidates` 的输出是 **3 字段**（角色 目录 文件名）——
+#     它**不带语言标签**，所以语言必须另查（第一版就是误以为它带，白折腾了三轮）。
+# ---------------------------------------------------------------------------
+_adaptive_role_ok() {   # $1=角色 $2=文件名
+  local ss
+  case "$1" in
+    # 只有这两个需要额外核：短语言码容易撞车
+    #   lang="und-Nkoo"（西非 NKo）被 *ko* 命中 → 判成 hangul
+    #   lang="und-Java"（爪哇文）等被 *ja* 命中 → 判成 kana
+    # `_scan_script_of` 返回的是**文字体系** cjk/kana/hangul/hant/lang，
+    # 所以这里就是"scan 给的体系必须和角色一致"。
+    hangul) [ "$(_scan_script_of "$2")" = hangul ] && return 0; return 1 ;;
+    kana)   [ "$(_scan_script_of "$2")" = kana ]   && return 0; return 1 ;;
+    *)      return 0 ;;
+  esac
+}
+# ---------------------------------------------------------------------------
+# 自适应补齐（只补空缺角色，绝不动模板已覆盖的）
+#
+# 设计（作者 2026-10-14 定的理念，实现必须严格照这个来）：
+#   **自适应 = 扫一遍设备自己的配置 − targets 已知的 = 剩下的就是没适配的 → 模块兜住。**
+#   所以就算没主动适配过，别人也能用；报告收多了再把剩下的手工补进 targets。
+#
+# 保守原则：**只补空缺角色**（cjk / kana / hangul / lang / hant 里，模板一个都没覆盖到的）。
+#   模板命中的那些是"这个机型真正的主字体"，优先级高于"配置里引用到的一切"。
+#
+# ★★ 2026-10-14 修两个"静默失效"的 bug（详见 文档\跨项目同步表.md 16.11.7）★★
+#
+#   ① 1.0.9.2 那次"提速"把 `scan=$(slot_scan_candidates)` 改成了 `scan="$base"`。
+#      但 `slot_candidates` **不含扫描结果**（它只汇总 XML 引用 + targets 清单 + OEM 命名），
+#      于是下面的角色 grep 变成"从 base 里挑 base 里已经有的" → **整段自适应等于被关闭**。
+#      只有"没主动适配过的机型"会踩到 —— 恰好是最需要它的那些。
+#      这里必须**真的去扫描**。
+#
+#   ② 扫描出来的行是按**配置的 lang** 定的角色，而 `slot_scan_names` 原来用 `*ko*`/`*ja*`
+#      **子串**判日韩 → `lang="und-Nkoo"`（西非 NKo）含 "ko"、`lang="und-Java"` 含 "ja"，
+#      被当成韩文/日文补进来 → **那两种文字会被换成用户字体、变方块**。
+#      已在 `slot_scan_names` 里改用 `_lang_is`（完整语言标签）判掉，这里不再需要额外核验。
+#
+# ⚠️ 性能：本函数在**自愈路径**上（`payload_mount` → `fontctl.sh apply` → `slot_plan` → 这里），
+#    自愈有 `_to_s 20` 的 20 秒上限。所以：
+#      · `slot_scan_candidates` 有进程内缓存（`SCAN_CANDS_CACHE`），不会被算两遍；
+#      · 下面那个 while **必须用 here-doc 而不是管道** —— 管道会让它跑在子 shell 里，
+#        `ADAPT_HANGUL` 的赋值传不出来（表现是"名单永远为空"，又静默失效）。
 # ---------------------------------------------------------------------------
 slot_adaptive_extra() {
-  local base="$1" role n scan
+  local base="$1" scan c_cjk c_kana c_hangul c_lang c_hant _r _d _nm _lg
   CANDS_TMP="$base"
-  # ★ 1.0.9.2：**用调用方已经算好的候选，别再自己算一遍**。
-  #   原来这里 `scan=$(slot_scan_candidates)` —— 而调用它的 slot_plan 前面刚做过
-  #   `CAND_RAW=$(slot_candidates ...)`，两者都要解析全部字体配置 + 逐文件判定，
-  #   等于**同一件重活干两遍**（作者机器上 C4「算槽位计划」28 秒，P2「候选枚举」只要 1 秒，
-  #   差的这一段主要就是这次重复计算）。
-  #   现在：base 非空时直接用；为空才回退去算（保持兼容旧调用方）。
-  # ★ 内置配色版差异：不用主项目那个写死的目录 —— 用当前模块目录，
-  #   实在没有才回退去扫本机装着的配色包（4 个 id 是 porsche_font_*）
-  if [ -z "$base" ]; then
-    _sd="${MODDIR:-}"
-    [ -n "$_sd" ] && [ -d "$_sd" ] || {
-      for _d in /data/adb/modules/porsche_font_*; do
-        [ -f "$_d/module.prop" ] || continue
-        _sd=$_d
-        break
-      done
-    }
-    [ -n "$_sd" ] || _sd=/data/adb/modules/porsche_font_multi
-    base=$(slot_candidates "$_sd")
-  fi
-  scan="$base"
+  scan=$(slot_scan_candidates)
   [ -n "$scan" ] || return 0
-  for role in cjk kana hangul lang hant; do
-    n=$(_role_count "$role")
+
+  # 角色计数只算 5 次（原来是每行算一次 = 每行起一个子 shell，把自愈的 20 秒吃光）
+  c_cjk=$(_role_count cjk);      c_kana=$(_role_count kana)
+  c_hangul=$(_role_count hangul); c_lang=$(_role_count lang); c_hant=$(_role_count hant)
+
+  printf '%s\n' "$scan" | while IFS=' ' read -r _r _d _nm; do
+    [ -n "$_r" ] && [ -n "$_nm" ] || continue
+    case "$_r" in
+      cjk)    n=$c_cjk ;;
+      kana)   n=$c_kana ;;
+      hangul) n=$c_hangul ;;
+      lang)   n=$c_lang ;;
+      hant)   n=$c_hant ;;
+      *)      continue ;;
+    esac
     [ "$n" -gt 0 ] && continue          # 这个角色模板已经管到了 → 不补
-    printf '%s\n' "$scan" | grep "^$role " 2>/dev/null
+    printf '%s %s %s\n' "$_r" "$_d" "$_nm"
   done | sort -u
 }
 
