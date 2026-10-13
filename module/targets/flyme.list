@@ -1,9 +1,8 @@
 # Flyme / 魅族 字体槽
 # 拉丁/数字/谷歌部分为标准 AOSP 命名；中文 flyme 槽为常见命名，
 # 安装时会扫描真机目录补全 FlymeSans/MeizuSans 等实际存在的文件。
-# 注意：魅族另有 /data/customizecenter/font/ 个性化字体机制（flymeFont.ttf 就在那里，
-# 用户在主题商店下主题时生成）。本清单只覆盖系统字体链路；那个目录由 slots.sh 的
-# theme_slots() 单独收（不按名字匹配），并且只在用户打开「也替换设置里选的字体」时才动。
+# 注意：魅族另有 /data/customizecenter/font/ 个性化字体机制（flymeFont.ttf 就在那里），
+# 由 slots.sh 的 theme_slots() 单独收（不按名字匹配），只在用户打开「也替换设置里选的字体」时才动。
 Roboto-Thin.ttf
 Roboto-ExtraLight.ttf
 Roboto-Light.ttf
@@ -37,3 +36,24 @@ MeizuSans-Regular.ttf
 MeizuSans-Medium.ttf
 MeizuSans-Bold.ttf
 FlymeFont.ttf
+# 魅族自有命名（2026-10-13 从 2 份真机报告补，依据见 跨项目同步表 第 16 节）
+SFDIN-Regular.otf
+SFDIN-Medium.otf
+SFDIN-Bold.otf
+SFDIN-Light.otf
+SFDINCondensed-Bold.otf
+SFPRO-Regular.otf
+SFPRO-Medium.otf
+SFPRO-Bold.otf
+SFPRO-SemiCondensedBold.otf
+SFPRO-SemiCondensedLight.otf
+DMSerifDisplay.otf
+FlymeNumber-VF.ttf
+# 真机（MEIZU 21 Note / Flyme 12.6）配置引用了、清单却没有的（2026-10-14 补）
+SourceSansPro-Regular.ttf
+SourceSansPro-SemiBold.ttf
+SourceSansPro-Bold.ttf
+SourceSansPro-Italic.ttf
+SourceSansPro-SemiBoldItalic.ttf
+SourceSansPro-BoldItalic.ttf
+CarroisGothicSC-Regular.ttf
