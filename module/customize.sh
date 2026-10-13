@@ -152,6 +152,14 @@ if [ "$LAST" != none ]; then
   [ -n "$_HAVE" ] && ui_print "  上次选择：$_HAVE（字体库里有）"
   [ -n "$_MISS" ] && ui_print "  上次选择：$_MISS（⚠ 字体库里**没有**这个文件 —— 通常是被清理过/换过字体库）"
 
+  # ★ 2026-10-14：加"要等一会儿"的提示（与主项目同步）。
+  #   为什么必须加：下一行 `fontctl.sh apply` 要**扫一遍机器上的字体配置 + 逐文件判定**，
+  #   字体多的机器上要十几秒到一分钟。而这段时间安装界面**一行输出都没有** ——
+  #   用户会以为卡死了、甚至去强杀管理器。真机反馈过（截图里就是停在"上次选择"这行不动）。
+  #   提示要写在 apply **之前**（写在后面就是马后炮了，用户已经等完了）。
+  #   ⚠️ 改这里时别删：它不参与任何逻辑，纯粹是给用户看的。
+  ui_print "  ⏳ 正在扫描你机器上的字体，大概十几秒到一分钟，卡住不动是正常的，请稍等…"
+
   _APPLY_OUT=$(sh "$MODPATH/fontctl.sh" apply "$LAST" 2>&1)
   OUT=$(printf '%s\n' "$_APPLY_OUT" | tail -n1)
   case "$OUT" in
@@ -239,6 +247,9 @@ if [ -n "$PEND" ] && [ "$PEND" != none ]; then
   if [ ! -s "$MODPATH/slots.map" ]; then
     ui_print " "
     ui_print "- 正在为「$PEND」生成挂载计划…"
+    # ★ 2026-10-14（与主项目同步）：这一步要扫一遍字体配置，会停十几秒到一分钟，
+    #   必须先在界面上说清楚，否则用户以为卡死（真机反馈过）。
+    ui_print "  ⏳ 第一次生成要扫描你机器上的字体，大概十几秒到一分钟，卡住不动是正常的，请稍等…"
     sh "$MODPATH/fontctl.sh" apply "$PEND" >/dev/null 2>&1 || true
     if [ ! -s "$MODPATH/slots.map" ]; then
       ui_print "⚠ 挂载计划没有生成（slots.map 为空）"
@@ -255,6 +266,8 @@ if [ -n "$PEND" ] && [ "$PEND" != none ]; then
 fi
 
 LIB_COUNT=$(lib_font_ids 2>/dev/null | grep -c '^builtin_')
+# ★ 2026-10-14（与主项目同步）：`conflicts` 也要扫一遍机器上的字体配置，会停一会儿。
+ui_print "- 正在检查有没有其它字体模块…（也会扫一遍字体配置，稍等）"
 CONFLICTS=$(sh "$MODPATH/fontctl.sh" conflicts 2>/dev/null | cut -d'|' -f2 | tr '\n' ' ')
 
 ui_print " "
