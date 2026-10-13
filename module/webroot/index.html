@@ -251,9 +251,25 @@
      为什么不是 88vh：真机上状态栏 + 手势条会吃掉一截，88vh 时底部按钮仍可能被挤出去。 */
   #reportMask .modal { max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
   #reportMask .modal > * { flex: 0 0 auto; min-height: 0; }
-  /* 报告区 = 唯一可滚动的部分（!important 是为了压过上面的 .rep-view { height: 46vh }） */
-  #reportMask .rep-view { flex: 1 1 auto !important; min-height: 90px; height: auto !important; margin-bottom: 8px; }
-  #reportMask textarea.report { flex: 1 1 auto !important; min-height: 90px; height: auto !important; margin-bottom: 8px; }
+  /* ★ 2026-10-14 修：两个视图的高度必须**一样**，而且必须**填满**可用空间。
+     以前写的是 `flex: 1 1 auto; min-height: 90px`：
+       · `flex-basis: auto` = 按**内容高度**起步 —— 结构化视图内容少时（比如报告刚开个头）
+         它的基准高度就只有几十像素；
+       · `flex-shrink: 1` + `min-height: 90px` = 弹窗内容一多就被压到 90px 下限。
+     实测（393×851 视口，无头浏览器量真实高度）：
+       旧写法  0节 结构化=90/原样=90 · 1节 104/90 · 1节+未完 186/90 · 12节 339/90
+               → 原样文本**永远 90px**（12 节内容挤在 90px 里，就是"中间小小的什么都看不到"），
+                 结构化视图跟着内容变 → **两个框大小不一致**
+       新写法  四种内容量全部 349/349 → 一致、填满、按钮仍在屏幕内
+     修法：两个视图用**完全同一套**规则 —— 都从 0 基准长（flex-basis:0）、
+     都填满剩余空间（flex-grow:1）、都**不许缩**（flex-shrink:0）、外加 46vh 兜底。 */
+  #reportMask .rep-view,
+  #reportMask textarea.report {
+    flex: 1 0 0 !important;
+    min-height: 46vh !important;
+    height: auto !important;
+    margin-bottom: 8px;
+  }
   /* 生成中的说明文字限高，最多 3 行，不许再挤压报告区 */
   #reportMask #reportTip { max-height: 3.4em; overflow-y: auto; }
   #reportMask .rep-prog { flex: 0 0 auto; }
