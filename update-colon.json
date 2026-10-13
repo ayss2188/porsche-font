@@ -1,7 +1,7 @@
 {
-  "version": "v3.9.1",
-  "versionCode": 40,
-  "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v3.9.1/porsche-font-911-v3.9.1.zip",
-  "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/UPDATE-v3.9.1.md",
-  "sha256": "e939c0a5296a027e4fb81992c249d229bfdd9ff023d4197e257031662616f33d"
+  "version": "v4.0",
+  "versionCode": 4000,
+  "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v4.0/porsche-font-911-v4.0.zip",
+  "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/UPDATE-v4.0.md",
+  "sha256": "579eda37d59349851de9465342cec962a5bd9a709a9ff9349c777f8e160fb28e"
 }

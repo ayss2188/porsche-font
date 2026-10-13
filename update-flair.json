@@ -1,7 +1,7 @@
 {
-  "version": "v3.9.1",
-  "versionCode": 40,
-  "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v3.9.1/porsche-font-gt3-v3.9.1.zip",
-  "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/UPDATE-v3.9.1.md",
-  "sha256": "ef9ef60717c55642d1bf517f770c5c300980d97c89a8ae632d595e4a63a5f448"
+  "version": "v4.0",
+  "versionCode": 4000,
+  "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v4.0/porsche-font-gt3-v4.0.zip",
+  "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/UPDATE-v4.0.md",
+  "sha256": "ff7b0c142b9527f4506e6d671082c3725edbc490c137459941a6e8a292c74d83"
 }
