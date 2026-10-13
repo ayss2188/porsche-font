@@ -1,0 +1,41 @@
+# 三星 One UI（Galaxy / 国行 SM-xxxx）字体槽
+# 三星命名与 AOSP 差别很大：界面主字体是 OneUISans-VF，另有 SECFallback / SECNum / SECCJK 等，
+# aosp.list 覆盖不到。依据 Galaxy S25 Ultra（SM-S9380 / Android 16 / OneUI 80500）真机报告，
+# 生成过程与逐条依据见 跨项目同步表 第 15 节。
+# ⚠️ 这里**只写单文件 .ttf/.otf**。中文在 .ttc 合集里（SECCJK-Regular.ttc index 2/3），
+#    但 .ttc 由 slots.sh 的 ttc 分支按 ttc_enabled 开关统一收，**写进清单没有任何作用**
+#    （实测见 跨项目同步表 第 16.10 节）。
+OneUISans-VF.ttf
+OneUISans-Regular.ttf
+OneUISans-Medium.ttf
+OneUISans-SemiBold.ttf
+OneUISans-Bold.ttf
+OneUISans-Light.ttf
+OneUISans-Thin.ttf
+OneUISansKR-VF.ttf
+OneUISansKR-Regular.ttf
+OneUISansKR-Bold.ttf
+SECCJK-Regular-Extra.ttf
+SECCJK-Regular.ttf
+SECCJK-Bold.ttf
+SECFallback.ttf
+SECFallback-Bold.ttf
+SECNum-VF.ttf
+SECNumFixed-VF.ttf
+Roboto-Regular.ttf
+RobotoFlex-Regular.ttf
+RobotoStatic-Regular.ttf
+SourceSansPro-Regular.ttf
+SourceSansPro-SemiBold.ttf
+SourceSansPro-Bold.ttf
+SourceSansPro-Italic.ttf
+SourceSansPro-SemiBoldItalic.ttf
+SourceSansPro-BoldItalic.ttf
+CarroisGothicSC-Regular.ttf
+ComingSoon.ttf
+DancingScript-Regular.ttf
+# 主题字体落点 /data/overlays/font 里的常见名字（由 theme_slots() 按同名挑）
+SamsungSans-Regular.ttf
+SamsungSans-Bold.ttf
+SamsungOneUI-Regular.ttf
+SamsungOneUI-Bold.ttf
