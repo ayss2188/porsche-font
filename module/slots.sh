@@ -532,14 +532,179 @@ _slot_script() {
 #   唯一保留的**极端保护**在 slot_plan 里：字体完全没有中文字形时中文槽位不动 ——
 #   否则整个界面全变方块，用户连 WebUI 都看不清、没法换回来。
 #   （参数 keep_lang / keep_special 保留只为兼容旧调用方，本函数不再使用它们。）
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-15（作者的理念）：锁屏字体名单 **扫一次存起来，以后直接读**
+#   名单是从字体配置 XML 里读出来的，而 XML 只在系统更新/刷机时才变 ——
+#   典型"扫一次长期有效"。存在 $LIB/.scan/（专门的缓存目录）。
+# ---------------------------------------------------------------------------
+_lk_dir() { printf '%s' "$LIB/.scan"; }
+
+_lk_key() {   # 当前状态指纹（变了就说明名单要重算）
+  local x k=""
+  for x in $(slot_xml_files 2>/dev/null); do
+    [ -f "$x" ] || continue
+    k="$k$x:$(stat -c '%s-%Y' "$x" 2>/dev/null | tr -d ' ')"
+  done
+  printf '%s' "$k"
+}
+
+_lk_load() {   # 命中就 set LOCKSCREEN_CACHE 并返回 0
+  local d="$LIB/.scan" f cur
+  f="$d/lockscreen.txt"
+  [ -s "$f" ] || return 1
+  [ -s "$d/lockscreen.key" ] || return 1
+  cur=$(_lk_key)
+  [ "$cur" = "$(cat "$d/lockscreen.key" 2>/dev/null)" ] || return 1
+  LOCKSCREEN_CACHE=$(cat "$f" 2>/dev/null)
+  # ⚠️ 必须和函数里那份保持同一种格式：_is_lockscreen 用 `*" $1 "*` 匹配**空格分隔**的串。
+  #    第一版我写成管道分隔 `|a|b|` → 格式不一致 → 锁屏字体一个都认不出来。
+  if [ -n "$LOCKSCREEN_CACHE" ]; then
+    _LOCK_LIST_SPACED=$(printf '%s' "$LOCKSCREEN_CACHE" | tr '\n' ' ')
+  else
+    _LOCK_LIST_SPACED=""
+  fi
+  return 0
+}
+
+
+# ★ 2026-10-15：按**文件名**补认锁屏字体（作者真机实测出来的缺口）
+#   为什么需要：`_role_set` 是按文件名判 clock 角色的（*clock*），
+#     而这份名单原来只扫 XML 的 family 名 —— 两边判据不一致，
+#     于是"只有文件、配置里没引用"的那批（真机例子：/product/fonts/MiClock.otf、
+#     MitypeClock.otf 及其 Mono 变体）进了计划却不在名单里 → 开关对它们无效。
+#   这里按文件名再扫一遍字体目录，把漏的补上。
+_lk_add_byname() {   # $1=已有名单（换行分隔）→ 输出补全后的名单
+  local d f n out="$1"
+  for d in $(slot_dirs 2>/dev/null); do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -f "$f" ] || continue
+      n=${f##*/}
+      case "$n" in *'*') continue ;; esac
+      case "$(_lc "$n")" in
+        *clock*|*keyguard*) ;;
+        *) continue ;;
+      esac
+      case "
+$out
+" in
+        *"
+$n
+"*) ;;                                # 已有，跳过
+        *) out="$out$n
+" ;;
+      esac
+    done
+  done
+  printf '%s' "$out" | grep -v '^[[:space:]]*$' | sort -u
+}
+
+_lk_save() {   # $1=名单内容
+  local d="$LIB/.scan"
+  mkdir -p "$d" 2>/dev/null || return 0
+  printf '%s\n' "$1" > "$d/lockscreen.txt.tmp.$$" 2>/dev/null && \
+    mv -f "$d/lockscreen.txt.tmp.$$" "$d/lockscreen.txt" 2>/dev/null
+  _lk_key > "$d/lockscreen.key.tmp.$$" 2>/dev/null && \
+    mv -f "$d/lockscreen.key.tmp.$$" "$d/lockscreen.key" 2>/dev/null
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+_LOCK_FAM_RE='clock|lock|keyguard|watch'
+slot_lockscreen_files() {
+  if [ -n "${LOCKSCREEN_CACHE+x}" ]; then
+    [ -n "$LOCKSCREEN_CACHE" ] && printf '%s\n' "$LOCKSCREEN_CACHE"
+    return 0
+  fi
+  # ★ 2026-10-15（作者的理念）：**先读磁盘缓存** —— 扫过一次就不用再遍历 XML 了。
+  #   命中就设好 LOCKSCREEN_CACHE / _LOCK_LIST_SPACED 并直接返回。
+  if _lk_load 2>/dev/null; then
+    [ -n "$LOCKSCREEN_CACHE" ] && printf '%s\n' "$LOCKSCREEN_CACHE"
+    return 0
+  fi
+  local x fam hdr l body rest name out="" _XLS
+  _XLS=$(slot_xml_files)          # ★ 只取一次
+  for x in $_XLS; do
+    [ -f "$x" ] || continue
+    # ⚠️ 不用 `tr | sed | while`：那样 while 在子 shell 里，out 传不出来。
+    #    改成"先把文件摊平成一行行的 <family 记录，再用 here-doc 喂给 while"。
+    while IFS= read -r fam || [ -n "$fam" ]; do
+      case "$fam" in '<family'*) ;; *) continue ;; esac
+      hdr=${fam%%>*}
+      l=$(_lc "$hdr")
+      case "$l" in
+        *clock*|*keyguard*) ;;
+        *) continue ;;
+      esac
+      # 这个 family 里的所有字体文件都算进去
+      body=${fam#*>}
+      rest=$body
+      while :; do
+        case "$rest" in
+          *'>'*'<'*) ;;
+          *) break ;;
+        esac
+        rest=${rest#*>}
+        name=${rest%%<*}
+        rest=${rest#*<}
+        _trim "$name"; name="$TRIM_OUT"
+        case "$name" in
+          *.[Tt][Tt][Ff]|*.[Oo][Tt][Ff]) out="$out$name
+" ;;
+        esac
+      done
+    done <<EOF
+$(tr '\n\r\t' '   ' 2>/dev/null < "$x" | sed 's/<family/\n<family/g')
+EOF
+  done
+  # 去目录、去空行、去重
+  LOCKSCREEN_CACHE=$(printf '%s' "$out" | sed 's#.*/##' | grep -v '^[[:space:]]*$' | sort -u)
+  LOCKSCREEN_CACHE=$(_lk_add_byname "$LOCKSCREEN_CACHE")
+  # ★ 再建一份"空格分隔"的副本给 _is_lockscreen 做纯 shell 匹配 —— `tr` 只跑这一次。
+  #   （不给它每次现跑 `tr`：那个函数会被调用几十次，每次一个进程。）
+  _LOCK_LIST_SPACED=$(printf '%s' "$LOCKSCREEN_CACHE" | tr '\n' ' ')
+    # ★ 2026-10-15（作者的理念）：**扫完就存起来** —— 以后（含重启后）直接读，不再遍历 XML。
+    _lk_save "$LOCKSCREEN_CACHE" 2>/dev/null
+  [ -n "$LOCKSCREEN_CACHE" ] && printf '%s\n' "$LOCKSCREEN_CACHE"
+  return 0
+}
+# 判定单个文件：0 = 锁屏专用（shell 惯例：0 = 真）
+#   ★ 零进程：名单在全局 _LOCK_LIST_SPACED 里，用"两侧带空格"的模式匹配避免子串误命中
+#     （比如 `Clock.otf` 不该命中 `MiClock.otf`）。
+_is_lockscreen() {   # $1=文件名
+  [ -n "${1:-}" ] || return 1
+  [ -n "${_LOCK_LIST_SPACED+x}" ] || slot_lockscreen_files >/dev/null 2>&1
+  case " ${_LOCK_LIST_SPACED:-} " in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
+}
+
 _role_wanted() {
-  local role="$1" scope="$2" keep_lang="$3" keep_special="$4" name="${5:-}"
+  local role="$1" scope="$2" keep_lang="$3" keep_special="$4" name="${5:-}" keep_lock="${6:-0}"
   # ★ 极端保护（唯一的保留规则）：字体完全没有中文字形 → **除符号槽外一律不换**。
   #   为什么必须管住 main/latin 这些"看着跟中文无关"的角色：
   #     · 很多设备的通用主字体族（无语言的 <family>）**本身就是渲染中文的那个族**；
   #     · 一旦换掉，整个界面（连 WebUI 自己）会变方块，用户连「换回无字体」都点不到。
   #   所以这条是"整体不换"，不是"只不换中文槽"。正常字体（有中文字形）不会命中，一律全替换。
   if [ "${CJK_GUARD:-0}" = 1 ]; then
+    return 1
+  fi
+  # ★ 2026-10-14：**锁屏专用字体**（family 名带 clock，见 slot_lockscreen_files）。
+  #   开了「保留锁屏字体」就把它们挡在计划外 —— 这样用户还能在系统里挑锁屏时钟样式；
+  #   而**其余所有槽位照旧全替换**。
+  #   注意这不是以前那个 keep_special：那个是"clock/mono/italic/serif/display 一锅端"
+  #   （不开 20 个、开了 70 个），把等宽/斜体/衬线/装饰也一起留了，
+  #   用户体感就是"替换不全"。这里是**精确判据**，实测一台小米机认出 34 个、全对。
+  #
+  #   ⚠️ 两个性能要点：
+  #     ① **先判 keep_lock**，默认（0）时短路，完全不碰锁屏扫描 —— 开关关着就零开销；
+  #     ② `_is_lockscreen` 只在开关打开时才会被调用，而它内部有进程内缓存
+  #        （`_LOCK_LIST_SPACED`，整个名单在内存里，判定本身零进程）。
+  #   为什么在意：建这份表要遍历**所有**字体配置 XML，沙箱实测 107 秒（真机几秒），
+  #   而 `slot_plan` 跑在自愈路径上、有超时，不能白花这个时间。
+  if [ "$keep_lock" = 1 ] && _is_lockscreen "$name"; then
     return 1
   fi
   case "$role" in
@@ -577,13 +742,65 @@ _role_wanted() {
 #   而 `payload_mount` 的自愈有 **20 秒超时** → 超时 → 计划空 → 自愈失效。
 #   （这条是回归测试抓到的：newfix-test 第 2 节"自愈没生效"。）
 #   "设备上存在哪些字体文件"在一次运行内不会变，缓存是安全的。
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-15（作者的理念）：自适应扫描 **扫一次存起来，切换时直接读**
+#   它扫的是"设备配置里的字体 − targets 里已知的 = 剩下没人管的"，
+#   而这三样（配置 XML / targets 清单 / 字体目录）平时都不变 ——
+#   典型"扫一次长期有效"。存 $LIB/.scan/scan.cache。
+# ---------------------------------------------------------------------------
+_sc_key() {
+  local x k=""
+  for x in $(slot_xml_files 2>/dev/null); do
+    [ -f "$x" ] || continue
+    k="$k$x:$(stat -c '%s-%Y' "$x" 2>/dev/null | tr -d ' ')"
+  done
+  for x in "$MODDIR"/targets/*.list; do
+    [ -f "$x" ] || continue
+    k="$k|$x:$(stat -c '%s-%Y' "$x" 2>/dev/null | tr -d ' ')"
+  done
+  for x in $(slot_dirs 2>/dev/null); do
+    [ -d "$x" ] || continue
+    k="$k|$x:$(ls "$x" 2>/dev/null | wc -l | tr -d ' ')"
+  done
+  printf '%s' "$k"
+}
+
+_sc_load() {   # 命中就 set SCAN_CANDS_CACHE 并返回 0
+  local d="$LIB/.scan" f="$LIB/.scan/scan.cache" cur
+  [ -s "$f" ] || return 1
+  [ -s "$d/scan.key" ] || return 1
+  cur=$(_sc_key)
+  [ "$cur" = "$(cat "$d/scan.key" 2>/dev/null)" ] || return 1
+  SCAN_CANDS_CACHE=$(cat "$f" 2>/dev/null)
+  return 0
+}
+
+_sc_save() {   # $1=候选内容
+  local d="$LIB/.scan"
+  mkdir -p "$d" 2>/dev/null || return 0
+  printf '%s\n' "$1" > "$d/scan.cache.tmp.$$" 2>/dev/null && \
+    mv -f "$d/scan.cache.tmp.$$" "$d/scan.cache" 2>/dev/null
+  _sc_key > "$d/scan.key.tmp.$$" 2>/dev/null && \
+    mv -f "$d/scan.key.tmp.$$" "$d/scan.key" 2>/dev/null
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 slot_scan_candidates() {
   if [ -n "${SCAN_CANDS_CACHE+x}" ]; then
     printf '%s\n' "$SCAN_CANDS_CACHE" | grep -v '^[[:space:]]*$'
     return 0
   fi
+  # ★ 2026-10-15（作者的理念）：**先读磁盘缓存** —— 扫过一次（含上次开机）就不用再扫了。
+  #   命中时 SCAN_CANDS_CACHE 已经在 _sc_load 里设好。
+  if _sc_load 2>/dev/null; then
+    printf '%s\n' "$SCAN_CANDS_CACHE" | grep -v '^[[:space:]]*$'
+    return 0
+  fi
   SCAN_CANDS_CACHE=$(_slot_scan_candidates_uncached)
+  # 扫完存起来，下次（包括重启后）直接读
+  _sc_save "$SCAN_CANDS_CACHE" 2>/dev/null
   printf '%s\n' "$SCAN_CANDS_CACHE" | grep -v '^[[:space:]]*$'
 }
 _slot_scan_candidates_uncached() {
@@ -1097,7 +1314,7 @@ slot_plan() {
   # 1.0.9：默认（也是唯一）口径 = **全替换**。日韩繁体、时钟/斜体/衬线都换，
   #   不再有"保留 XX"开关、也不再按字形自动让路（作者定的：不给开关，省心）。
   #   参数 scope/keep_lang/keep_special 保留只为兼容旧调用方（fontctl / diag）。
-  local moddir="$1" scope="${2:-all}" keep_lang="${3:-0}" keep_special="${4:-0}"
+  local moddir="$1" scope="${2:-all}" keep_lang="${3:-0}" keep_special="${4:-0}" keep_lock="${5:-0}"
   local role d name base
   #------------------------------------------------------------------------
   # 唯一的**极端保护**：字体里完全没有中文字形时，中文槽位一个都不动。
@@ -1122,7 +1339,7 @@ slot_plan() {
   [ -n "$ADAPTIVE_N" ] || ADAPTIVE_N=0
   export ADAPTIVE_N
   base=$(printf '%s\n' "$CAND_RAW" | while read -r role d name; do
-           _role_wanted "$role" "$scope" "$keep_lang" "$keep_special" "$name" || continue
+           _role_wanted "$role" "$scope" "$keep_lang" "$keep_special" "$name" "$keep_lock" || continue
            printf '%s %s/%s\n' "$role" "${d#/}" "$name"
          done | sort -u -k2,2)
   [ -n "$base" ] || return 0
