@@ -2,6 +2,9 @@
 <html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>保时捷字体</title>
 <style>
@@ -42,7 +45,8 @@
     color-scheme: light;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { min-height: 100%; }
+  html, html, body { height: 100%; }
+body { min-height: 100%; }
   body {
     margin: 0;
     padding: 20px 16px 40px;
@@ -54,7 +58,7 @@
   body::before {
     content: "";
     position: fixed;
-    inset: 0;
+    top: 0; right: 0; bottom: 0; left: 0; inset: 0;
     pointer-events: none;
     background: radial-gradient(600px 300px at 50% -60px, var(--glow), transparent 70%);
   }
@@ -90,13 +94,17 @@
   .option {
     position: relative; overflow: hidden;
     background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-    padding: 14px 14px 14px 16px; margin-bottom: 10px;
+    padding: 12px 12px 12px 14px; margin-bottom: 10px;
+    /* ★ 2026-10-15 作者反馈：套着选中态的描边会被边缘挡。
+       直接把卡片缩小一点（左右各留 2px），描边就不会贴到容器边。 */
+    margin-left: 2px; margin-right: 2px;
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     cursor: pointer; box-shadow: var(--shadow);
     transition: transform .16s ease, background .22s ease, border-color .22s ease;
   }
   .option:active { transform: scale(.97); background: var(--card-press); }
-  .option.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 12px 30px -18px var(--accent); }
+  /* ★ 2026-10-15 作者反馈：选中那圈光晕（外发光）去掉，只留描边。 */
+  .option.is-active { border-color: var(--accent); box-shadow: none; }
   .option.is-pending { border-color: var(--pending-blue); background: var(--card-pending); }
   .option .info { min-width: 0; flex: 1; }
   .option .name { font-size: 16px; font-weight: 600; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -106,16 +114,19 @@
   .badge.pending { color: var(--pending-blue); border: 1px solid var(--pending-blue); }
   .option.is-active .badge.active, .option.is-pending .badge.pending { display: inline-block; }
 
-  .icons { display: flex; gap: 6px; flex-shrink: 0; }
+  /* ★ 2026-10-14 真机反馈：⋯ 按钮被切成 ".."。右边留点余量，并让符号居中。 */
+  .icons { display: flex; gap: 6px; flex-shrink: 0; margin-left: 6px; padding-right: 2px; }
   .icon-btn {
     width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border);
     background: transparent; color: var(--text); font-size: 15px; cursor: pointer; padding: 0;
+    /* ⋯ 是个宽字符，不居中会被切掉一角（真机截图上显示成 ".."）*/
+    display: inline-flex; align-items: center; justify-content: center; line-height: 1;
   }
   .icon-btn:active { background: var(--card-press); }
 
   .option.busy { cursor: progress; }
   .option .overlay {
-    position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 8px;
+    position: absolute; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 8px;
     background: var(--card); color: var(--pending-blue); font-size: 13px; font-weight: 600; border-radius: 16px;
   }
   /* 转圈：1.0.9 换掉"一个边框缺口在转"的老式写法。
@@ -123,7 +134,7 @@
      而且用 transform 动画（GPU 合成），比改 border-color 省电。 */
   .spin { position: relative; width: 16px; height: 16px; flex: none; display: inline-block;
           border-radius: 50%; animation: spin 1.05s cubic-bezier(.45,.05,.55,.95) infinite; }
-  .spin::before, .spin::after { content: ""; position: absolute; inset: 0; border-radius: 50%; }
+  .spin::before, .spin::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; inset: 0; border-radius: 50%; }
   /* 外圈：一条渐隐的弧（用 conic-gradient 做，手机上都支持） */
   .spin::before {
     background: conic-gradient(from 0deg, transparent 0deg 40deg,
@@ -134,7 +145,7 @@
   }
   /* 内圈：反向慢转的一条细弧，形成"对转"的层次感 */
   .spin::after {
-    inset: 4px;
+    top: 4px; right: 4px; bottom: 4px; left: 4px; inset: 4px;
     background: conic-gradient(from 180deg, transparent 0deg 90deg, currentColor 300deg, transparent 360deg);
     -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.6px), #000 calc(100% - 1.2px));
             mask: radial-gradient(farthest-side, transparent calc(100% - 1.6px), #000 calc(100% - 1.2px));
@@ -231,10 +242,88 @@
   }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+  /* ---------- 字体库：底部动作菜单（2026-10-14 新增） ----------
+     为什么加：社区反馈"点一下卡片就直接换字体，容易误触"。
+     现在点卡片只弹菜单，真正的应用要再点一次 —— 误触不会再换字体。 */
+  .fontact-mask {
+    /* ★ 2026-10-15：照抄诊断报告那个浮层（.modal-mask）的做法 ——
+       作者实测它的位置完全正确（自检显示 modal 四边正好铺满屏幕）。
+       差别只有一条：报告是居中（align-items:center），菜单要贴底（flex-end）。 */
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 30;
+    background: rgba(0,0,0,.45);
+    display: flex; align-items: flex-end; justify-content: center;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    opacity: 0; visibility: hidden;
+    transition: opacity .18s ease, visibility .18s ease;
+  }
+  .fontact-mask.show { opacity: 1 !important; visibility: visible !important; }
+  .fontact {
+    position: relative; z-index: 1;
+    width: 100%; max-width: 520px; background: var(--card, #fff);
+    border-radius: 18px 18px 0 0; padding: 8px 12px 14px;
+    transform: translateY(100%);
+    transition: transform .24s cubic-bezier(.22,.9,.3,1);
+    box-shadow: 0 -8px 30px rgba(0,0,0,.22);
+  }
+  .fontact-mask.show .fontact { transform: translateY(0) !important; }
+  .fontact-title {
+    padding: 12px 6px 10px; font-size: 13.5px; opacity: .62; text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .fontact-title b { font-weight: 600; opacity: .95; }
+  .fontact-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 12px; border-radius: 12px; font-size: 15.5px;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: background .14s ease, transform .1s ease;
+  }
+  .fontact-item:active { background: rgba(128,128,128,.16); transform: scale(.985); }
+  .fontact-item .si-i { width: 22px; text-align: center; font-size: 17px; opacity: .85; }
+  .fontact-item.apply { color: var(--accent, #b0304a); font-weight: 600; }
+  .fontact-item.danger { color: #d0433f; }
+  .fontact-item.disabled { opacity: .38; pointer-events: none; }
+  .fontact-sep { height: 1px; background: rgba(128,128,128,.18); margin: 6px 12px; }
+
+  /* ---------- 字体库：折叠展开 ---------- */
+  .lib-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; cursor: pointer; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .lib-head .lh-t { font-size: 13px; opacity: .62; }
+  .lib-head .lh-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12.5px; opacity: .72; padding: 3px 8px; border-radius: 9px;
+    background: rgba(128,128,128,.12);
+    transition: opacity .15s ease, background .15s ease;
+  }
+  .lib-head:active .lh-btn { background: rgba(128,128,128,.22); }
+  .lib-head .caret {
+    display: inline-block; font-size: 10px;
+    transition: transform .26s cubic-bezier(.22,.9,.3,1);
+  }
+  .lib-box.collapsed .caret { transform: rotate(-90deg); }
+  /* 折叠动画：用 grid 行高 1fr↔0fr，不需要预先知道内容高度 */
+  .lib-wrap {
+    display: grid; grid-template-rows: 1fr;
+    transition: grid-template-rows .28s cubic-bezier(.22,.9,.3,1);
+  }
+  .lib-box.collapsed .lib-wrap { grid-template-rows: 0fr; }
+  .lib-wrap > .lib-inner { overflow: hidden; min-height: 0; }
+  /* 卡片有 border + box-shadow（选中态 1px 描边），列表容器留 1px 余量免得被裁 */
+  /* ★ 2026-10-15 作者反馈：「无字体」那张卡在最上面，套着描边时上边会被切。
+     给它单独留出上边距（只影响第一张卡）。 */
+  #fontList > .option:first-child { margin-top: 3px; }
+  @media (prefers-reduced-motion: reduce) {
+    .lib-wrap, .fontact, .fontact-mask, .lib-head .caret { transition: none; }
+  }
+
+
   /* 弹窗 */
   .modal-mask {
-    position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.55);
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 20; background: rgba(0,0,0,.55);
     display: flex; align-items: center; justify-content: center; padding: 24px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     opacity: 0; visibility: hidden; transition: opacity .22s ease, visibility .22s;
   }
   .modal-mask.show { opacity: 1; visibility: visible; }
@@ -244,12 +333,12 @@
   .loading-box.small { height: 120px; }
   .pop { animation: popIn .32s cubic-bezier(.22,.8,.34,1) both; }
   @keyframes popIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-  .modal { width: 100%; max-width: 360px; background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 18px; }
+  .modal { width: 100%; max-width: 360px; min-width: 0; background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 18px; }
   /* ★ 1.0.9.2：报告弹窗以前没有高度约束，内容一多就顶出屏幕（真机反馈"上下 UI 都到屏幕外了"）。
      现在：弹窗最高占屏幕 82%，内部 flex 纵向；**只有中间的报告区滚动**，
      标题、进度、按钮永远留在屏幕内。
      为什么不是 88vh：真机上状态栏 + 手势条会吃掉一截，88vh 时底部按钮仍可能被挤出去。 */
-  #reportMask .modal { max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; }
+  #reportMask .modal { max-height: calc(82vh - env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; }
   #reportMask .modal > * { flex: 0 0 auto; min-height: 0; }
   /* ★ 2026-10-14 修：两个视图的高度必须**一样**，而且必须**填满**可用空间。
      以前写的是 `flex: 1 1 auto; min-height: 90px`：
@@ -274,8 +363,8 @@
   #reportMask #reportTip { max-height: 3.4em; overflow-y: auto; }
   #reportMask .rep-prog { flex: 0 0 auto; }
   /* 按钮永远贴在最下面，且不会被压扁 */
-  #reportMask .btn-row { flex: 0 0 auto; margin-top: 2px; margin-bottom: 0; }
-  #reportMask .btn-row .g-btn { padding-top: 9px; padding-bottom: 9px; }
+  #reportMask .btn-row { flex: 0 0 auto; margin-top: 2px; margin-bottom: 0; flex-wrap: wrap; }
+  #reportMask .btn-row .g-btn { padding: 9px 10px; font-size: 13.5px; flex: 1 1 auto; }
   .modal h3 { margin: 0 0 8px; font-size: 16px; }
   .modal p { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); line-height: 1.55; word-break: break-all; white-space: pre-line; }
   .modal .txt { width: 100%; margin-bottom: 12px; }
@@ -325,7 +414,7 @@
   .link-btn:disabled { opacity: .5; }
 
   /* 文件浏览器（全屏面板） */
-  .sheet { position: fixed; inset: 0; z-index: 15; background: var(--bg); display: flex; flex-direction: column; transform: translateY(100%); visibility: hidden; transition: transform .3s cubic-bezier(.22,.8,.34,1), visibility .3s; }
+  .sheet { position: fixed; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 15; background: var(--bg); display: flex; flex-direction: column; transform: translateY(100%); visibility: hidden; transition: transform .3s cubic-bezier(.22,.8,.34,1), visibility .3s; }
   .sheet.show { transform: none; visibility: visible; }
   .sheet-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 8px; }
   .sheet-title { font-size: 16px; font-weight: 600; flex: 1; }
@@ -354,7 +443,7 @@
   .switch-row { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 8px; cursor: pointer; transition: transform .16s ease, background .22s ease, border-color .22s ease; }
   .switch-row:active { transform: scale(.98); background: var(--card-press); }
   .switch-row.loading { pointer-events: none; border-color: var(--pending-blue); }
-  .switch-row .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--card); color: var(--pending-blue); font-size: 13px; font-weight: 600; animation: popIn .25s ease both; }
+  .switch-row .overlay { position: absolute; top: 0; right: 0; bottom: 0; left: 0; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--card); color: var(--pending-blue); font-size: 13px; font-weight: 600; animation: popIn .25s ease both; }
   .switch-row .t { font-size: 14px; font-weight: 600; }
   .switch-row .d { font-size: 11px; color: var(--text-dim); margin-top: 3px; line-height: 1.5; }
   .sw { flex-shrink: 0; width: 44px; height: 26px; border-radius: 13px; background: var(--border); position: relative; transition: background .25s ease; }
@@ -414,6 +503,7 @@ try {
   document.documentElement.setAttribute("data-theme", _t);
 } catch (e) {}
 </script>
+
 </head>
 <body>
 
@@ -428,7 +518,7 @@ try {
   <div class="status-box fade" style="--d:.03s">
     <div class="status-row">
       <span class="label">当前实际生效</span>
-      <span class="value active" id="activeLabel">读取中...</span>
+      <span class="value active" id="activeLabel">正在读取…</span>
     </div>
     <div class="status-row" id="pendingRow" style="display:none;">
       <span class="label">待生效（下次重启后）</span>
@@ -448,7 +538,7 @@ try {
     </div>
     <div class="status-row">
       <span class="label">识别系统</span>
-      <span class="value" id="romLabel">读取中...</span>
+      <span class="value" id="romLabel">正在读取…</span>
     </div>
   </div>
 
@@ -471,10 +561,13 @@ try {
     发现新版本 <b id="updateBannerVer"></b>，可在页面下方「模块更新」里下载安装。
   </div>
 
-  <div class="section-title fade" style="--d:.05s">
-    <span>字体库（点击卡片切换）</span>
+  <div class="section-title fade lib-head" style="--d:.05s" onclick="toggleLib()">
+    <span id="libHeadText">字体库（点卡片打开菜单）</span>
+    <span class="lh-btn"><span class="caret">▼</span><span id="libToggleText">收起</span></span>
   </div>
-  <div id="fontList"></div>
+  <div class="lib-box" id="libBox">
+    <div class="lib-wrap"><div class="lib-inner"><div id="fontList"></div></div></div>
+  </div>
 
 
   <div class="divider"></div>
@@ -484,6 +577,10 @@ try {
   <div class="switch-row fade" onclick="toggleSetting('theme_fonts')">
     <div><div class="t">也替换主题里选的字体</div><div class="d">有些机型会把「设置 → 字体样式」或主题商店里选的那份字体单独存一份，它比系统字体优先，不换它就不生效。<br><b>开</b>：那份也换成你的字体，设置里的选择会失效。<br><b>关</b>：只换系统字体（小米想用「字体粗细」调粗细就保持关）。</div></div>
     <div class="sw" id="sw_theme_fonts"></div>
+  </div>
+  <div class="switch-row fade" onclick="toggleSetting('keep_lockscreen')">
+    <div><div class="t">保留锁屏时钟字体</div><div class="d">小米/红米/POCO 的锁屏时钟有<b>自己专用的一份字体</b>，默认会一起换成你的字体。<br><b>开</b>：那几份保留原样，你还能在系统里换锁屏时钟样式。<br><b>关</b>：连锁屏时钟也换成你的字体。<br>（其他品牌没有这种专用字体，开关无影响）</div></div>
+    <div class="sw" id="sw_keep_lockscreen"></div>
   </div>
   <div class="switch-row fade" onclick="toggleSetting('mount_mode')">
     <div><div class="t">自带挂载</div><div class="d"><b>开</b>：模块自己把字体挂上去（推荐，不用装元模块）。<br><b>关</b>：交给 Root 管理器 / 元模块来挂。</div></div>
@@ -502,7 +599,7 @@ try {
   <div class="status-box fade">
     <div class="status-row">
       <span class="label">当前状态</span>
-      <span class="value off" id="googleLabel">读取中...</span>
+      <span class="value off" id="googleLabel">正在读取…</span>
     </div>
   </div>
   <div class="btn-row fade">
@@ -967,6 +1064,75 @@ function makeCard(id, name, metaText, f) {
   return card;
 }
 
+
+/* ---------- 字体库：折叠展开（与主项目同步） ----------
+   用 grid-template-rows 1fr↔0fr 做动画，不需要预先知道内容高度。 */
+function toggleLib(force) {
+  const box = document.getElementById("libBox");
+  const txt = document.getElementById("libToggleText");
+  if (!box) return;
+  const want = (typeof force === "boolean") ? force : !box.classList.contains("collapsed");
+  box.classList.toggle("collapsed", want);
+  if (txt) txt.textContent = want ? "展开" : "收起";
+  try { localStorage.setItem("cf_lib_collapsed", want ? "1" : "0"); } catch (e) {}
+}
+
+/* ---------- 字体库：底部动作菜单（与主项目同步） ----------
+   为什么加：社区反馈"点一下卡片就直接换字体，容易误触"。
+   现在点卡片只弹菜单，**真正的应用要再点一次**。
+   ⚠️ 内置配色版差异：这里**只有"应用"** —— 自带配色不能改名、不能删除
+      （删了下次开机 builtin_import 会恢复），所以菜单里不放那两个入口。 */
+function showFontSheet(id, name, isNone) {
+  const old = document.getElementById("fontSheetMask");
+  if (old) old.remove();
+  const mask = document.createElement("div");
+  mask.className = "fontact-mask"; mask.id = "fontSheetMask";
+  const sheet = document.createElement("div");
+  sheet.className = "fontact";
+
+  const title = document.createElement("div");
+  title.className = "fontact-title";
+  title.innerHTML = "「<b></b>」";
+  title.querySelector("b").textContent = name;
+  sheet.append(title);
+
+  const close = () => {
+    mask.classList.remove("show");
+    setTimeout(() => mask.remove(), 220);
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = e => { if (e.key === "Escape") close(); };
+  const mkItem = (icon, text, cls, fn) => {
+    const it = document.createElement("div");
+    it.className = "fontact-item" + (cls ? " " + cls : "");
+    const i = document.createElement("span"); i.className = "si-i"; i.textContent = icon;
+    const t = document.createElement("span"); t.textContent = text;
+    it.append(i, t);
+    it.onclick = () => { close(); fn(); };
+    return it;
+  };
+
+  if (isNone) {
+    sheet.append(mkItem("\u2713", "恢复系统默认字体", "apply", () => selectFont("none")));
+  } else if (id === activeId && id === pendingId) {
+    // 真·当前在用 → 给一条可点的"重新应用"（用户改了能反悔）
+    sheet.append(mkItem("\u21bb", "重新应用这个配色", "apply", () => selectFont(id)));
+  } else if (id === activeId) {
+    // 当前在用但待生效是别的 → **必须可点**，否则切走之后切不回来
+    sheet.append(mkItem("\u21a9", "改回这个配色", "apply", () => selectFont(id)));
+  } else {
+    sheet.append(mkItem("\u2713", "应用这个配色", "apply", () => selectFont(id)));
+  }
+  sheet.append(Object.assign(document.createElement("div"), { className: "fontact-sep" }));
+  sheet.append(mkItem("\u2715", "取消", "", () => {}));
+
+  mask.append(sheet);
+  mask.onclick = e => { if (e.target === mask) close(); };
+  document.body.append(mask);
+  document.addEventListener("keydown", onKey);
+  requestAnimationFrame(() => mask.classList.add("show"));
+}
+
 function render() {
   setValue("activeLabel", labelOf(activeId));
   const hasPending = pendingId !== activeId;
@@ -980,12 +1146,13 @@ function render() {
   //   （自带配色是包的一部分，删了/改名了下次开机也会被 builtin_import 恢复，
   //     给用户这些入口只会造成困惑。）
   const none = makeCard("none", NONE_LABEL, "不替换任何系统字体（默认）");
-  none.onclick = () => selectFont("none");
+  none.onclick = () => showFontSheet("none", NONE_LABEL, true);   // 点一下先弹菜单，不再直接切
   box.append(none);
 
   fonts.forEach(f => {
     const card = makeCard(f.id, f.name, fmtSize(f.size), f);
-    card.onclick = () => selectFont(f.id);
+    // 改成"点一下弹菜单"，不再直接应用（社区反馈容易误触）
+    card.onclick = () => showFontSheet(f.id, f.name, false);
     box.append(card);
   });
 
@@ -1015,7 +1182,7 @@ function setCardBusy(card, on) {
   const ov = document.createElement("div");
   ov.className = "overlay";
   const sp = document.createElement("span"); sp.className = "spin";
-  const tx = document.createElement("span"); tx.textContent = "应用中...";
+  const tx = document.createElement("span"); tx.textContent = "正在应用配色…";
   ov.append(sp, tx);
   card.append(ov);
   card.classList.add("busy");
@@ -1038,7 +1205,7 @@ async function selectFont(id) {
   busy = true;
   const card = document.querySelector('.option[data-id="' + id + '"]');
   setCardBusy(card, true);
-  showToast("正在生成字体文件...", true);
+  showToast("正在把配色铺到系统槽位…", true);
   await nextPaint();
   try {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh apply ${shq(id)}`);
@@ -1313,14 +1480,14 @@ function coverageText(m, before) {
    （保留这段说明是为了让以后同步主项目的人一眼看出：这里是**故意删掉的**，
      不是漏同步。） */
 /* ---------- 替换范围设置 / 诊断 ---------- */
-const settings = {mount_mode: "self", theme_fonts: "0"};   // 1.0.9：只剩这两个开关
+const settings = {mount_mode: "self", theme_fonts: "0", keep_lockscreen: "0"};   // 1.0.9：只剩这两个开关
 let mountMode = "self";
 async function loadSettings() {
   try {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh settings`);
     (out.match(/(\w+)=(\S+)/g) || []).forEach(kv => { const i = kv.indexOf("="); settings[kv.slice(0, i)] = kv.slice(i + 1); });
   } catch (e) {}
-  ["theme_fonts"].forEach(k => {
+  ["theme_fonts", "keep_lockscreen"].forEach(k => {
     const el = document.getElementById("sw_" + k);
     if (el) el.classList.toggle("on", settings[k] === "1");
   });
@@ -1364,7 +1531,7 @@ async function toggleSetting(key) {
     row.classList.add("loading");
     const ov = document.createElement("div");
     ov.className = "overlay";
-    ov.innerHTML = '<span class="spin"></span><span>' + (pendingId !== "none" ? "正在重新生成..." : "正在保存...") + '</span>';
+    ov.innerHTML = '<span class="spin"></span><span>' + (pendingId !== "none" ? "正在更新设置…" : "正在保存设置…") + '</span>';
     row.appendChild(ov);
   }
   busy = true;
@@ -1374,7 +1541,7 @@ async function toggleSetting(key) {
     if (pendingId !== "none") {
       const out = await ksuExec(`sh ${MODDIR}/fontctl.sh reapply`);
       const m = out.match(/^OK:(.*):(\d+):(\w+)\s*$/m);
-      showToast(m ? "已重新生成：" + m[2] + " 个槽位，重启后生效" : "重新生成失败：" + out.replace(/^ERROR:/, ""));
+      showToast(m ? "已重新生成：" + m[2] + " 个槽位，重启后生效" : "处理失败：" + out.replace(/^ERROR:/, ""));
     } else showToast("已修改");
     success = true;
   } catch (e) { showToast("修改失败：" + errText(e)); }
@@ -1659,8 +1826,8 @@ function repPaintEta() {
     const e = repEtaText(kv, used);
     if (e && e.soon) bits.push("<b>马上就好</b>");
     else if (e && e.left > 3) bits.push((e.exact ? "预计还要 " : "大概需要 ") + "<b>" + fmtClock(e.left) + "</b>");
-    else if (!used) bits.push("正在启动…");
-    bits.push('<span style="opacity:.75;font-weight:400">（可以随时关闭窗口，任务会继续在后台跑）</span>');
+    else if (!used) bits.push("正在准备…");
+    bits.push('<span style="opacity:.75;font-weight:400">（生成期间请留在这一页，切走可能被系统冻结）</span>');
     el.innerHTML = bits.join(" · ");
     el.style.display = "block";
   } else {
@@ -1722,7 +1889,7 @@ function repPaintRunning(kv, sub) {
     //   这里只留"可以关窗口"这一个用户真正需要知道的操作提示。
     const slow = !(kv && kv.speed === "full");
     return (slow ? "生成中自动让路给系统（所以慢一些）" : "全速生成中") +
-      " · 可以关窗口去干别的，任务会继续 · 想停就点「中止生成」";
+      " · 期间请留在这一页 · 想停就点「中止生成」";
   }
   // 本次实际保存的文件名（1.0.9：只有一份）
   // 本次实际保存的文件名（1.0.9：只有一份）
@@ -1864,7 +2031,7 @@ async function repPaintRunningLive(kv) {
   if (!t.trim() || t.length === repLastPartLen) return;
   repLastPartLen = t.length;
   const head = "⏳ 还在生成中，还没完成！（第 " + (p.step || "?") + " 步：" + p.label + "）\n" +
-    "下面只是已经写好的部分，完成后会自动补全；可以点「关闭」去干别的，任务会在后台继续。\n" +
+    "下面只是已经写好的部分，完成后会自动补全。\n" +
     "────────────────────────────────────────\n";
     // 显示由 repPutText 统一处理
     const _pv = head + (t.length >= REP_PART_LIMIT
@@ -1982,7 +2149,7 @@ async function repFinish(kv) {
   if (kv.state === "none") { repPaintChooser(""); return; }
   repPaintSimple("timeout",
     "等了很久都没结果：任务可能还在后台慢慢跑，也可能已经被系统停掉了。\n\n" +
-    "可以先点「关闭」去干别的 —— 生成完会自动出现在 Download/完整体检报告.txt（同一个文件会不断更新）；\n" +
+    "如果还在这一页，可以再等等 —— 报告是边写边存进 Download/完整体检报告.txt 的；\n" +
     "也可以点「重新生成」从头再来，或点「中止生成」把它彻底停掉。");
 }
 function loadEstimate() {
@@ -2001,7 +2168,7 @@ function loadEstimate() {
 async function reportMore() {
   const btn = repEl("reportMoreBtn");
   if (btn.disabled) return;
-  btnBusy(btn, true, "载入中…");
+  btnBusy(btn, true, "正在读取字体库…");
   try {
     const out = String(await ksuExec(`sh ${MODDIR}/fontctl.sh diag textpage ${repDisp.offset} 60000`) || "");
     const i = out.indexOf("@@TEXT\n");
@@ -2230,15 +2397,22 @@ function hideUpdProg() {
   if (box) box.classList.remove("show");
 }
 // 轮询 update.sh 写的状态文件（/data/adb/custom_font_lib/.update/state），直到下载安装结束
+//
+// ★ 2026-10-14 重写：**这是"进度条是摆设"的根因修法**。
+//   以前这里虽然每 500ms 读一次 state，但调用方在下一行就 `await ksuExec('update.sh install')`
+//   —— KernelSU 的 exec 桥是**同步**的，那句一直阻塞到下载+安装跑完，
+//   整个 JS 线程被占住，**这个轮询循环一次都来不及跑**。
+//   所以用户看到的是：闪一下"准备中" →（几十 MB 下载，全黑）→"安装完成请重启"。
+//   主项目包 100KB 看不出来；子项目的包 20~65MB，中间那段长得离谱。
+//
+//   现在配合 update.sh 新增的 installbg / installstate：
+//     · installbg 立刻返回（只派生 detached worker）
+//     · 本循环随即真正跑起来，每 500ms 读一次 state
+//     · worker 每次 prog() 都会把 stage/cur/total 写进 state → 进度条是真进度
+//   做法对齐 camsw_shennong（它的 upd_install 也是立刻返回 STATE=started，UI 轮询 upd_status）。
 function startUpdateProgress() {
   let stop = false;
-  const STAGE_TEXT = {
-    download: "正在下载刷机包",
-    verify: "正在校验刷机包",
-    install: "正在安装（管理器解包中）",
-    finished: "安装完成",
-    error: "安装失败"
-  };
+  let lastCur = 0, stuck = 0;
   (async function loop() {
     while (!stop) {
       let s = "";
@@ -2252,13 +2426,32 @@ function startUpdateProgress() {
         if (total > 0) {
           const r = Math.min(1, cur / total);
           updProg("正在下载刷机包 " + fmtSize(cur) + " / " + fmtSize(total) + "（" + Math.round(r * 100) + "%）", r);
+        } else if (cur > 0) {
+          // 服务器没给 Content-Length：至少把"已下多少"显示出来，别让人以为没动
+          updProg("正在下载刷机包 " + fmtSize(cur) + "…", Math.min(0.9, cur / (16 * 1048576)));
         } else {
-          updProg("正在下载刷机包 " + fmtSize(cur), Math.min(0.9, cur / (8 * 1048576)));
+          updProg("正在连接 GitHub…", 0.03);
         }
+        // 卡住判定：连续 30 次（约 15 秒）字节数没变，就说一句 —— 但**不中断**，
+        // 网络抖动一下很常见，乱报错比慢更烦人。
+        if (cur > 0 && cur === lastCur) {
+          stuck++;
+          if (stuck === 30) updProg("下载好像卡住了（" + fmtSize(cur) + "）… 还在重试，如果一直不动可以换网络再试", Math.min(0.95, total ? cur / total : 0.5));
+        } else { stuck = 0; }
+        lastCur = cur;
       } else if (stage === "verify") {
-        updProg("正在校验刷机包（sha256 / 模块 ID）…", 0.96);
+        updProg("正在校验刷机包…", 0.96);
       } else if (stage === "install") {
-        updProg("正在安装（管理器解包中，请稍等）…", 0.98);
+        // ★ 2026-10-14：安装阶段**不再是死文字**。
+        //   update.sh 现在后台装、每秒读安装器日志的字节数，并把“按耗时爬的百分比”
+        //   放在 total 里（0~97）。所以这里能显示“解包中…（大概 40%）”，进度条也在动。
+        //   管理器（ksud/magisk）不保证输出节奏，所以这个百分比是**按耗时估的**，
+        //   不是假的“精确值”—— 但比一动不动强得多。
+        const est = total > 0 && total <= 100 ? total / 100 : 0.98;
+        const tip = total > 0 && total <= 100
+          ? "正在安装（管理器解包中）… 大概 " + total + "%"
+          : "正在安装（管理器解包中，请稍等）…";
+        updProg(cur > 0 ? tip + "（安装器输出 " + fmtSize(cur) + "）" : tip, Math.max(0.97, est));
       } else if (stage === "finished") {
         updProg("安装完成，重启后生效", 1);
         break;
@@ -2324,11 +2517,27 @@ async function installUpdate() {
   }, 150000);
   await nextPaint();
   try {
-    const out = (await ksuExec(`sh ${MODDIR}/update.sh install`)).trim();
+    // ★ 关键：**只派发，不等它跑完**。
+    //   installbg 会派生一个 detached worker 去下载+安装，自己立刻返回 OK:started；
+    //   这样 JS 线程立刻空出来，上面那个 startUpdateProgress() 的轮询才画得动进度条。
+    //   （以前这里直接 `await update.sh install` —— 同步 exec 阻塞整个页面，
+    //     子项目的包 20~65MB，中间那段完全黑屏，正是“进度条是摆设”的原因。）
+    const out = (await ksuExec(`sh ${MODDIR}/update.sh installbg`)).trim();
+    const last = out.split("\n").pop() || "";
+    if (last.indexOf("OK:") !== 0) {
+      done = true;
+      const msg = last.replace(/^ERROR:/, "") || "无法开始下载";
+      updProg("更新失败：" + msg, 0);
+      showToast("更新失败：" + msg);
+      btn.disabled = false;
+      setTimeout(hideUpdProg, 8000);
+      return;
+    }
+    // 派发成功 → 轮询等它结束（进度条已经在画了）
+    const rc = await waitUpdateWorker();
     done = true;
-    const last = out.split("\n").pop();
-    if (last.indexOf("OK:") === 0) {
-      const ver = last.slice(3) || updateInfo.NEW_VER;
+    if (rc && rc.stage === "finished") {
+      const ver = updateInfo.NEW_VER;
       updProg("安装完成：" + ver + "，点红色按钮重启生效", 1);
       setUpdateDone(updateInfo.NEW_CODE);
       applyRebootButton(ver);
@@ -2336,7 +2545,7 @@ async function installUpdate() {
       showToast("已安装 " + ver + "，点红色按钮重启生效");
       setTimeout(hideUpdProg, 6000);
     } else {
-      const msg = last.replace(/^ERROR:/, "");
+      const msg = (rc && rc.msg) || "下载或安装失败，请重试";
       updProg("更新失败：" + msg, 0);
       showToast("更新失败：" + msg);
       btn.disabled = false;
@@ -2349,6 +2558,32 @@ async function installUpdate() {
     btn.disabled = false;
     setTimeout(hideUpdProg, 8000);
   } finally { clearTimeout(watchdog); stopPoll(); busy = false; }
+}
+
+// 轮询后台安装的状态，直到结束。
+//   为什么不用那个"画进度条"的循环来判定结束：那个循环只管画，退出条件写在它自己里面，
+//   这里需要拿到"结束时的状态 + 退出码"来给用户一句准确的话，所以单独轮询
+//   `update.sh installstate`（它顺便会判定 worker 是否已经死了）。
+//   返回：{stage, msg, rc}
+async function waitUpdateWorker() {
+  const T0 = Date.now();
+  let lastStage = "", lastMsg = "";
+  while (true) {
+    let s = "";
+    try { s = await ksuExec(`sh ${MODDIR}/update.sh installstate 2>/dev/null`); } catch (e) { s = ""; }
+    const kv = {};
+    String(s || "").split("\n").forEach(l => { const m = l.match(/^(\w+)=(.*)$/); if (m) kv[m[1]] = m[2]; });
+    if (kv.stage) lastStage = kv.stage;
+    if (kv.msg) lastMsg = kv.msg;
+    if (lastStage === "finished" || lastStage === "error" || lastStage === "none") {
+      return { stage: lastStage, msg: lastMsg, rc: kv.done };
+    }
+    // 兜底：15 分钟还没结束就不再挂着（正常下载不可能这么久）
+    if (Date.now() - T0 > 15 * 60 * 1000) {
+      return { stage: "error", msg: "等了 15 分钟还没结束，请检查网络后到 Root 管理器里手动安装" };
+    }
+    await new Promise(r => setTimeout(r, 700));
+  }
 }
 
 /* ---------- 初始化 ---------- */
@@ -2407,6 +2642,8 @@ async function installUpdate() {
   setTimeout(() => checkUpdate(false), 600);
 })();
 </script>
+
+
 
 </body>
 </html>
