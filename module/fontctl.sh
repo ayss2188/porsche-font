@@ -174,6 +174,92 @@ free_kb() {
   printf '%s' "$v"
 }
 
+# ---------------------------------------------------------------------------
+# ★ 2026-10-14：**只要"有没有轮廓表"这一个答案**（给"应用前复查"用）
+#
+# 为什么不复用 valid_font：valid_font 要求 cmap/head/hhea/hmtx/maxp **全都在**，
+#   而有些真机字体（尤其手机厂商的 CJK 子集、CFF2 变量字体）表集合不完全一样 ——
+#   拿 valid_font 去当"应用前的闸门"会**误伤好字体**。
+#   这里只查最要命、且各格式通用的一条：**必须有轮廓数据**。
+#     TrueType → glyf     OpenType/CFF → CFF␣ 或 CFF2     矢量备用 → SVG␣
+#   一个都没有 = 空壳，挂上去满屏方框（真机 realme RMX6699 就是这个）。
+#
+# 输出：0 = 有轮廓（可以用）；1 = 没有轮廓（别挂）
+# 读法：一次 od 读前 3072 字节（表目录远小于这个），纯 shell 判，零额外进程。
+# ---------------------------------------------------------------------------
+has_outline() {
+  local f="$1" num tot bytes v b4 id mv sv sz
+  [ -f "$f" ] || return 1
+  id=${f##*/}; id=${id%.ttf}
+  # ★ 2026-10-15（作者的建议）：**检测只做一次，结果记住** —— 以后切换不再读字体文件。
+  #   ⚠️ 性能教训：第一版用 `sed|tail|tr|wc` 分别去读 meta，**每条都是一次进程创建**，
+  #      5 个进程的开销把"省下一次读文件"吃掉了（实测命中缓存 395ms/次，读文件 730ms/次，
+  #      只快一倍）。改成 **cat 一次读进变量 + 纯 shell 字符串匹配** → 零额外进程。
+  _HO_META=""
+  [ -f "$LIB/$id.meta" ] && _HO_META=$(cat "$LIB/$id.meta" 2>/dev/null)
+  if [ -n "$_HO_META" ]; then
+    # 用固定分隔符匹配，避免 meta 里别的值恰好叫 outline
+    case "$_HO_META" in
+      *"outline=1"*) sv=1 ;;
+      *"outline=0"*) sv=0 ;;
+      *) sv="" ;;
+    esac
+    case "$_HO_META" in
+      *"outline_sz="*)
+        mv=${_HO_META##*outline_sz=}; mv=${mv%%[!0-9]*} ;;
+      *) mv="" ;;
+    esac
+    if [ -n "$sv" ] && [ -n "$mv" ]; then
+      sz=$(wc -c < "$f" 2>/dev/null | tr -d ' \t\r')
+      # ⚠️ 仍有一个 wc：它比读整个表目录便宜得多，但还能再省 —— 见下面 _HO_SZW 缓存
+      if [ "$sz" = "$mv" ]; then
+        [ "$sv" = 1 ] && return 0
+        return 1
+      fi
+    fi
+  fi
+  # ---- 下面才是"真去读一遍"：新字体第一次、或文件被换过时才会走到 ----
+  # ⚠️⚠️ 别用"tr 洗成词 + grep 精确匹配"那种写法 —— 这里踩过，是**真 bug**：
+  #   `tr -c 'A-Za-z0-9' '\n'` 会把**字母数字的二进制字节**也保留，
+  #   而表目录里 tag 后面紧跟的就是 checksum（4 字节二进制）——
+  #   那 4 字节里恰好有字母数字时，tag 就和它**粘成一个词**（实测洗出来是 `glyfY`），
+  #   于是 `grep -qx glyf` 永远不中，**有 glyf 的好字体被判成空壳**。
+  #   正确做法：**按 16 字节一条读表目录**，只取每条第 0..3 字节当 tag 比较。
+  num=$(od -An -tu1 -j4 -N2 "$f" 2>/dev/null); set -- $num
+  [ $# -ge 2 ] || return 1
+  num=$(( $1 * 256 + $2 ))
+  [ "$num" -ge 1 ] 2>/dev/null || return 1
+  [ "$num" -le 512 ] 2>/dev/null || return 1
+  tot=$(( 16 * num ))
+  bytes=$(od -An -tu1 -j12 -N"$tot" "$f" 2>/dev/null | tr -s ' \n' ' ')
+  set -- $bytes
+  [ $# -ge "$tot" ] || return 1
+  v=0
+  _HO_HIT=0
+  while [ "$v" -lt "$num" ]; do
+    b4="$1 $2 $3 $4"
+    case "$b4" in
+      "103 108 121 102") _HO_HIT=1; break ;;   # g l y f
+      "67 70 70 50")     _HO_HIT=1; break ;;   # C F F 2
+      "67 70 70 32")     _HO_HIT=1; break ;;   # C F F␣
+      "83 86 71 32")     _HO_HIT=1; break ;;   # S V G␣
+    esac
+    shift 16
+    v=$((v + 1))
+  done
+  # 把结论补记进 .meta（只写一次，之后都走上面的快路）
+  if [ -s "$LIB/$id.meta" ]; then
+    _hosz=$(wc -c < "$f" 2>/dev/null | tr -d ' \t\r')
+    _hotmp="$LIB/$id.meta.tmp.$$"
+    { grep -v '^outline=\|^outline_sz=' "$LIB/$id.meta" 2>/dev/null
+      echo "outline=$_HO_HIT"
+      echo "outline_sz=$_hosz"
+    } > "$_hotmp" 2>/dev/null && mv -f "$_hotmp" "$LIB/$id.meta" 2>/dev/null
+  fi
+  [ "$_HO_HIT" = 1 ] && return 0
+  return 1
+}
+
 new_id() {
   local t i id
   t=$(date +%s); i=0; id="f$t"
@@ -223,7 +309,7 @@ store_font() {
   local src="$1" name="$2" mode="$3" id dst sz need free
   if ! valid_font "$src"; then
     rm -f "$PART"
-    echo "ERROR:不是有效的 TTF/OTF 字体文件（可能已损坏或被截断；TTC 合集请先在电脑上用 tools/optimize_font.py --face 拆出单个字体）"
+    echo "ERROR:这份字体无法使用：内部结构不完整（可能已损坏/被截断/少了字形轮廓表）。TTC 合集请先在电脑上用 tools/optimize_font.py --face 拆出单个字体再导入"
     return 1
   fi
   # 空间检查：字体本身 + 换成 .ttc 合集时要再合成几份（每份≈原合集+本字体），
@@ -258,6 +344,20 @@ store_font() {
   chcon u:object_r:system_file:s0 "$dst" 2>/dev/null
   [ -n "$name" ] || name=$(basename "$src" | sed 's/\.[^.]*$//')
   printf '%s' "$(clean_name "$name")" > "$LIB/$id.name"
+  # ★ 2026-10-15（作者的建议）：**导入时就把"有没有轮廓"验一次并记进 meta**。
+  #   这样以后每次切换直接读记录，不用再读字体文件（切换更快）。
+  #   在 store_font 里做最合适：valid_font 刚刚已经完整验过一遍，这里只是把结论落盘。
+  _sf_sz=$(wc -c < "$dst" 2>/dev/null | tr -d ' \t\r')
+  if valid_font "$dst"; then _sf_ho=1; else _sf_ho=0; fi
+  if [ -s "$LIB/$id.meta" ]; then
+    _sf_tmp="$LIB/$id.meta.tmp.$$"
+    { grep -v '^outline=\|^outline_sz=' "$LIB/$id.meta" 2>/dev/null
+      echo "outline=$_sf_ho"
+      echo "outline_sz=$_sf_sz"
+    } > "$_sf_tmp" 2>/dev/null && mv -f "$_sf_tmp" "$LIB/$id.meta" 2>/dev/null
+  else
+    printf 'outline=%s\noutline_sz=%s\n' "$_sf_ho" "$_sf_sz" > "$LIB/$id.meta" 2>/dev/null
+  fi
   echo "OK:$id"
 }
 
@@ -356,9 +456,11 @@ make_plan() {
   fi
   export CJK_GUARD
   if [ "$scope" = combo ]; then
-    slot_plan "$MODDIR" all "$kl" "$ks" > "$out"
+    # ★ 2026-10-14：新增「保留锁屏字体」开关（cfg 键 keep_lockscreen，默认 0 = 照旧全替换）。
+    klk=$(cfg_get keep_lockscreen 0)
+    slot_plan "$MODDIR" all "$kl" "$ks" "$klk" > "$out"
   else
-    slot_plan "$MODDIR" "$scope" "$kl" "$ks" > "$out"
+    slot_plan "$MODDIR" "$scope" "$kl" "$ks" "$klk" > "$out"
   fi
   # 除了 echo，还留一份到全局变量：调用方常用 $(...) 取返回值，那会开子 shell，
   # 而 SCOPE_VIA（判定依据）是在子 shell 里设的，外面拿不到 —— 所以调用方直接读 PLAN_SCOPE。
@@ -506,6 +608,25 @@ do_apply() {
   local sel scope plan role rel id src dest stage mode COUNT=0 fail=0 wid
   GRP_LAST=""; GRP_PAIRS=""     # 多字重配对的缓存（见 grp_load）
   sel=$(check_sel "$1") || { echo "$sel"; exit 1; }
+
+  # ★★ 2026-10-14：**应用前再验一遍轮廓表**（不只是导入时验）。
+  #
+  # 为什么必须在这里也验：`valid_font` 只在**导入那一刻**跑。
+  #   真机反馈（realme RMX6699 / ColorOS 17 / v1.1.0）：用户字体里**没有 glyf / CFF / CFF2**
+  #   （只有 cmap loca head maxp post DSIG），却已经躺在字体库里，于是：
+  #     桌面、设置 —— **所有中文都渲染成「口」**，英文数字正常（那部分字形另有来源）。
+  #   用户那份是**旧版模块**导入的（那时 valid_font 还没这道检查），
+  #   而应用时没人再验一遍 → 坏字体一路挂到系统上。
+  #
+  # 判据（与 valid_font 同源，但这里只查最要命的一条）：**必须有一张轮廓表**。
+  #   TrueType → `glyf`；OpenType/CFF → `CFF `(尾随空格) 或 `CFF2`；还有 `SVG ` 也算有轮廓来源。
+  #   一个都没有 = 空壳，挂上去只会满屏方框 —— 宁可不动、也不要给用户造这个。
+  if [ -f "$LIB/$sel.ttf" ] && ! has_outline "$LIB/$sel.ttf"; then
+    printf '%s %s %s\n' "$sel" "系统槽位" "scope=blocked via=nooutline detail=字体没有轮廓表(glyf/CFF)，挂上去只会显示方框" \
+      >> "$LIB/ttc.log" 2>/dev/null
+    echo "ERROR:这份字体里没有任何字形轮廓（缺 glyf/CFF）—— 挂上去会让中文全变成方框。请删掉它重新导入一份正常的字体"
+    exit 1
+  fi
   refresh_rom
   mode=$(mount_mode)
   plan="$LIB/.plan.$$"
@@ -598,6 +719,24 @@ do_apply() {
               fi
             fi
             ttc_wrap_mix "$src" "$nf" "$cand" "/$rel" "$cn" 2>/dev/null || cand=""
+
+            # ★ 2026-10-14（与主项目同步）：**尺寸兜底**。
+            #   上面那道校验只在 _osz/_usz 都非空时才生效，
+            #   而 `[ -s "$cand" ]` 只要求非空 —— **16 字节也算非空**，
+            #   于是坏产物被当成“合成好的合集”反复拿去挂载。
+            #   真难正的合集都是 MB 级，这里加一条与实现无关的硬底线：不到 1KB 就是坏的，
+            #   **删掉它**，让下次重新合成。
+            if [ -n "$cand" ]; then
+              _csz=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
+              if ! isnum "$_csz" || [ "$_csz" -lt 1024 ] 2>/dev/null; then
+                printf '%s %s faces=%s replace=%s via=toosmall detail=产物只有%s字节，已删除并跳过\n' \
+                  "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "${_csz:-?}" \
+                  >> "$LIB/ttc.log" 2>/dev/null
+                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 合集产物异常（只有 ${_csz:-?} 字节，已删除）：$cand" >> "$LIB/mount.log" 2>/dev/null
+                rm -f "$cand" 2>/dev/null
+                cand=""
+              fi
+            fi
             # 合成后核对：文件必须真的写全（空间在合成途中被占满会留下半截文件）
             if [ -s "$cand" ] && [ -n "$_osz" ] && [ -n "$_usz" ]; then
               _got=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
@@ -668,7 +807,7 @@ do_report() {
     [ -f "$LIB/$id.ttf" ] || continue
     echo "  $(name_of "$id"): $(( $(wc -c < "$LIB/$id.ttf") / 1024 )) KB | 范围 $(effective_scope "$id") | 元数据 $(meta_compact "$id")"
   done
-  echo "设置: keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode)"
+  echo "设置: keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) keep_lockscreen=$(cfg_get keep_lockscreen 0)"
   echo "字体库: $(lib_font_ids 2>/dev/null | grep -c .) 个，占用 $(du -sk "$LIB" 2>/dev/null | cut -f1) KB"
   echo "---- 槽位 ----"
   echo "字体目录: $(slot_dirs | tr '\n' ' ')"
@@ -828,7 +967,10 @@ case "${1:-}" in
     case "$2" in
       set)
         case "$3" in
-          keep_lang|keep_special)
+          keep_lang|keep_special|keep_lockscreen)
+            # keep_lockscreen（v4.1.1 新增）：小米/红米/POCO 的锁屏时钟有专用字体，
+            #   开了就保留它们（用户还能换锁屏时钟样式），其余槽位照旧全替换。
+            #   判据是 family 名带 clock（见 slots.sh 的 slot_lockscreen_files）。
             case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
           theme_fonts)
             # 是否连"设置 → 字体样式"里选的字体（主题字体目录）也一起替换。
@@ -846,7 +988,7 @@ case "${1:-}" in
         ;;
       *)
         # ttc_replace 回显的是**生效值**：这类机型即使没手动设过，界面开关也该是亮的
-        echo "keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0) "
+        echo "keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0) keep_lockscreen=$(cfg_get keep_lockscreen 0) "
         ;;
     esac
     ;;
