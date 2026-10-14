@@ -98,8 +98,19 @@ ttc_wrap() {
 
 # 读一个 .ttc 有多少个 face（不是 ttc 返回 0）
 ttc_faces_of() {
+  local _tf_sz
   [ -f "$1" ] || { echo 0; return; }
   [ "$(head -c 4 "$1" 2>/dev/null)" = ttcf ] || { echo 0; return; }
+  # ★ 2026-10-14（与主项目同步）：**尺寸下限**。
+  #   原来只查魔数，于是 **16 字节的垃圾也能自称 5 个 face** ——
+  #   真机（一加 Ace 3 Pro / v4.1.0）字体库里就留下过这么一个
+  #   `builtin_flair.ttc5_2-3`（只有 TTC 头、没有字体数据），
+  #   模块认为它结构正确 → 每次开机都拿去挂载、每次都被判“无效字体”跳过，
+  #   用户看到的是“刷了不生效、切回无字体、一直转圈”。
+  #   一个 TTC 的头就有 12+4*faces 字节，每个 face 表目录至少 12+16 字节，
+  #   所以真正的合集**不可能小于 100 字节** —— 低于这个数一律当“不是合集”。
+  _tf_sz=$(wc -c < "$1" 2>/dev/null | tr -d ' \t\r\n')
+  isnum "$_tf_sz" && [ "$_tf_sz" -ge 100 ] 2>/dev/null || { echo 0; return; }
   _tf=$(od -An -tu1 -j8 -N4 "$1" 2>/dev/null)
   set -- $_tf
   [ $# -ge 4 ] || { echo 0; return; }
