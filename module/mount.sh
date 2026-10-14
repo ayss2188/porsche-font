@@ -71,6 +71,131 @@ _to_s() {
 }
 _to() { _to_s 5 "$@"; }
 
+# ---------------------------------------------------------------------------
+# ★ 2026-10-15：/data 上的"主题字体"槽位 —— 改成**物理替换（带备份）**
+#
+# 为什么不能用 bind 挂载（真机定位到的根因）：
+#   bind 挂载只换"内容"，**inode 和 mtime 都不变**。
+#   魅族主题服务（/data/customizecenter/font/flymeFont.ttf）靠"文件变了没有"
+#   决定要不要重读 —— 内容变了但它看不出来，于是继续用缓存里的旧字形。
+#   作者实测：手动"改名替换"能生效、"删掉再添加"不生效 —— 差别就在 inode 变没变。
+#
+# 所以这里不挂了，直接做作者手动做的那个动作：同分区 rename 覆盖。
+#   · 换 inode、刷新 mtime → 系统认为"文件变了" → 重读 → 生效
+#   · **必须备份原件**，否则用户切回「无字体」时他原来那份主题字体就没了
+# ---------------------------------------------------------------------------
+_datafont_is_ours() {   # $1=字体库源文件  $2=目标文件 → 0=目标已经是我们的
+  local a b
+  a=$(stat -L -c '%d:%i' "$1" 2>/dev/null)
+  b=$(stat -L -c '%d:%i' "$2" 2>/dev/null)
+  [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
+datafont_swap() {   # $1=源(字体库文件) $2=目标(绝对路径) → 0=已替换 1=没做(调用方回退 bind)
+  local src="$1" dst="$2" key bakdir bak tmp dir
+  [ -f "$src" ] && [ -f "$dst" ] || return 1
+  _datafont_is_ours "$src" "$dst" && return 0      # 已经是我们的，不用再动
+
+  bakdir="$LIB/.orig"
+  mkdir -p "$bakdir" 2>/dev/null || return 1
+
+  # 用原路径编码成文件名，保留目录层级可读性
+  key=$(printf '%s' "$dst" | tr '/' '_' | tr -d ' ')
+  bak="$bakdir/$key"
+  # ★ 只在**第一次**备份：以后（原件的 inode 已经变了）不再覆盖备份，
+  #   否则第二次替换会把"已经是我们字体"的那份当成原件备份走，用户的原字体就丢了。
+  if [ ! -s "$bak" ]; then
+    cp -f "$dst" "$bak" 2>/dev/null || return 1
+    [ -s "$bak" ] || return 1
+    printf '%s\n' "$dst" >> "$bakdir/manifest.txt" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 主题字体已备份原件：$dst -> $bak" >> "$LIB/mount.log" 2>/dev/null
+  fi
+
+  # 空间检查：替换要放得下一份（同分区）
+  dir=${dst%/*}
+  if command -v free_kb >/dev/null 2>&1; then
+    local need free
+    need=$(( $(wc -c < "$src" 2>/dev/null | tr -d ' ') / 1024 + 4096 ))
+    free=$(free_kb "$dir")
+    if [ -n "$free" ] && [ "$free" -lt "$need" ] 2>/dev/null; then
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 空间不足，主题字体改用挂载：$dst（需要 $((need/1024))MB，剩 $((free/1024))MB）" >> "$LIB/mount.log" 2>/dev/null
+      return 1
+    fi
+  fi
+
+  # 同目录临时文件 → mv（rename）覆盖。临时名不能带扩展名，免得被主题服务当成字体
+  tmp="$dir/.cfs_tmp_$$"
+  cp -f "$src" "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
+  # 内容核对（写入过程被截断的话宁可不动）
+  if [ "$(wc -c < "$tmp" 2>/dev/null | tr -d ' ')" != "$(wc -c < "$src" 2>/dev/null | tr -d ' ')" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  chmod 644 "$tmp" 2>/dev/null
+  chcon u:object_r:system_file:s0 "$tmp" 2>/dev/null
+  if mv -f "$tmp" "$dst" 2>/dev/null; then
+    chmod 644 "$dst" 2>/dev/null
+    chcon u:object_r:system_file:s0 "$dst" 2>/dev/null
+    # ★ 作者的意思：**两种都做**（双保险）。
+    #   物理替换已经换了 inode/mtime（让主题服务刷新）；
+    #   再 bind 一次，是为了防"系统读的时候把文件钉住了"——
+    #   即使它忽略了时间戳，路径上的内容也始终是我们的。
+    #   挂载失败不影响：物理替换那一步已经达成了目的。
+    _to mount -o bind "$src" "$dst" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 主题字体已物理替换 + 挂载（双保险）：$dst" >> "$LIB/mount.log" 2>/dev/null
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return 1
+}
+
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-15：把物理替换过的主题字体**还原**回去
+#
+# 什么时候调：当前**没有选字体**（pending_font 为空/none）时。
+#   因为"选了字体"意味着用户要用我们的字体，那时不该还原；
+#   一旦他切回「无字体」，就该把他原来的主题字体还给他 —— 否则是我们弄丢了用户数据。
+# 怎么做：读 .orig/manifest.txt 里登记过的路径，逐个用备份盖回去（同样 rename，
+#   换 inode 让主题服务也重读一次）。还原成功后清掉该条登记（保留备份文件本身，
+#   万一以后还要用；体积不大，且用户删模块时会一起被 uninstall 清掉）。
+# ---------------------------------------------------------------------------
+datafont_restore() {
+  local bakdir="$LIB/.orig" mani="$LIB/.orig/manifest.txt" dst bak tmp dir n=0
+  [ -s "$mani" ] || return 0
+  tmp="$mani.$$"
+  : > "$tmp" 2>/dev/null
+  while IFS= read -r dst || [ -n "$dst" ]; do
+    [ -n "$dst" ] || continue
+    case "$dst" in /data/*) ;; *) printf '%s\n' "$dst" >> "$tmp"; continue ;; esac
+    bak="$bakdir/$(printf '%s' "$dst" | tr '/' '_' | tr -d ' ')"
+    if [ ! -s "$bak" ]; then
+      # 备份没了：不敢乱动，跳过（留着登记，下次再看）
+      printf '%s\n' "$dst" >> "$tmp"
+      continue
+    fi
+    dir=${dst%/*}
+    [ -d "$dir" ] || { printf '%s\n' "$dst" >> "$tmp"; continue; }
+    if ! cp -f "$bak" "$dir/.cfs_rs_$$" 2>/dev/null; then
+      printf '%s\n' "$dst" >> "$tmp"
+      continue
+    fi
+    chmod 644 "$dir/.cfs_rs_$$" 2>/dev/null
+    chcon u:object_r:system_file:s0 "$dir/.cfs_rs_$$" 2>/dev/null
+    if mv -f "$dir/.cfs_rs_$$" "$dst" 2>/dev/null; then
+      n=$((n+1))
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 已还原主题字体原件：$dst" >> "$LIB/mount.log" 2>/dev/null
+    else
+      rm -f "$dir/.cfs_rs_$$" 2>/dev/null
+      printf '%s\n' "$dst" >> "$tmp"
+    fi
+  done < "$mani"
+  mv -f "$tmp" "$mani" 2>/dev/null
+  [ "$n" -gt 0 ] && echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 还原完成：$n 个主题字体" >> "$LIB/mount.log" 2>/dev/null
+  return 0
+}
+
 payload_mount() {
   local moddir="$1" id rel src dst err ok=0 fail=0 skip=0 same=0
   local map="$moddir/slots.map"
@@ -88,6 +213,10 @@ payload_mount() {
   #     （那一步要读写几十 MB，老设备上能拖很久，正是"卡开机动画"的来源之一）。
   #     合集没换不影响这次开机：本来一个槽位都没挂上，现在至少把普通字体挂上；
   #     完整的一次（含合集）由 service 阶段在开机完成后补做。
+  # ★ 2026-10-15：没选字体（或选了「无字体」）→ 把物理替换过的主题字体**还回去**
+  _pf=$(tr -d '[:space:]' 2>/dev/null < "$moddir/pending_font")
+  case "$_pf" in ""|none) datafont_restore ;; esac
+
   if [ ! -s "$map" ]; then
     local _p _pm _ttc_prev
     _p=$(tr -d '[:space:]' 2>/dev/null < "$moddir/pending_font")
@@ -136,6 +265,13 @@ payload_mount() {
     if [ ! -f "$src" ] || [ ! -f "$dst" ]; then
       skip=$((skip+1)); continue
     fi
+    case "$dst" in
+      /data/customizecenter/*)
+        if datafont_swap "$src" "$dst"; then
+          ok=$((ok+1)); continue
+        fi
+        ;;
+    esac
     # ★★ 最外层防线：**挂之前再验一次字体文件本身**。
     #
     #   为什么要有这一道（真机上付出过代价）：
