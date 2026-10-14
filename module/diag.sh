@@ -378,6 +378,67 @@ size_of() {
     *)        printf '?' ;;
   esac
 }
+# ---------------------------------------------------------------------------
+# ★ 2026-10-14：**批量 stat 建表**（大小 / 修改时间）
+#
+# 为什么加：真机报告实测 24~29 分钟，最贵的是"逐文件起进程"。
+#   一加 218 个字体文件、三星 274 个（三星那份**总共 1.3 GB**，单个最大 78MB）。
+#   fp_of() 原来每文件 2 次 stat（%s 和 %Y）→ 400~550 次 fork/exec。
+#
+#   现在：一个目录**一次** `stat -c '%s %Y %n' 目录/*` 就把两样都拿到，
+#   之后查询是纯 shell 字符串匹配（零进程）。
+#
+# ⚠️⚠️ 但**不要**把 inode 去重也做成"大字符串查表" —— 这是本文件里踩过的坑，
+#   教训就在下面第 2438 行附近（原文照抄）：
+#       「我试过"整个目录一次 stat 建表 + 内存查表"，真机实测**更慢**：
+#         每文件 stat：288 秒 → 批量建表 + 大字符串查表：**314 秒**
+#         原因：case 匹配要在上万字符的表里逐个匹配，纯 shell 字符串匹配比起一次 stat 还贵。
+#         教训：**"少起进程"不等于"更快"** —— 大字符串查表在 shell 里也是 O(n·m)。」
+#   所以这里**只**建两张**定长前缀**表（路径→大小、路径→mtime），
+#   查表用的是 `case "$MAP" in *"|$path="*)` 这种**单次前缀匹配**；
+#   而 inode 去重那条路**保持原样**（逐文件 stat），别去动它。
+#
+# ⚠️ 兼容性：真机是 **toybox**（不是 GNU coreutils）。`-c` 加 `%s/%Y/%n`
+#   在 toybox 上可用 —— 报告里 FONT_META 段的大小列就是这么来的。
+#   查不到时**回退去 stat**，保证任何情况下结果都和以前一致（只是慢一点）。
+# ---------------------------------------------------------------------------
+SZ_MAP=""; MT_MAP=""
+load_meta() {   # $1=目录
+  local d="$1" raw ln sz mt path rest
+  SZ_MAP=""; MT_MAP=""
+  [ -d "$d" ] || return 0
+  raw=$(stat -c '%s %Y %n' "$d"/* 2>/dev/null)
+  [ -n "$raw" ] || return 0
+  while IFS= read -r ln; do
+    [ -n "$ln" ] || continue
+    sz=${ln%% *}
+    rest=${ln#* }
+    mt=${rest%% *}
+    path=${rest#* }
+    [ -n "$path" ] || continue
+    isnum "$sz" || continue
+    SZ_MAP="$SZ_MAP|$path=$sz"
+    MT_MAP="$MT_MAP|$path=$mt"
+  done <<EOF
+$raw
+EOF
+  # load_meta 同时把"路径→大小"表也建好了，于是 size_of() 不用再单独 stat 一遍
+  SIZE_MAP="$SZ_MAP"
+  return 0
+}
+# 查表版：拿不到就回退去 stat（保证行为不变）
+sz_lookup() {
+  case "$SZ_MAP" in
+    *"|$1="*) _SZ_V=${SZ_MAP#*"|$1="}; printf '%s' "${_SZ_V%%|*}" ;;
+    *)        stat -c %s "$1" 2>/dev/null ;;
+  esac
+}
+mt_lookup() {
+  case "$MT_MAP" in
+    *"|$1="*) _MT_V=${MT_MAP#*"|$1="}; printf '%s' "${_MT_V%%|*}" ;;
+    *)        stat -c %Y "$1" 2>/dev/null ;;
+  esac
+}
 # 指纹相关的累加器（每批用完后在 hash_flush 里清零）
 HASH_BATCH=""; HASH_BN=0; HN=0
 HASH_KEY=""; HASH_MAP=""
@@ -399,8 +460,12 @@ HASH_KEY=""; HASH_MAP=""
 # 输出直接就是"哈希 大小 路径"里的哈希字段（大小/mtime 已混进去），所以调用方不用改。
 fp_of() {
   local f="$1" sz mt
-  sz=$(stat -c %s "$f" 2>/dev/null) || sz=""
-  mt=$(stat -c %Y "$f" 2>/dev/null) || mt=""
+  # ★ 2026-10-14：先查批量 stat 建好的表（load_meta），查不到再回退去 stat。
+  #   原来这里每文件 2 次 stat（%s + %Y）—— 一加 218 个文件、三星 274 个，
+  #   就是 400~550 次 fork/exec，而真机上每次 stat 都要动那个几十 MB 文件的目录项。
+  #   调用方（第 6 步的两遍循环）现在会先 load_meta "$d"，
+  #   所以这两个查询命中的是纯 shell 字符串匹配，零进程。
+  sz=$(sz_lookup "$f"); mt=$(mt_lookup "$f")
   if [ -z "$sz" ]; then printf '%s' "-"; return 0; fi
   # tail -c 可能因 busybox 版本差异不支持，兜底只取头部（一样能判变化）
   {
@@ -2418,7 +2483,7 @@ pack_extra() {
   HN=0
   for d in $HDIRS; do
     [ -d "$d" ] || continue
-    load_sizes "$d"
+    load_meta "$d"
     for f in "$d"/*; do
       [ -f "$f" ] || continue
       _hk=$(stat -c '%d:%i' "$f" 2>/dev/null)
@@ -2437,7 +2502,7 @@ pack_extra() {
   n=0
   for d in $HDIRS; do
     [ -d "$d" ] || continue
-    load_sizes "$d"
+    load_meta "$d"
     # 前 4 字节（魔数）：一次 head 读出整目录（每文件 4 字节）+ 一次 od 转十六进制，
     # 纯 shell 按 8 个字符一段切开 —— 以前是每个文件起 head+od+tr 三个进程
     _MFILES=""; _MCOUNT=0; _MSHORT=0
@@ -2475,15 +2540,20 @@ pack_extra() {
   echo "@@SECTION:PROCS"
   # 当前和本模块相关的进程（让"有没有偷偷跑东西"一目了然）
   ps -A -o pid,ppid,args 2>/dev/null | grep -E 'diag\.sh|fontctl\.sh|update\.sh|custom_font' | grep -v grep | head -n 20
-  timing_add 'PZ1 TTC头信息' "$_PZ_T"; _PZ_T=$(now_s)
+  # ★ 2026-10-14 修**测量 bug**（与主项目同步）：原来这条
+  #   `timing_add 'PZ1 TTC头信息'` 写在 TTC 那段**之前** ——
+  #   所以 PZ1 记的是「表信息 + PROCS」的耗时，TTC 那段根本没被测到。
+  #   真机报告里“PZ1 TTC头信息 223 秒”其实是表信息那一段，会把人带偏。
+  timing_add 'PZ0 表信息(魔数+sfnt标签)' "$_PZ_T"; _PZ_T=$(now_s)
   subnote "TTC 合集头信息"
   echo "@@SECTION:TTCHEAD"
   for d in $FONTDIRS; do
     for f in "$d"/*.ttc; do
       [ -f "$f" ] || continue
-      printf '%s\t%s\t%s\t%s\n' "$f" "$(ttc_tag "$f")" "$(ttc_faces "$f")" "$(stat -c %s "$f" 2>/dev/null)"
+      printf '%s\t%s\t%s\t%s\n' "$f" "$(ttc_tag "$f")" "$(ttc_faces "$f")" "$(size_of "$f")"
     done
   done
+  timing_add 'PZ1b TTC头信息' "$_PZ_T"; _PZ_T=$(now_s)
   timing_add 'PZ2 配置原文' "$_PZ_T"; _PZ_T=$(now_s)
   subnote "导出字体配置原文"
   echo "@@SECTION:XMLCONTENT"
