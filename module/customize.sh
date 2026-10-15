@@ -6,10 +6,10 @@ LIB=/data/adb/custom_font_lib
 MODID=$(sed -n 's/^id=//p' "$MODPATH/module.prop" | head -n1 | tr -d '\r')
 OLD="/data/adb/modules/$MODID"
 
-ui_print "*****************************************"
+ui_print "*********************************"
 ui_print "  保时捷字体（内置配色版） $(sed -n 's/^version=//p' "$MODPATH/module.prop")"
-ui_print "  内置配色 · 素装(无色) / 一点红 / 烈焰"
-ui_print "*****************************************"
+ui_print "  内置配色：素装(无色) / 一点红 / 烈焰"
+ui_print "*****************************"
 
 . "$MODPATH/common.sh"
 # ★ 字体校验工具必须**在 builtin.sh 之前**载入 —— builtin_import 要用它挡住坏字体。
@@ -18,7 +18,8 @@ if [ -f "$MODPATH/fontcheck.sh" ]; then
   . "$MODPATH/fontcheck.sh"
 fi
 if ! command -v valid_font >/dev/null 2>&1; then
-  ui_print "  ⚠ 缺少 fontcheck.sh，内置字体的有效性校验被跳过"
+  ui_print "  ⚠ 缺少 fontcheck.sh"
+    ui_print "     内置字体的有效性校验被跳过"
   valid_font() { [ -f "$1" ]; }
 fi
 mkdir -p "$LIB"
@@ -57,7 +58,8 @@ if [ -f "$MODPATH/builtin.sh" ]; then
   }
   if [ -n "$_mp" ]; then
     BUILTIN_PREV="$_mp"
-    ui_print "- 认出你上次用的配色：$(builtin_id_of "$(printf '%s' "$_mp" | sed 's/^builtin_//')" | cut -d'|' -f2)"
+    ui_print "- 认出你上次用的配色："
+    ui_print "     $(builtin_id_of "$(printf '%s' "$_mp" | sed 's/^builtin_//')" | cut -d'|' -f2)"
   fi
   export BUILTIN_PREV
 
@@ -117,7 +119,8 @@ LAST=$(_pick "$LIB/last_selection")
 #     「认出你上次用的配色：718素装版」+「已恢复：911经典版」
 #   这种"认出来了却没用它"的荒唐结果。
 if [ -n "${BUILTIN_PREV:-}" ]; then
-  ui_print "  → 按你原来的配色恢复到：$(builtin_id_of "$(printf '%s' "$BUILTIN_PREV" | sed 's/^builtin_//')" | cut -d'|' -f2)"
+  ui_print "  → 按你原来的配色恢复到："
+  ui_print "     $(builtin_id_of "$(printf \'%s\' "$BUILTIN_PREV" | sed \'s/^builtin_//\')" | cut -d\'|\' -f2)"
   LAST="$BUILTIN_PREV"
 fi
 # 把"本来想恢复什么"记下来 —— 恢复失败时日志里能看出是哪个，不用猜
@@ -132,7 +135,11 @@ rm -f "$MODPATH/customize.sh.bak" 2>/dev/null
 ui_print " "
 ui_print "- 识别到系统：$ROM_NAME"
 ui_print "- Root 管理器：$(root_manager_name "$RM")"
-ui_print "- 挂载方式：$([ "$(mount_mode)" = manager ] && echo 交给管理器/元模块 || echo 模块自带挂载（无需元模块）)"
+if [ "$(mount_mode)" = manager ]; then
+  ui_print "- 挂载方式：交给管理器 / 元模块"
+else
+  ui_print "- 挂载方式：模块自带挂载（无需元模块）"
+fi
 
 RESTORED=0
 if [ "$LAST" != none ]; then
@@ -158,7 +165,9 @@ if [ "$LAST" != none ]; then
   #   用户会以为卡死了、甚至去强杀管理器。真机反馈过（截图里就是停在"上次选择"这行不动）。
   #   提示要写在 apply **之前**（写在后面就是马后炮了，用户已经等完了）。
   #   ⚠️ 改这里时别删：它不参与任何逻辑，纯粹是给用户看的。
-  ui_print "  ⏳ 正在扫描你机器上的字体，大概十几秒到一分钟，卡住不动是正常的，请稍等…"
+  ui_print "  ⏳ 正在扫描你机器上的字体"
+      ui_print "     大概十几秒到一分钟。"
+      ui_print "     卡住不动是正常的，请稍等…"
 
   _APPLY_OUT=$(sh "$MODPATH/fontctl.sh" apply "$LAST" 2>&1)
   OUT=$(printf '%s\n' "$_APPLY_OUT" | tail -n1)
@@ -174,14 +183,17 @@ if [ "$LAST" != none ]; then
       #   真相是：上次那套找不到了 → 自动沿用了内置的一套，**结果是可用的**。
       #   所以按"结果"说话，别按"过程"说话。
       if [ -n "${OUT#ERROR:}" ]; then
-        ui_print "  没找到你上次选的「$_LAST_RAW」（${OUT#ERROR:}）"
+        ui_print "  没找到你上次选的「$_LAST_RAW」"
+        ui_print "     原因：${OUT#ERROR:}"
       else
         ui_print "  没找到你上次选的「$_LAST_RAW」"
         printf '%s\n' "$_APPLY_OUT" | while IFS= read -r _l; do
           [ -n "$_l" ] && ui_print "    | $_l"
         done
       fi
-      ui_print "  常见原因：那个字体文件已被清理，或换过字体库（模块之间共用同一个库）"
+      ui_print "  常见原因：那个字体文件已被清理，"
+ui_print "  或者换过字体库"
+ui_print "  （模块之间共用同一个库）"
       # ⚠️ 不能只写 none 就完事 —— 那样模块会**静默空转**（装上了却什么都不换），
       #    用户重启后看到"没生效"，还以为新包坏了。
       #    这里兜底自动挑一套可用配色，保证模块一定处于"能用"的状态。
@@ -192,14 +204,18 @@ if [ "$LAST" != none ]; then
           # 告诉 builtin_menu：这次不是"沿用你上次的"，是"改用了内置配色"
           BUILTIN_MENU_NOTE="已改用内置配色（不是沿用上次的选择）—— 想换请在 WebUI 里点"
           export BUILTIN_MENU_NOTE
-          ui_print "  → 已改为内置配色，重启后即可用（想换配色请在 WebUI 里点）"
+          ui_print "  → 已改为内置配色，重启后即可用"
+ui_print "     （想换配色请在 WebUI 里点）"
         else
           echo none > "$MODPATH/pending_font"
-          ui_print "  → 也没有可用的内置配色，已设为「无字体」，请开机后在 WebUI 选择"
+          ui_print "  → 也没有可用的内置配色"
+          ui_print "     已设为「无字体」"
+ui_print "     请开机后在 WebUI 选择"
         fi
       else
         echo none > "$MODPATH/pending_font"
-        ui_print "  → 已设为「无字体」，请开机后在 WebUI 重新选择"
+        ui_print "  → 已设为「无字体」"
+ui_print "     请开机后在 WebUI 重新选择"
       fi
       ;;
   esac
@@ -249,11 +265,13 @@ if [ -n "$PEND" ] && [ "$PEND" != none ]; then
     ui_print "- 正在为「$PEND」生成挂载计划…"
     # ★ 2026-10-14（与主项目同步）：这一步要扫一遍字体配置，会停十几秒到一分钟，
     #   必须先在界面上说清楚，否则用户以为卡死（真机反馈过）。
-    ui_print "  ⏳ 第一次生成要扫描你机器上的字体，大概十几秒到一分钟，卡住不动是正常的，请稍等…"
+    ui_print "  ⏳ 第一次生成要扫描你机器上的字体"
+      ui_print "     大概十几秒到一分钟"
+      ui_print "     卡住不动是正常的，请稍等…"
     sh "$MODPATH/fontctl.sh" apply "$PEND" >/dev/null 2>&1 || true
     if [ ! -s "$MODPATH/slots.map" ]; then
       ui_print "⚠ 挂载计划没有生成（slots.map 为空）"
-      ui_print "  字体库:$(ls "$LIB"/builtin_*.ttf 2>/dev/null | wc -l | tr -d ' ') 个自带配色"
+      ui_print "  字体库里有 $(ls "$LIB"/builtin_*.ttf 2>/dev/null | wc -l | tr -d \' \') 套自带配色"
       ui_print "  修复尝试：重新生成一次…"
       OUT2=$(sh "$MODPATH/fontctl.sh" apply "$PEND" 2>&1 | tail -n1)
       case "$OUT2" in
@@ -267,20 +285,26 @@ fi
 
 LIB_COUNT=$(lib_font_ids 2>/dev/null | grep -c '^builtin_')
 # ★ 2026-10-14（与主项目同步）：`conflicts` 也要扫一遍机器上的字体配置，会停一会儿。
-ui_print "- 正在检查有没有其它字体模块…（也会扫一遍字体配置，稍等）"
+ui_print "- 正在检查有没有其它字体模块…"
+ui_print "  （也会扫一遍字体配置，稍等）"
 CONFLICTS=$(sh "$MODPATH/fontctl.sh" conflicts 2>/dev/null | cut -d'|' -f2 | tr '\n' ' ')
 
 ui_print " "
 ui_print "===================================="
-ui_print "自带配色：$LIB_COUNT 套（$LIB）"
-ui_print "更新模块不会丢失选择；卸载全部配色包才会删除"
+ui_print "自带配色：$LIB_COUNT 套"
+ui_print "位置：$LIB"
+ui_print "更新模块不会丢失选择"
+ui_print "卸载全部配色包才会删除"
 ui_print "===================================="
-ui_print "使用方法：在模块管理器打开【WebUI】"
-ui_print "  1. 点选配色卡片切换（内置三套配色，不用导入）"
-ui_print "  2. 重启生效；选「无字体」即恢复默认"
+ui_print "使用方法：在模块管理器打开 WebUI"
+ui_print "  1. 点选配色卡片切换"
+ui_print "     （内置三套配色，不用导入）"
+ui_print "  2. 重启生效"
+ui_print "     选「无字体」即恢复默认"
 if [ "$RM" = magisk ]; then
   ui_print " "
-  ui_print "Magisk 没有 WebUI 入口：请安装 KsuWebUI"
+  ui_print "Magisk 没有 WebUI 入口"
+  ui_print "请先安装 KsuWebUI，"
   ui_print "后点模块卡片上的「操作」按钮打开。"
 fi
 if [ -n "$CONFLICTS" ]; then
@@ -303,11 +327,18 @@ GU="无"; [ -f "$OLD/update" ] && GU="有（上一次安装没被激活）"
 GS="无"; case "$(getprop persist.sys.safemode)$(getprop ro.sys.safemode)" in *1*) GS="有" ;; esac
 GM="无"; { command -v magisk >/dev/null 2>&1 || [ -e /data/adb/magisk ]; } && GM="有"
 ui_print " "
-ui_print "- 设备：$(getprop ro.product.brand) $(getprop ro.product.model) / Android $(getprop ro.build.version.release)"
-ui_print "- 门禁速查：已禁用=$GD  待激活=$GU  安全模式=$GS  Magisk共存=$GM"
-ui_print "- 需要诊断报告时：在 WebUI 里点「查看诊断报告」，"
-ui_print "  或点模块卡片上的「操作」按钮（不用手动保存，生成完会自动存到 Download）。"
-ui_print "  报告只产出一个文件：Download/完整体检报告.txt"
+ui_print "- 设备：$(getprop ro.product.brand) $(getprop ro.product.model)"
+ui_print "  Android $(getprop ro.build.version.release)"
+ui_print "- 门禁速查："
+ui_print "  已禁用=$GD   待激活=$GU"
+ui_print "  安全模式=$GS   Magisk共存=$GM"
+ui_print "- 需要诊断报告时："
+ui_print "  在 WebUI 里点「查看诊断报告」，"
+ui_print "  或点模块卡片上的「操作」按钮"
+ui_print "  （不用手动保存）"
+ui_print "  （生成完会自动存到 Download）"
+ui_print "  报告只产出一个文件："
+ui_print "  Download/完整体检报告.txt"
 if [ -f "$MODPATH/diag.sh" ]; then
   cp -f "$MODPATH/diag.sh" /data/local/tmp/font_diag.sh 2>/dev/null
   chmod 755 /data/local/tmp/font_diag.sh 2>/dev/null
