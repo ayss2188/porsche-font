@@ -1135,12 +1135,74 @@ slot_adaptive_extra() {
 # ---------------------------------------------------------------------------
 # 候选枚举：输出 "角色 目录 文件名"（目录为真实路径），仅限设备上真实存在的文件
 # 整份名单只转一次小写、成对读取，避免为每个文件名单独启动外部进程
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-15：通用候选层 —— **目录里有、配置没提的字体文件名**
+#
+#   为什么加：真机反馈「部分应用内字体不生效」，而另一个模块（犬神志-台北正黑）
+#   能解决 —— 它的做法是**手塞 34 个"配置里没引用"的字体文件**
+#   （RobotoFake-*、MiSans*VF、GoogleSans-*Italic 等，其中 25 个我们的清单里没有）。
+#   换句话说：有些 App 是**按固定文件名**取字体，那名字不在 ROM 配置里，
+#   我们的候选（配置 + 写死的清单 + 厂商正则）就看不见它 → 漏掉。
+#
+#   这一层把"目录里实际存在的字体文件"也纳进来 —— **不需要知道 ROM 是哪个**，
+#   所以它是通用的：换台机器、换个 ROM，缺哪个名字都自动覆盖。
+#
+#   安全性由下游保证：角色判定还是走 `_role_set` + `_role_wanted`，
+#   emoji/符号/等宽/锁屏/衬线这些**本来就不会被替换**（规则早就在那儿了）。
+# ---------------------------------------------------------------------------
+slot_dir_names() {
+  if [ -n "${DIR_NAMES_CACHE+x}" ]; then
+    printf '%s\n' "$DIR_NAMES_CACHE" | grep -v '^[[:space:]]*$'
+    return 0
+  fi
+  DIR_NAMES_CACHE=$(
+    for d in $(slot_dirs); do
+      [ -d "$FSROOT$d" ] || continue
+      # ★ 只收 Android 的厂商分区路径。
+      #   容器/沙箱环境里 slot_dirs 的"未知分区自动发现"会把宿主机的目录
+      #   （/Windows/fonts、/Users/... 之类）也列进来 —— 那些不是 Android 槽位。
+      #   真机上这条不会命中，但加上它：① 沙箱测试才准 ② 多一道防御。
+      case "$d" in
+        /system/*|/system_ext/*|/product/*|/vendor/*|/odm/*|/oem/*|/my_*/*|/mi_ext/*|\
+        /hw_product/*|/prism/*|/optics/*|/oplus_*/*) ;;
+        *) continue ;;
+      esac
+      for f in "$FSROOT$d"/*.ttf "$FSROOT$d"/*.otf "$FSROOT$d"/*.TTF "$FSROOT$d"/*.OTF; do
+        [ -f "$f" ] || continue
+        b=${f##*/}
+        case "$b" in *'*') continue ;; esac          # glob 没匹配到会原样留着
+        # ★ 跳过"占位/替身"性质的小文件（犬神志那批 RobotoFake 是 1.7~3.2 KB）：
+        #   把用户的大字体挂到那种位置上，可能盖掉 ROM 特意放的兜底字体。
+        sz=$(wc -c < "$f" 2>/dev/null | tr -dc '0-9')
+        [ -n "$sz" ] || continue
+        [ "$sz" -lt 32768 ] && continue
+        # ★ 与 `_xml_family_ok` 保持同一套准入标准。
+        #   配置驱动那条路会主动排除 emoji/符号/等宽/手写/休闲/数学/音乐/时钟，
+        #   以及 **serif（Sans-Serif 除外）**。新层是从目录枚举的，不经过那道判断 ——
+        #   这里按文件名补上等价的排除，免得"换条路就多出槽位"。
+        #   （weighttest 抓到：夹具里 serif 族的 WT-Serif.ttf 被新层收了，而配置那条路会排除它。）
+        bl=$(printf '%s' "$b" | tr '[:upper:]' '[:lower:]')
+        case "$bl" in
+          *sans-serif*|*sansserif*) ;;                  # Sans-Serif 例外 → 收
+          *emoji*|*symbol*|*mono*|*cursive*|*casual*|*math*|*music*|*clock*|*serif*)
+            continue ;;                                 # 与配置那条路一致 → 排除
+        esac
+        printf '%s\n' "$b"
+      done
+    done | sort -u
+  )
+  printf '%s\n' "$DIR_NAMES_CACHE" | grep -v '^[[:space:]]*$'
+}
+
 # ---------------------------------------------------------------------------
 slot_candidates() {
   local moddir="$1" t name l d dirs
   t="${TMPDIR:-/data/local/tmp}/.cand.$$"
   mkdir -p "${t%/*}" 2>/dev/null
-  { slot_xml_names; slot_static_names "$moddir"; slot_oem_names "$moddir"; } \
+  # ★ 第四层：目录里实际存在的字体文件名（通用，不依赖 ROM 清单）
+  #   加在最后，靠 sort -u 去重；角色判定仍在下游统一做
+  { slot_xml_names; slot_static_names "$moddir"; slot_oem_names "$moddir"; slot_dir_names; } \
     | grep -v '^[[:space:]]*$' | sort -u > "$t"
   tr '[:upper:]' '[:lower:]' < "$t" > "$t.l"
   dirs=$(slot_dirs)
