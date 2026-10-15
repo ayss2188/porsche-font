@@ -596,10 +596,19 @@ commit_payload() {
 # ---------------------------------------------------------------------------
 prune_wrapped_ttc() {
   local f
+  # ★ 2026-10-16 加一道保险（真机出过"产物不见了"）：
+  #   计划文件不存在 / 为空 / 一行有效内容都没有时，**什么都不删**。
+  #   原来的写法在那种情况下会走到 rm —— 把刚生成好的产物也删了，
+  #   而 slots.map 还指着它 ⇒ 之后每次挂载都报
+  #   "mount: '...ttc5_2-3'->'...': No such file or directory"。
+  #   宁可少清理，也不能删掉正在用的东西。
+  [ -s "$MODDIR/slots.map" ] || return 0
+  if ! awk 'NF >= 2 { ok = 1 } END { exit !ok }' "$MODDIR/slots.map" 2>/dev/null; then
+    return 0
+  fi
   for f in "$LIB"/*.ttc[0-9]* ; do
     [ -f "$f" ] || continue
-    if [ -s "$MODDIR/slots.map" ] && \
-       awk -v p="$f" '$NF == p { found = 1 } END { exit !found }' "$MODDIR/slots.map" 2>/dev/null; then
+    if awk -v p="$f" '$NF == p { found = 1 } END { exit !found }' "$MODDIR/slots.map" 2>/dev/null; then
       continue
     fi
     rm -f "$f" 2>/dev/null
@@ -721,7 +730,22 @@ do_apply() {
                 continue
               fi
             fi
-            ttc_wrap_mix "$src" "$nf" "$cand" "/$rel" "$cn" 2>/dev/null || cand=""
+            # ★ 2026-10-16：**别再吞报错**。真机上"合集没生成"导致挂载一直失败，
+            #   而 ttc.log 里一个字都没有 —— 因为这里原来是 2>/dev/null || cand=""，
+            #   失败原因彻底丢失。现在把 stderr 第一行 + 产物大小 + 剩余空间都记下来。
+            _twerr=$(ttc_wrap_mix "$src" "$nf" "$cand" "/$rel" "$cn" 2>&1)
+            _twrc=$?
+            [ "$_twrc" = 0 ] || cand=""
+            if [ -z "$cand" ] || [ ! -s "$cand" ]; then
+              _twsz=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
+              _twfree=$(free_kb "$LIB")
+              printf '%s %s faces=%s replace=%s via=wrapfail detail=包装器rc=%s 产物=%s字节 剩余=%sKB err=%s\n' \
+                "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" \
+                "${_twrc:-?}" "${_twsz:-无}" "${_twfree:-?}" \
+                "$(printf '%s' "$_twerr" | head -n1 | cut -c1-80)" \
+                >> "$LIB/ttc.log" 2>/dev/null
+              cand=""
+            fi
 
             # ★ 2026-10-14（与主项目同步）：**尺寸兜底**。
             #   上面那道校验只在 _osz/_usz 都非空时才生效，
