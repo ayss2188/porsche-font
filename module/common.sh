@@ -44,7 +44,8 @@ getp() { getprop "$1" 2>/dev/null | tr -d '\r\n'; }
 # ---------------------------------------------------------------------------
 # 识别当前 ROM：
 #   专项适配（有已知文件名清单）：hyperos | coloros | originos | flyme
-#   通用适配（靠真实字体目录 + 字体配置 XML 发现槽位）：samsung | honor | huawei | nothing | aosp
+#   （靠真实字体目录 + 字体配置 XML 自动发现槽位）：honor | huawei | nothing | aosp
+#   ★ samsung 有自己的清单（targets/samsung.list）+ .ttc 合集处理，不属于这一类
 #
 # ★ 1.0.9 重做：识别要"多证据"，不能看到一个属性就下结论 ★
 #   真实反馈（2026-10-12）：一台 **Android 16 类原生**被认成了 MIUI ——
@@ -224,10 +225,10 @@ rom_name() {
     coloros)  echo "ColorOS/OPPO/一加/realme" ;;
     originos) echo "OriginOS/vivo/iQOO" ;;
     flyme)    echo "Flyme/魅族" ;;
-    samsung)  echo "三星 One UI（通用适配）" ;;
-    honor)    echo "荣耀 MagicOS（通用适配）" ;;
-    huawei)   echo "华为 EMUI/鸿蒙（通用适配）" ;;
-    nothing)  echo "Nothing OS（通用适配）" ;;
+    samsung)  echo "三星 One UI" ;;
+    honor)    echo "荣耀 MagicOS（自动发现）" ;;
+    huawei)   echo "华为 EMUI/鸿蒙（自动发现）" ;;
+    nothing)  echo "Nothing OS（自动发现）" ;;
     aosp)     echo "原生/类原生/谷歌Pixel" ;;
     *)        echo "未知系统" ;;
   esac
