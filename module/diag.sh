@@ -1007,10 +1007,23 @@ app_side_probe() {
   fi
   # 管理器侧"卸载模块"的现场：原样列出（不猜文件格式，作者一眼就能看懂）
   if [ -f /data/adb/ksu/.feature_config ]; then
+    # ★ 2026-10-15：这个文件里那一行就是**全局一次搞定**的开关 ——
+    #   `kernel_umount=0` 一写，所有 App 都不再被卸载模块（不用逐个 App 点）。
+    #   所以：查到就把"怎么改"一起写出来，别只当现场信息列着。
     AS_FEATURE=$(grep -a -i 'umount' /data/adb/ksu/.feature_config 2>/dev/null | head -n1)
-    [ -n "$AS_FEATURE" ] || AS_FEATURE="（文件在，但没有含 umount 的项）"
+    if [ -n "$AS_FEATURE" ]; then
+      case "$AS_FEATURE" in
+        *umount=0*|*umount=false*|*umount=off*|*umount=no*) AS_FEATURE_HINT="（= 已关闭卸载，这是对的）" ;;
+        *) AS_FEATURE_HINT="（= 开着卸载；改成 kernel_umount=0 可一次性对所有 App 生效）" ;;
+      esac
+    else
+      AS_FEATURE="（文件在，但没有含 umount 的项）"
+      AS_FEATURE_HINT="（默认就是卸载；加一行 kernel_umount=0 可一次性对所有 App 生效）"
+    fi
   else
     AS_FEATURE="（没有 /data/adb/ksu/.feature_config）"
+    # 没有这个文件 = 用的是内核默认值"卸载"，所以这里就是解法所在
+    AS_FEATURE_HINT="（走内核默认值：会卸载；建这个文件并写一行 kernel_umount=0 即可对所有 App 生效）"
   fi
   if [ -f /data/adb/ksu/.umount ]; then
     AS_DOTUM=$(head -c 120 /data/adb/ksu/.umount 2>/dev/null | tr '\n' ' ')
@@ -1019,7 +1032,8 @@ app_side_probe() {
     AS_DOTUM="（没有 /data/adb/ksu/.umount）"
   fi
   # 元模块（Hybrid Mount 这类）自己也有"卸载/隐藏"开关，配置里叫 disable_umount
-  for _asf in /data/adb/hybrid-mount/config.toml /data/adb/hybrid_mount/config.toml /data/adb/magic_mount/config.toml; do
+  for _asf in /data/adb/hybrid-mount/config.toml /data/adb/hybrid_mount/config.toml /data/adb/magic_mount/config.toml \
+                 /data/adb/modules/mountify/config.toml /data/adb/mountify/config.toml; do
     [ -f "$_asf" ] || continue
     _asdu=$(sed -n 's/^[[:space:]]*disable_umount[[:space:]]*=[[:space:]]*//p' "$_asf" 2>/dev/null | head -n1)
     _asiu=$(sed -n 's/^[[:space:]]*vfs_isolate_uids[[:space:]]*=[[:space:]]*//p' "$_asf" 2>/dev/null | head -n1)
@@ -1496,6 +1510,25 @@ sec_unadapted() {
         *clock*|*watch*|*lockscreen*|*widget*|*emoji*|*symbol*|*logo*|*brand*)
           _should=0 ;;
       esac
+    fi
+
+    # ★ 2026-10-15 真机补：**再问一次 `_xml_family_ok`** ——
+    #   它是"哪些族本来就被排除"的唯一权威（EMOJI/SYMBOL/MONO/CURSIVE/CASUAL/
+    #   MATH/MUSIC/CLOCK，以及 SERIF）。
+    #   魅族真机报告（完整体检报告(2)(2).txt）里 ComingSoon.ttf / DancingScript-Regular.ttf
+    #   被标成 [★要修]，但它们的族名就是 `casual` / `cursive` —— 属于装饰字体，
+    #   `_xml_family_ok` 明确排除，没进计划是**正确**的。按文件名看不出来
+    #   （文件名里没有那些词）；上面那条只覆盖 clock/emoji 这类，覆盖不到 casual/cursive。
+    #   保守：只有确实查到族名、且判定为不该要时才降级；查不到就保持原判断，
+    #   免得把真问题掩盖掉。
+    if [ "$_should" = 1 ] && [ -f "${D2_TMP:-/nonexistent}/famfile" ] &&
+       command -v _xml_family_ok >/dev/null 2>&1; then
+      _fid=$(sed -n "s/^$(printf '%s' "$_fl" | sed 's/[.[\*^$]/\\&/g')|//p" "$D2_TMP/famfile" 2>/dev/null | head -n1)
+      if [ -n "$_fid" ]; then
+        for _one in $_fid; do
+          if ! _xml_family_ok "$_one" ""; then _should=0; break; fi
+        done
+      fi
     fi
     if [ "$_should" = 1 ]; then
       _un=$((_un + 1))
