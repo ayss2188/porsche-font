@@ -455,9 +455,12 @@ make_plan() {
     CJK_GUARD=1
   fi
   export CJK_GUARD
+  # ★ 保留锁屏时钟字体（cfg 键 keep_lockscreen）。
+  # ⚠️ 读取必须放在**这个 if 之前**：子项目 scope 是 all，走的是 else 分支；
+  #    一旦把它写进 if 里，else 那条路上的 $klk 永远是空 → 开关开着也没用。
+  #    （2026-10-15 真机反馈「保留锁屏不生效」就是这么来的，别再把这两行挪进 if。）
+  klk=$(cfg_get keep_lockscreen 0)
   if [ "$scope" = combo ]; then
-    # ★ 2026-10-14：新增「保留锁屏字体」开关（cfg 键 keep_lockscreen，默认 0 = 照旧全替换）。
-    klk=$(cfg_get keep_lockscreen 0)
     slot_plan "$MODDIR" all "$kl" "$ks" "$klk" > "$out"
   else
     slot_plan "$MODDIR" "$scope" "$kl" "$ks" "$klk" > "$out"
