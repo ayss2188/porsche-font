@@ -364,7 +364,24 @@ body { min-height: 100%; }
   #reportMask .rep-prog { flex: 0 0 auto; }
   /* 按钮永远贴在最下面，且不会被压扁 */
   #reportMask .btn-row { flex: 0 0 auto; margin-top: 2px; margin-bottom: 0; flex-wrap: wrap; }
-  #reportMask .btn-row .g-btn { padding: 9px 10px; font-size: 13.5px; flex: 1 1 auto; }
+  /* ★ 2026-10-16 再修一次（作者真机反馈"按钮文字显示不全"）：
+     上一版只允许换行，但按钮仍是 `flex: 1 1 auto` —— 四五个按钮挤一行时
+     每个被压得很窄，`white-space: nowrap` 的文字就溢出被切掉。
+     现在改成：**按钮按内容定宽（不收缩）**，一行放不下就整行折下去。
+     代价是可能占两行，但至少每个都能看全 —— 比"点了不知道是什么"强。 */
+  #reportMask .btn-row {
+    flex: 0 0 auto; margin-top: 2px; margin-bottom: 0;
+    flex-wrap: wrap; row-gap: 6px;
+    justify-content: flex-end;
+  }
+  #reportMask .btn-row .g-btn {
+    padding: 10px 14px; font-size: 13.5px;
+    flex: 0 0 auto;                 /* 不伸不缩：按文字宽度 */
+    white-space: nowrap;
+    overflow: visible;
+  }
+  /* 主按钮（上传给作者）给多一点分量，一眼能找到 */
+  #reportMask .btn-row .g-btn.primary-blue { padding: 10px 18px; font-weight: 700; }
   .modal h3 { margin: 0 0 8px; font-size: 16px; }
   .modal p { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); line-height: 1.55; word-break: break-all; white-space: pre-line; }
   .modal .txt { width: 100%; margin-bottom: 12px; }
@@ -418,11 +435,51 @@ body { min-height: 100%; }
   .sheet.show { transform: none; visibility: visible; }
   .sheet-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 8px; }
   .sheet-title { font-size: 16px; font-weight: 600; flex: 1; }
+  /* ★ 2026-10-16 修：字体选择面板的标题用的是 .fontact-title，而它**没有 flex:1**，
+     于是标题不撑开、右上角的 ✕ 紧贴在标题右边（真机截图反馈"叉怎么贴在左边"）。
+     这里补上 flex:1 把它推到最右。
+     ⚠️ 选择器必须限定到 #sheet —— 因为 .fontact-title 还被**底部动作菜单**用着
+     （那是 JS 动态建的 `title.className = "fontact-title"`，居中标题，
+      它是圆角小面板里的样式，不能被这里的"面板标题"规则影响）。 */
+  #sheet .sheet-head .fontact-title {
+    flex: 1; min-width: 0; padding: 0; text-align: left;
+    font-size: 16px; font-weight: 600; opacity: 1;
+  }
   .sheet-x { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 15px; cursor: pointer; }
   .sheet-path { padding: 0 16px 8px; font-size: 12px; color: var(--text-dim); word-break: break-all; }
   .sheet-tools { display: flex; gap: 8px; padding: 0 16px 10px; flex-wrap: wrap; }
   .chip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 12px; cursor: pointer; }
   .chip:active { background: var(--card-press); }
+  /* ★ 2026-10-16：「遇到问题」入口行的右箭头（跟开关行同款布局，只是右边不是开关） */
+  /* ★ 2026-10-16：「不重启也能生效」里的两类用户对照（普通 root / 临时 root）。
+     做成两行带标签的小卡片，让人一眼认出自己是哪一类。 */
+  .live-cmp { margin-bottom: 10px; }
+  .live-cmp > div {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 7px 10px; margin-bottom: 6px; font-size: 12px; line-height: 1.6;
+    color: var(--text-dim);
+  }
+  .live-cmp .k {
+    display: inline-block; min-width: 62px; margin-right: 6px; padding: 1px 6px;
+    border-radius: 6px; background: var(--border); color: var(--text);
+    font-size: 11.5px; text-align: center;
+  }
+  .live-cmp b { color: var(--text); }
+  .row-arrow { flex-shrink: 0; font-size: 20px; color: var(--text-dim); line-height: 1; padding: 0 4px; }
+  /* 弹层内容区：撑满中间、可滚动（跟 .sheet-list 同理，只是这里不是列表） */
+  .fbk-body { flex: 1; overflow-y: auto; padding: 0 16px 18px; -webkit-overflow-scrolling: touch; }
+  /* 入口行：给一点视觉强调，让它像"可点的入口"而不是普通说明文字。
+     注意只用已有变量，不引入新颜色。 */
+  /* ★ 2026-10-16："要挂梯子"这类提示的统一样式（左边一条细线 + 稍微亮一点） */
+  .vpn-tip {
+    border-left: 3px solid var(--border);
+    padding: 7px 0 7px 10px;
+    background: color-mix(in srgb, var(--card) 55%, transparent);
+    border-radius: 0 8px 8px 0;
+  }
+  .vpn-tip b { color: var(--text); }
+  .fbk-entry { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+  .fbk-entry:active { background: var(--card-press); }
   .sheet-list { flex: 1; overflow-y: auto; padding: 0 16px 12px; }
   .pick-item {
     display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border);
@@ -587,13 +644,20 @@ try {
     <div class="sw on" id="sw_mount_mode"></div>
   </div>
   <div class="g-hint">改完会自动重新生成，重启生效。</div>
+
   <div class="divider"></div>
 
-  <div class="btn-row">
-    <button class="g-btn" onclick="showReport()">查看诊断报告</button>
+  <div class="switch-row fade fbk-entry" onclick="openFbk()">
+    <div>
+      <div class="t">遇到问题？把现场发我</div>
+      <div class="d">字体没换全 / 某个 App 没变 / 显示方块 □ / 想加粗没变化 ——
+        点这里<b>两秒</b>上报，不用找文件。</div>
+    </div>
+    <div class="row-arrow">›</div>
   </div>
 
   <div class="divider"></div>
+
 
   <div class="section-title fade"><span>谷歌字体兼容</span></div>
   <div class="status-box fade">
@@ -612,6 +676,11 @@ try {
   <div class="divider"></div>
 
   <div class="section-title fade"><span>模块更新（GitHub）</span></div>
+  <!-- ★ 2026-10-16 作者要求：把"要挂梯子"提前说清楚，别等用户点了失败才猜 -->
+  <div class="g-hint vpn-tip fade" style="margin:-2px 0 10px">
+    <b>更新包在 GitHub 上，国内直连大多不通</b> ——
+    如果点「检查更新」没反应、或者「下载并安装」失败，<b>先连上 VPN 再试</b>。
+  </div>
   <div class="status-box fade">
     <div class="status-row">
       <span class="label">当前版本</span>
@@ -635,11 +704,74 @@ try {
 
   <div class="divider"></div>
 
-  <button class="reboot-btn fade" id="rebootBtn" onclick="doReboot()">立即重启生效</button>
-  <div class="hint fade" id="rebootHint">切换字体后不会立刻改变，需要重启手机</div>
+  <!-- ===================== 免重启生效（2026-10-16 新增）=====================
+       一直以来的体验问题：换了字体必须重启才看得到。
+       原因：界面点「应用」只是把挂载计划(slots.map)写好，**真正挂载发生在下次开机**
+             （post-fs-data / post-mount）。
+       这里补上"现在就挂"的那一步 —— 技术上要 nsenter 进 init 命名空间才有效
+       （su 会话的挂载 system_server 看不见），细节见 live.sh 顶部注释。
+
+       ⚠️ 顺序很重要：**必须先挂载，再软重启**。
+         只做软重启没用 —— 那时还没有任何东西可读。
+       ================================================================ -->
+  <div class="section-title fade"><span>让字体生效</span></div>
+  <div class="g-hint fade" style="margin-bottom:8px">
+    换了字体后有两种做法，<b>内容一样，只是快慢和稳当程度不同</b>：
+  </div>
+  <div class="live-cmp fade">
+    <div><span class="k">免重启</span>不用重启，点一下就生效（屏幕黑一下、约 30~60 秒）。
+      <b>临时 root 用户必须走这条</b> —— 他们重启后 root 会掉、开机脚本也不会跑。</div>
+    <div><span class="k">最稳</span>重启手机 —— 模块在开机时自己挂载，<b>一次到位</b>。
+      清缓存、恢复出厂那种，都靠这条路。</div>
+  </div>
+
+  <!-- ===================== 免重启生效（2026-10-16 新增）=====================
+       一直以来的体验问题：换了字体必须重启才看得到。
+       原因：界面点「应用」只是把挂载计划(slots.map)写好，**真正挂载发生在下次开机**
+             （post-fs-data / post-mount）。
+       这里补上"现在就挂"的那一步 —— 技术上要 nsenter 进 init 命名空间才有效
+       （su 会话的挂载 system_server 看不见），细节见 live.sh 顶部注释。
+
+       ⚠️ 顺序很重要：**必须先挂载，再软重启**。
+         只做软重启没用 —— 那时还没有任何东西可读。
+
+       ★ 2026-10-16 作者意见：**不要按 root 类型分**。
+         因为正常 root 也能用这条路（省一次重启），所以改成按"稳 / 快"分：
+           · 最稳 = 重启（所有情况下都管用，真·一次到位）
+           · 免重启 = 快，但依赖 root 会话还在
+         而且**最稳那条排在前面** —— 它才是多数人该点的主按钮。
+       ================================================================ -->
+  <div class="btn-row fade">
+    <button class="g-btn primary-blue" id="liveFreeBtn" onclick="liveFree()">免重启应用（快，不用重启）</button>
+  </div>
+  <div class="btn-row fade">
+    <button class="g-btn" id="liveRevertBtn" onclick="liveRevert()">变回原字体（免重启）</button>
+  </div>
+  <div class="g-hint fade" style="margin-bottom:8px">
+    点它会让<b>屏幕黑一下、所有 App 重新加载</b>，约 30~60 秒恢复 —— 这期间别乱点。<br>
+    <span style="opacity:.8">它不改开机行为（模块还是照常自己挂载），只是把这次应用提前到现在。</span>
+  </div>
+  <div class="g-hint fade" id="liveStatus" style="display:none"></div>
+
+  <div class="divider"></div>
+
+  <button class="reboot-btn fade" id="rebootBtn" onclick="doReboot()">立即重启生效（最稳）</button>
+  <div class="hint fade" id="rebootHint">重启一次，模块在开机时自己挂载 —— 以后每次开机都照常生效</div>
+
+
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
   <div class="foot"><span id="modNameFoot">保时捷字体</span> · 作者 暗影双生</div>
 
+
+  <!-- ===================== 遇到问题（入口行）2026-10-16 =====================
+       作者反馈：原来把"快捷上报 + 完整报告"整块摊在主界面上，占了太多位置，
+       而这是**低频功能**（只有出问题才用）。所以收成一行入口，点开才是完整界面。
+       弹层见 #fbkSheet。
+
+       ★ 作者第二次反馈："症状标签那排也占位置" —— 确实。
+         把它压成**一行小字**（还是把"什么时候该点"说清楚），
+         不再用一排圆角标签（那排要占 2 行高度）。
+       ======================================================================== -->
 
   <div class="modal-mask" id="reportMask">
     <div class="modal">
@@ -670,7 +802,58 @@ try {
         <button class="g-btn" id="reportMoreBtn" onclick="reportMore()" style="display:none">看更多</button>
         <button class="g-btn" id="reportViewBtn" onclick="repShowView(repViewMode === 'raw' ? 'pretty' : 'raw')" style="display:none">原样文本</button>
         <button class="g-btn" id="reportRegenBtn" onclick="regenReport()" style="display:none">重新生成</button>
+        <!-- ★ 2026-10-16：生成完成后就地提供"上传给作者"（传作者自己的服务器）。
+             作者的意见：它属于完整报告的一部分，放在外面的区块里"感觉很奇怪" ——
+             而且它依赖这次刚生成的文件，就地放才说得通。
+             所以只在**生成完成**（repPaintDone）后才出现。 -->
+        <button class="g-btn primary-blue" id="reportServerBtn" onclick="repSendServer()" style="display:none">上传给作者</button>
         <button class="g-btn primary-blue" onclick="closeReport()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+<div class="sheet" id="fbkSheet">
+    <div class="sheet-head">
+      <div class="sheet-title">遇到问题？把现场发我</div>
+      <button class="sheet-x" onclick="closeFbk()" aria-label="关闭">✕</button>
+    </div>
+    <div class="fbk-body">
+    <!-- ★ 2026-10-16 作者要求：上传前先提醒要梯子（服务器在国外） -->
+    <div class="g-hint vpn-tip" style="margin-bottom:10px">
+      <b>上传前请先连 VPN</b> —— 报告是传到我自己的服务器（在国外），
+      不连 VPN 一般传不上去。连不上就点右边的「连接自检」，它会告诉你卡在哪一步。
+    </div>
+      <div class="g-hint" style="margin-bottom:12px">
+        <b>先试「一键上报」</b> —— 两秒生成、点一下就发到我邮箱，不用你找文件。
+        它只读模块自己的状态文件，足够我看清大多数问题。<br>
+        只有在疑难杂症时，才需要下面的<b>完整报告</b>（它要跑几分钟）。
+      </div>
+
+      <div class="btn-row">
+        <button class="g-btn primary-blue" id="fbkQuickBtn" onclick="fbkQuickSend()">一键上报</button>
+      <button class="g-btn" id="fbkTestBtn" onclick="fbkSelfTest()">连接自检</button>
+      </div>
+      <div class="btn-row">
+        <button class="g-btn" id="fbkExportBtn" onclick="fbkExportFile()">导出小报告</button>
+      </div>
+      <div class="g-hint" id="fbkStatus" style="display:none"></div>
+      <div class="g-hint" style="opacity:.75">
+        「导出小报告」存到 Download，是个纯文本文件（约 2KB），你可以先打开看一眼内容。
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="g-hint" style="margin-bottom:8px">
+        <b>下面是完整报告</b> —— 逐文件指纹、语言映射全表、框架读取路径这些原始数据。
+        它<b>10 分钟内就能跑完</b>（大部分时间花在给几百 MB 字体逐个算 sha256），
+        而且生成过程占资源。<b>没有明确需要就别点。</b>
+      </div>
+      <div class="btn-row">
+        <button class="g-btn" onclick="closeFbk(); showReport()">查看 / 生成完整报告</button>
+      </div>
+      <div class="g-hint" style="opacity:.75">
+        生成完那个窗口底部会多出一个「上传给作者」————
+        点它就能把报告当附件传上去。
       </div>
     </div>
   </div>
@@ -764,6 +947,140 @@ async function detectModDir() {
 }
 
 const LIB = "/data/adb/custom_font_lib";
+/* ===========================================================================
+   ★ 2026-10-16 上报通道：**只有一条 —— 作者自己的服务器**
+   ===========================================================================
+   服务器：Cloudflare Worker（cfs-report）+ R2 存储桶 cfs-reports
+     收报告  POST /report               带 x-cfs-key 口令
+     看报告  GET  /list?k=VIEW_KEY      网页表格，能下载、能删
+     为什么用它：报告整份存 R2（单份上限 8MB），**不占邮件正文长度**。
+
+   为什么去掉另外两条路（都不是坏东西，只是别扭）：
+     · Web3Forms 邮箱 —— 报告当邮件正文发，正文有 4000 字符上限，
+                         真机上被截断过，而截掉的恰好是最该看的几段
+     · GitHub Issue  —— 手机上 github.com 没梯子打不开，还要手动拖文件
+
+   ⚠️ 所以：**上传失败基本就是没挂梯子**（服务器在国外）。
+      界面上的提示也这么写了 —— 不用怀疑别的。
+
+   WORKER_URL : 服务地址
+   WORKER_KEY : 上传口令（UPLOAD_KEY）。它只能【写】不能【读】，
+                拿到它顶多往桶里塞垃圾报告，看不到已有的。
+                所以内置在界面里是安全的。换口令：改 Worker 的 secret + 改这里。
+   =========================================================================== */
+/* ★ 2026-10-16 作者要求：**只留自己的服务器这一条通道**。
+   去掉的两条：
+     · Web3Forms 邮箱 —— 报告当邮件正文发，正文有 4000 字符上限，真机被截断过
+     · GitHub Issue  —— 手机上 github.com 在没梯子时打不开，还要手动拖文件
+   两条都是"能用但别扭"，而自己的服务器（Cloudflare R2，单份上限 8MB）没有这些问题。
+   所以现在只有一条路：传不上去就挂个梯子，没有第二条退路。（报告还会留在
+   Download/快捷报告.txt，实在不行可以手动发。） */
+
+/* ---------- ★ 2026-10-16：自己的上报服务器（优先走这条）----------
+   背景：Web3Forms 的问题是**报告要当邮件正文发**，正文有 4000 字符上限，
+        真机上就被截断过 —— 而截掉的恰好是最该看的几段。
+        作者原本就部署了一个 Cloudflare Worker（报告存 R2），
+        那条路**不占长度**（单份上限 8MB），也没有 250 封/月 的额度焦虑。
+
+   通道顺序：
+     ① Worker（自己的服务器）—— 完整报告，不截断
+     ② Web3Forms —— 兜底。Worker 不通时自动回退（比如没挂梯子）
+
+   ⚠️ WORKER_KEY 必须跟 Worker 里 `wrangler secret put UPLOAD_KEY` 设的**完全一致**。
+      这个口令不是"密码级"的机密（它只是防止外人拿你的 R2 当网盘刷），
+      所以内置在界面里是可接受的 —— 跟 Web3Forms 的 access_key 同理。
+      真要换口令：改 Worker 的 secret + 改这里，两处一致即可。
+*/
+const WORKER_URL = "https://cfs-report.2188366745q.workers.dev";
+const WORKER_KEY = "up_AIWDsNGqSacruDo4wLnJmEiMvgEMpGtt";
+
+/* 自检：在控制台里跑一下就知道服务器通不通、口令对不对。
+   手机上看不到控制台的话，直接在浏览器打开这个地址也行：
+     https://cfs-report.2188366745q.workers.dev/health   → 正常会返回 ok
+   用法：ksu 界面里没法开控制台，所以这个函数主要是给"以后排查"留的。 */
+async function fbkTestWorker() {
+  const out = { url: WORKER_URL, keySet: !!WORKER_KEY, health: "", upload: "" };
+  try {
+    out.health = String(await ksuExec(
+      "if command -v curl >/dev/null 2>&1; then curl -sS -m 25 " + WORKER_URL + "/health; " +
+      "else toybox wget -q -O - " + WORKER_URL + "/health; fi") || "").trim().slice(0, 60);
+  } catch (e) { out.health = "失败：" + errText(e); }
+  out.upload = out.health ? "见 fbkSelfTest" : "（跳过）";
+  return out;
+}
+
+/* 连接自检（2026-10-16 加）
+   为什么加：作者反馈"挂了梯子也上传不了"，而错误信息只有一个
+   "Failed to fetch"，看不出是【网络到不了】还是【口令不对】还是【别的】。
+   这个函数把三段分别测一遍，结果直接显示在界面上 —— 一眼定位。
+
+   它做的三件事：
+     ① 看两个常量填了没（没填就根本不会走这条路）
+     ② GET /health        —— 纯连通性（不需要口令）
+     ③ POST /report       —— 口令对不对 + R2 桶通不通（传一小段测试文本）
+*/
+async function fbkSelfTest() {
+  const say = document.getElementById("fbkStatus");
+  const put = (h) => { if (say) { say.style.display = ""; say.innerHTML = h; } };
+  const esc2 = (s) => repEsc(String(s == null ? "" : s));
+  const out = [];
+
+  put("正在自检…");
+  out.push("① 配置：" + (WORKER_URL ? "地址有" : "★ 地址空") +
+           " / " + (WORKER_KEY ? "口令有（" + WORKER_KEY.length + " 字符）" : "★ 口令空"));
+  if (!WORKER_URL || !WORKER_KEY) {
+    put("自检结果：<br>" + out.map(esc2).join("<br>"));
+    return;
+  }
+
+  // ② 有没有能用的 HTTP 命令（这一步决定后面走哪条路）
+  let tool = "";
+  try {
+    const t = String(await ksuExec(
+      "if command -v curl >/dev/null 2>&1; then echo curl; " +
+      "elif toybox wget >/dev/null 2>&1; then echo toybox; else echo none; fi") || "").trim();
+    tool = t;
+    out.push("② HTTP 工具：" + (t === "curl" ? "curl ✓" : t === "toybox" ? "toybox wget ✓"
+             : "★ 都没有（没法上传，需要装 curl）"));
+  } catch (e) {
+    out.push("② HTTP 工具：★ 读不到：" + errText(e));
+  }
+
+  // ③ 连通性（走 shell，因为它过梯子）
+  try {
+    const r = String(await ksuExec(
+      "if command -v curl >/dev/null 2>&1; then " +
+      "curl -sS -m 25 " + WORKER_URL + "/health; " +
+      "else toybox wget -q -O - " + WORKER_URL + "/health; fi") || "");
+    if (/ok/i.test(r)) {
+      out.push("③ 连通性：✓ 通（服务器回 ok）");
+    } else {
+      out.push("③ 连通性：★ 回的不是 ok：" + r.slice(0, 60));
+    }
+  } catch (e) {
+    out.push("③ 连通性：★ 失败：" + errText(e));
+    put("自检结果：<br>" + out.map(esc2).join("<br>") +
+        "<br><br><b>走 shell 也连不上</b> —— 这次是真网络问题：" +
+        "确认梯子是【全局模式】，或者换成给「所有应用」代理。");
+    return;
+  }
+
+  // ④ 真传一小段
+  try {
+    const r = await fbkSendViaShell(
+      "连接自检 " + new Date().toISOString() + "\n（这份可以删）\n",
+      { "x-cfs-key": WORKER_KEY, "x-cfs-device": fbkHdr("自检", 20),
+        "x-cfs-ver": fbkHdr("v-selfcheck", 20), "x-cfs-note": fbkHdr("连接自检报文，可删", 60) });
+    out.push("④ 试传：✓ 成功（" + String(r.raw || "").trim().slice(0, 40) + "）");
+    put("自检结果：<br>" + out.map(esc2).join("<br>") +
+        "<br><br>✅ 全通 —— 可以点「一键上报」了。");
+  } catch (e) {
+    out.push("④ 试传：★ " + errText(e));
+    put("自检结果：<br>" + out.map(esc2).join("<br>") +
+        "<br><br>连通性没问题但传不进去 —— 把第 ④ 行发我。");
+  }
+}
+
 const NONE_LABEL = "无字体（系统默认）";
 const ROM_NAMES = {hyperos:"澎湃OS/HyperOS/MIUI", coloros:"ColorOS/OPPO/一加/realme", originos:"OriginOS/vivo/iQOO", flyme:"Flyme/魅族", samsung:"三星 One UI", honor:"荣耀 MagicOS（自动发现）", huawei:"华为 EMUI/鸿蒙（自动发现）", nothing:"Nothing OS（自动发现）", aosp:"原生/类原生/谷歌Pixel"};
 const HUGE_FONT = 30 * 1048576;    // 超过这个体积应用前要确认
@@ -773,6 +1090,8 @@ const THEME_LABELS = {auto:"🌓 自动", light:"☀️ 浅色", dark:"🌙 深�
 let cbCounter = 0, busy = false, themePref = "auto", toastTimer = null, rebooting = false;
 let fonts = [];            // [{id,name,size}]
 let activeId = "none", pendingId = "none";
+let manageMode = false;
+const selected = new Set();   // 字体库多选
 
 /* ---------- 基础工具 ---------- */
 function ksuExec(cmd) {
@@ -887,13 +1206,36 @@ function labelOf(id) {
   return p.length === 2 ? "中文 " + nameOf(p[0]) + " + 英文 " + nameOf(p[1]) : nameOf(id);
 }
 
+/* ★ 2026-10-16 修一个误报（作者真机反馈"明明有数据却显示无法读取"）：
+   旧写法把整段包在一个 try 里 ——
+     applyStatus 已经填好了 slotLabel / romLabel / mountLabel，
+     后面 backfillFam / render 里任何一个小错都会走 catch，
+     catch 又把 activeLabel / romLabel **覆盖**成「无法读取」。
+   于是界面上同时出现"已替换槽位=172"和"当前实际生效=无法读取"，自相矛盾。
+   （另外并发调两次时，先失败那次会盖掉后成功那次的界面。）
+
+   现在分成三层：
+     ① 读状态：只有它真失败，才说"无法读取"（这是唯一该报这个错的地方）
+     ② 补族键 / 渲染：各自保护，出错不影响状态显示（少个配对信息而已）
+     ③ 重入保护：同一时间只跑一次，避免互相覆盖 */
+let refreshBusy = false;
 async function refreshAll() {
+  if (refreshBusy) return;          // ③ 已经在跑就别再发一遍
+  refreshBusy = true;
   try {
-    // 两个调用并行发，少等一个来回
-    const [listOut, st] = await Promise.all([
-      ksuExec(`sh ${MODDIR}/fontctl.sh list`),
-      ksuExec(`sh ${MODDIR}/fontctl.sh status`)
-    ]);
+    // ① 这一步是"能不能跟模块说上话"，失败才是真的读不到
+    let listOut, st;
+    try {
+      const r = await Promise.all([
+        ksuExec(`sh ${MODDIR}/fontctl.sh list`),
+        ksuExec(`sh ${MODDIR}/fontctl.sh status`)
+      ]);
+      listOut = r[0]; st = r[1];
+    } catch (e) {
+      setValue("activeLabel", "无法读取（请在支持WebUI的模块管理器中打开）");
+      setValue("romLabel", "无法读取");
+      return;
+    }
     fonts = listOut.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
       const p = l.split("|");
       const id = p.shift();
@@ -904,12 +1246,15 @@ async function refreshAll() {
       return {id, name: p.join("|") || id, size, meta};
     });
     applyStatus(st);
-    // 老版本导入的字体没有族键（多字重配对要靠它），顺手补一次；
-    // 每个字体只试一次，失败就算了（不影响使用，只是不参与配对）。
-    if (await backfillFam()) render();
-  } catch (e) {
-    setValue("activeLabel", "无法读取（请在支持WebUI的模块管理器中打开）");
-    setValue("romLabel", "无法读取");
+
+    // ② 后面的都是"锦上添花"，出错不要动状态那几行
+    try {
+      // 老版本导入的字体没有族键（多字重配对要靠它），顺手补一次；
+      // 每个字体只试一次，失败就算了（不影响使用，只是不参与配对）。
+      if (await backfillFam()) render();
+    } catch (e) { /* 补族键失败：界面其余部分照常 */ }
+  } finally {
+    refreshBusy = false;
   }
 }
 
@@ -1045,16 +1390,15 @@ function makeCard(id, name, metaText, f) {
   const ba = document.createElement("span");
   ba.className = "badge active"; ba.textContent = "当前";
   meta.append(m, bp, ba);
-  const isBuiltin = /^builtin_/.test(id);      // 自带配色 → 不显示字重/同族标签
-  if (f && !isBuiltin) {
+  if (f) {
     const addTag = (text, cls) => { const t = document.createElement("span"); t.className = "tag" + (cls ? " " + cls : ""); t.textContent = text; meta.append(t); };
-    // ★ 内置配色版：**不显示字重/同族标签**。
-    //   为什么去掉（作者反馈）：三套内置配色用的是同一套可变字体，
-    //   每张卡都显示同样的「字重 330」「同族 3 个字重」—— 对用户是纯噪声，
-    //   而且"字重 330"这个数来自 OS/2 的 usWeightClass，对用户毫无意义。
-    //   用户真正需要知道的信息（能切换、哪个生效）已经在卡片标题和「当前」徽章里了。
-    //   ⚠️ 用户自己导入的字体仍然显示这些 —— 那里"有没有中文字形、加粗会不会变粗"
-    //      确实是选字体时要知道的。判断依据：内置配色的 id 以 builtin_ 开头。
+    if (f.meta.vf === "1") addTag("可变");
+    else if (f.meta.wght) addTag("字重 " + f.meta.wght);
+    // 多字重配对：同族有几个字重，一眼看得出"加粗会不会真的变粗"
+    if (f.meta.fam) {
+      const sib = fonts.filter(x => x.meta.fam === f.meta.fam);
+      if (sib.length > 1) addTag("同族 " + sib.length + " 个字重", "ok");
+    }
   }
   info.append(n, meta);
   card.append(info);
@@ -1065,7 +1409,8 @@ function makeCard(id, name, metaText, f) {
 }
 
 
-/* ---------- 字体库：折叠展开（与主项目同步） ----------
+/* ---------- 字体库：折叠展开（2026-10-14 新增） ----------
+   社区反馈"字体多了列表太长"，加一个收起。
    用 grid-template-rows 1fr↔0fr 做动画，不需要预先知道内容高度。 */
 function toggleLib(force) {
   const box = document.getElementById("libBox");
@@ -1077,16 +1422,16 @@ function toggleLib(force) {
   try { localStorage.setItem("cf_lib_collapsed", want ? "1" : "0"); } catch (e) {}
 }
 
-/* ---------- 字体库：底部动作菜单（与主项目同步） ----------
+/* ---------- 字体库：底部动作菜单（2026-10-14 新增） ----------
    为什么加：社区反馈"点一下卡片就直接换字体，容易误触"。
-   现在点卡片只弹菜单，**真正的应用要再点一次**。
-   ⚠️ 内置配色版差异：这里**只有"应用"** —— 自带配色不能改名、不能删除
-      （删了下次开机 builtin_import 会恢复），所以菜单里不放那两个入口。 */
+   现在点卡片只弹菜单，**真正的应用要再点一次** —— 误触不会再换字体。
+   菜单从底部滑上来（手机上最自然），点遮罩 / 返回键 / 取消都能关。 */
 function showFontSheet(id, name, isNone) {
   const old = document.getElementById("fontSheetMask");
   if (old) old.remove();
   const mask = document.createElement("div");
   mask.className = "fontact-mask"; mask.id = "fontSheetMask";
+
   const sheet = document.createElement("div");
   sheet.className = "fontact";
 
@@ -1096,12 +1441,6 @@ function showFontSheet(id, name, isNone) {
   title.querySelector("b").textContent = name;
   sheet.append(title);
 
-  const close = () => {
-    mask.classList.remove("show");
-    setTimeout(() => mask.remove(), 220);
-    document.removeEventListener("keydown", onKey);
-  };
-  const onKey = e => { if (e.key === "Escape") close(); };
   const mkItem = (icon, text, cls, fn) => {
     const it = document.createElement("div");
     it.className = "fontact-item" + (cls ? " " + cls : "");
@@ -1112,19 +1451,34 @@ function showFontSheet(id, name, isNone) {
     return it;
   };
 
+  const close = () => {
+    mask.classList.remove("show");
+    setTimeout(() => mask.remove(), 220);
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = e => { if (e.key === "Escape") close(); };
+
   if (isNone) {
-    sheet.append(mkItem("\u2713", "恢复系统默认字体", "apply", () => selectFont("none")));
-  } else if (id === activeId && id === pendingId) {
-    // 真·当前在用 → 给一条可点的"重新应用"（用户改了能反悔）
-    sheet.append(mkItem("\u21bb", "重新应用这个配色", "apply", () => selectFont(id)));
-  } else if (id === activeId) {
-    // 当前在用但待生效是别的 → **必须可点**，否则切走之后切不回来
-    sheet.append(mkItem("\u21a9", "改回这个配色", "apply", () => selectFont(id)));
+    sheet.append(mkItem("✓", "恢复系统默认字体", "apply", () => selectFont("none")));
   } else {
-    sheet.append(mkItem("\u2713", "应用这个配色", "apply", () => selectFont(id)));
+    const isCur = (id === activeId);
+    if (isCur && id === pendingId) {
+      // 真·当前在用（也已经是待生效的那个）→ 不用重复应用，但**给一条可点的重应用**，
+      // 万一用户改了想反悔（比如刚切到「无字体」），点它能纠正回来。
+      sheet.append(mkItem("↻", "重新应用这个字体", "apply", () => selectFont(id)));
+    } else if (isCur) {
+      // 当前在用、但待生效的不是它（= 用户刚改成别的还没重启）
+      // → 这里必须**可点**，否则"切到无字体后切不回来"（作者真机反馈过）
+      sheet.append(mkItem("↩", "改回这个字体", "apply", () => selectFont(id)));
+    } else {
+      sheet.append(mkItem("✓", "应用这个字体", "apply", () => selectFont(id)));
+    }
+    sheet.append(Object.assign(document.createElement("div"), { className: "fontact-sep" }));
+    sheet.append(mkItem("✎", "重命名", "", () => editFont(id)));
+    sheet.append(mkItem("🗑", "删除", "danger", () => deleteFonts([id])));
   }
   sheet.append(Object.assign(document.createElement("div"), { className: "fontact-sep" }));
-  sheet.append(mkItem("\u2715", "取消", "", () => {}));
+  sheet.append(mkItem("✕", "取消", "", () => {}));
 
   mask.append(sheet);
   mask.onclick = e => { if (e.target === mask) close(); };
@@ -1139,30 +1493,58 @@ function render() {
   document.getElementById("pendingRow").style.display = hasPending ? "flex" : "none";
   if (hasPending) setValue("pendingLabel", labelOf(pendingId));
 
+  // 顶部提示：换模式时告诉用户"现在点卡片会发生什么"
+  const ht = document.getElementById("libHeadText");
+  if (ht) ht.textContent = manageMode ? "字体库（点卡片勾选）" : "字体库（点卡片打开菜单）";
+
+  // 字体被删掉后，清理多选里失效的项
+  [...selected].forEach(id => { if (!fonts.some(f => f.id === id) || isLocked(id)) selected.delete(id); });
+
   const box = document.getElementById("fontList");
   box.textContent = "";
 
-  // ★ 内置配色版：卡片只有"点选切换"一个动作 —— 没有导入、没有改名、没有删除。
-  //   （自带配色是包的一部分，删了/改名了下次开机也会被 builtin_import 恢复，
-  //     给用户这些入口只会造成困惑。）
   const none = makeCard("none", NONE_LABEL, "不替换任何系统字体（默认）");
-  none.onclick = () => showFontSheet("none", NONE_LABEL, true);   // 点一下先弹菜单，不再直接切
+  if (manageMode) none.classList.add("locked");
+  none.onclick = () => {
+    if (manageMode) { showToast("这一项不能删除"); return; }
+    showFontSheet("none", NONE_LABEL, true);   // 点一下先弹菜单，不再直接切
+  };
   box.append(none);
 
   fonts.forEach(f => {
     const card = makeCard(f.id, f.name, fmtSize(f.size), f);
-    // 改成"点一下弹菜单"，不再直接应用（社区反馈容易误触）
-    card.onclick = () => showFontSheet(f.id, f.name, false);
+    if (manageMode) {
+      const locked = isLocked(f.id);
+      if (locked) card.classList.add("locked");
+      card.classList.toggle("selected", selected.has(f.id));
+      const ck = document.createElement("div");
+      ck.className = "ckbox"; ck.textContent = "✓";
+      card.append(ck);
+      card.onclick = () => toggleSelect(f.id, card);
+    } else {
+      // ★ 2026-10-14：改成"点一下弹菜单"，不再直接应用（社区反馈容易误触）。
+      //   编辑 / 删除也收进菜单里 —— 卡片右侧不再放那两个小图标按钮，
+      //   少两个容易点错的目标（反馈里说的"误触"主要就是它们和整卡点击挤在一起）。
+      card.onclick = () => showFontSheet(f.id, f.name, false);
+      const more = document.createElement("button");
+      more.className = "icon-btn more"; more.textContent = "⋯"; more.setAttribute("aria-label", "更多");
+      more.onclick = ev => { ev.stopPropagation(); showFontSheet(f.id, f.name, false); };
+      const icons = document.createElement("div");
+      icons.className = "icons";
+      icons.append(more);
+      card.append(icons);
+    }
     box.append(card);
   });
 
   if (!fonts.length) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = "没有找到自带配色 —— 请重新刷入一次模块（自带配色由安装脚本注入）";
+    e.textContent = "字体库还是空的，先在下方导入一个字体吧";
     box.append(e);
   }
 
+  updateBatchBtn();
 
   const hint = document.getElementById("rebootHint");
   hint.textContent = hasPending
@@ -1170,9 +1552,34 @@ function render() {
     : "当前没有待生效的更改，重启按钮仍可随时使用";
 }
 
-/* ---------- 多选 / 批量删除：内置配色版**没有**这些功能 ----------
-   自带配色是包的一部分，删不掉（下次开机 builtin_import 会恢复），
-   所以整块去掉，避免留下指向已删按钮的引用。 */
+/* ---------- 字体库多选 / 批量删除 ---------- */
+function updateBatchBtn() {
+  const btn = document.getElementById("batchBtn");
+  btn.style.display = manageMode ? "block" : "none";
+  btn.textContent = "删除选中 (" + selected.size + ")";
+  btn.disabled = selected.size === 0;
+  const mb = document.getElementById("manageBtn");
+  mb.textContent = manageMode ? "完成" : "多选";
+  mb.classList.toggle("on", manageMode);
+}
+
+function toggleManage() {
+  if (busy) return;
+  manageMode = !manageMode;
+  selected.clear();
+  render();
+}
+
+function toggleSelect(id, card) {
+  if (isLocked(id)) { showToast("使用中或待生效的字体不能删除"); return; }
+  if (selected.has(id)) selected.delete(id); else selected.add(id);
+  if (card) card.classList.toggle("selected", selected.has(id));
+  updateBatchBtn();
+}
+
+function batchDelete() {
+  if (selected.size) deleteFonts([...selected]);
+}
 
 function setCardBusy(card, on) {
   if (!card) return;
@@ -1182,7 +1589,7 @@ function setCardBusy(card, on) {
   const ov = document.createElement("div");
   ov.className = "overlay";
   const sp = document.createElement("span"); sp.className = "spin";
-  const tx = document.createElement("span"); tx.textContent = "正在应用配色…";
+  const tx = document.createElement("span"); tx.textContent = "正在准备字体…";
   ov.append(sp, tx);
   card.append(ov);
   card.classList.add("busy");
@@ -1205,7 +1612,7 @@ async function selectFont(id) {
   busy = true;
   const card = document.querySelector('.option[data-id="' + id + '"]');
   setCardBusy(card, true);
-  showToast("正在把配色铺到系统槽位…", true);
+  showToast("正在把这套字体铺到系统槽位…", true);
   await nextPaint();
   try {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh apply ${shq(id)}`);
@@ -1254,6 +1661,8 @@ async function deleteFonts(ids) {
     else showToast("已删除 " + del + " 个" + (skip ? "，" + skip + " 个使用中已跳过" : ""));
   } catch (e) { showToast("删除失败：" + errText(e)); }
   busy = false;
+  selected.clear();
+  manageMode = false;
   await refreshAll();
 }
 
@@ -1389,26 +1798,6 @@ async function probeFont(path) {
     tables[String.fromCharCode(dir[o], dir[o + 1], dir[o + 2], dir[o + 3])] = {off: u32(dir, o + 8), len: u32(dir, o + 12)};
   }
   const meta = {vf: tables["fvar"] ? 1 : 0};
-  // ★ 可变字体的**字重可调范围**（fvar 的 wght 轴 min/max）。
-  //   为什么要读它：只显示 OS/2 的 usWeightClass（比如 330）对用户毫无意义 ——
-  //   用户真正想知道的是"系统里的粗细滑杆能不能调、能调到多少"。
-  //   读法：fvar 头 16 字节，然后轴记录（每 20 字节：tag(4) + min/default/max 各 16.16 定点）。
-  if (tables["fvar"]) {
-    try {
-      const fv = await readHex(path, tables["fvar"].off, Math.min(tables["fvar"].len, 16 + 20 * 8));
-      const axOff = u16(fv, 4), axCnt = u16(fv, 8), axSize = u16(fv, 10);
-      for (let i = 0; i < axCnt && i < 8; i++) {
-        const o = axOff + i * axSize;
-        if (o + 20 > fv.length) break;
-        const tag = String.fromCharCode(fv[o], fv[o + 1], fv[o + 2], fv[o + 3]);
-        if (tag !== "wght") continue;
-        const fx = k => ((fv[k] << 24) | (fv[k + 1] << 16) | (fv[k + 2] << 8) | fv[k + 3]) / 65536;
-        const lo = Math.round(fx(o + 4)), hi = Math.round(fx(o + 12));
-        if (lo > 0 && hi > lo) { meta.wghtLo = lo; meta.wghtHi = hi; }
-        break;
-      }
-    } catch (e) { /* 读不到就算了，不影响其它信息 */ }
-  }
   if (tables["CFF "] || tables["CFF2"]) meta.cff = 1;
   if (tables["COLR"] || tables["CBDT"] || tables["sbix"]) meta.color = 1;
   if (tables["maxp"]) meta.glyphs = u16(await readHex(path, tables["maxp"].off + 4, 2), 0);
@@ -1435,6 +1824,16 @@ async function probeFont(path) {
     }
   }
   return meta;
+}
+
+// 导入后读取覆盖范围并写入元数据；失败不影响导入（按中英文处理）
+async function probeAndSave(id) {
+  try {
+    const m = await probeFont(`${LIB}/${id}.ttf`);
+    const kv = Object.entries(m).map(([k, v]) => k + "=" + v).join(" ");
+    await ksuExec(`sh ${MODDIR}/fontctl.sh setmeta ${shq(id)} ${kv}`);
+    return m;                                  // 给界面显示"这个字体覆盖了哪些文字"
+  } catch (e) { return null; }
 }
 // 同族一共有几个字重（含它自己）。>1 就说明"加粗/细体"能各就各位。
 function sibCount(m, before) {
@@ -1474,14 +1873,215 @@ function coverageText(m, before) {
   else s += "\n六项齐全，全部槽位都会用这个字体";
   return s + weightHint(m, before) + pairHint(m, before);
 }
-/* ---------- 文件浏览器 / 导入相关代码：内置配色版**已全部移除** ----------
-   本版只在本模块自带的三套配色之间切换，没有「导入字体」这个功能，
-   所以原来的文件浏览器、进度条、导入确认那一整套都不需要了。
-   （保留这段说明是为了让以后同步主项目的人一眼看出：这里是**故意删掉的**，
-     不是漏同步。） */
+function setImporting(on) {
+  ["importBtn", "sysPickBtn"].forEach(i => { document.getElementById(i).disabled = on; });
+  if (!on) document.getElementById("progress").classList.remove("show");
+}
+function setProgress(text, ratio) {
+  document.getElementById("progress").classList.add("show");
+  document.getElementById("progressText").textContent = text;
+  document.getElementById("progressBar").style.width = Math.round((ratio || 0) * 100) + "%";
+}
+function summarize(ok, fails) {
+  if (!fails.length) return "导入成功 " + ok + " 个";
+  return "成功 " + ok + " 个，失败 " + fails.length + " 个：" + fails[0];
+}
+
+// 批量导入：items = [[完整路径, 显示名], ...]，每个文件一次 cp，速度快
+async function importMany(items) {
+  if (busy || !items.length) return;
+  busy = true; setImporting(true);
+  let ok = 0; const fails = []; let lastMeta = null;
+  try {
+    for (let i = 0; i < items.length; i++) {
+      const [path, name] = items[i];
+      // ★ 2026-10-15（作者的意思）：**把"检测"显示在进度条里**。
+      //   检测其实一直在导入时跑（fontctl 的 store_font → valid_font），但界面上不显示，
+      //   用户完全不知道有这一步。这里把它说出来 —— 顺便让"导入要等一下"变得可解释。
+      const pfx = items.length > 1 ? ("导入 " + (i + 1) + "/" + items.length + "：") : "";
+      setProgress(pfx + "正在校验字体文件：" + name, i / items.length);
+      await nextPaint();
+      try {
+        const out = await ksuExec(`sh ${MODDIR}/fontctl.sh import ${shq(path)} ${shq(stripExt(name))}`);
+        if (out.indexOf("OK:") === 0) { ok++; setProgress("检查字体覆盖范围：" + name, (i + 1) / items.length); lastMeta = await probeAndSave(out.trim().slice(3)); }
+        else fails.push(name + "：" + out.replace(/^ERROR:/, ""));
+      } catch (e) {
+        fails.push(name + "：" + errText(e));
+      }
+    }
+    setProgress("完成", 1);
+    // 只导一个时，顺手把"覆盖了哪些文字"说清楚（用户最关心的就是这个）
+    showToast(summarize(ok, fails) + (ok === 1 && lastMeta ? "\n" + coverageText(lastMeta, fonts) : ""));
+  } finally {
+    busy = false; setImporting(false);
+    await refreshAll();
+  }
+}
+
+/* ---------- 文件浏览器（可多选，选择会跨文件夹保留） ---------- */
+const FB_ROOT = "/storage/emulated/0";
+const FB = {path: FB_ROOT, dirs: [], files: []};
+const picked = new Map();   // 完整路径 -> {name, size}
+const b64 = s => btoa(unescape(encodeURIComponent(s)));
+const joinPath = (d, n) => d.replace(/\/$/, "") + "/" + n;
+
+function openBrowser() {
+  if (busy) return;
+  document.getElementById("sheet").classList.add("show");
+  updatePickCount();
+  fbLoad(FB.path);
+}
+function closeBrowser() { document.getElementById("sheet").classList.remove("show"); }
+
+// ★ 2026-10-16：「遇到问题」弹层（把原来摊在主界面上的那一大块收起来）
+function openFbk() { document.getElementById("fbkSheet").classList.add("show"); }
+function closeFbk() { document.getElementById("fbkSheet").classList.remove("show"); }
+
+function fbMsg(text) {
+  const list = document.getElementById("fbList");
+  list.textContent = "";
+  const e = document.createElement("div");
+  e.className = "empty"; e.textContent = text;
+  list.append(e);
+}
+
+async function fbLoad(path) {
+  fbMsg("正在读取文件列表…");
+  document.getElementById("fbPath").textContent = path;
+  try {
+    const out = await ksuExec(`sh ${MODDIR}/fontctl.sh ls ${shq(b64(path))}`);
+    const dirs = [], files = [];
+    let cur = path;
+    out.split("\n").forEach(l => {
+      const p = l.replace(/\r$/, "").split("|");
+      if (p[0] === "P") cur = p.slice(1).join("|");
+      else if (p[0] === "D") dirs.push(p.slice(1).join("|"));
+      else if (p[0] === "F") {
+        const size = parseInt(p.pop(), 10) || 0;
+        files.push({n: p.slice(1).join("|"), s: size});
+      }
+    });
+    FB.path = cur;
+    FB.dirs = dirs;
+    FB.files = files.map(f => ({...f, full: joinPath(cur, f.n)}));
+    renderBrowser();
+  } catch (e) {
+    if (path !== FB_ROOT) { showToast("该目录无法读取，已回到根目录"); FB.path = FB_ROOT; fbLoad(FB_ROOT); }
+    else fbMsg("读取失败：" + errText(e));
+  }
+}
+
+function renderBrowser() {
+  document.getElementById("fbPath").textContent = FB.path;
+  const list = document.getElementById("fbList");
+  list.textContent = "";
+
+  FB.dirs.forEach(d => {
+    const it = document.createElement("div");
+    it.className = "pick-item";
+    const ico = document.createElement("span"); ico.className = "pico"; ico.textContent = "📁";
+    const nm = document.createElement("span"); nm.className = "pname"; nm.textContent = d;
+    const ar = document.createElement("span"); ar.className = "arrow"; ar.textContent = "›";
+    it.append(ico, nm, ar);
+    it.onclick = () => fbLoad(joinPath(FB.path, d));
+    list.append(it);
+  });
+
+  FB.files.forEach(f => {
+    const it = document.createElement("div");
+    it.className = "pick-item" + (picked.has(f.full) ? " selected" : "");
+    const ck = document.createElement("div"); ck.className = "ckbox"; ck.textContent = "✓";
+    const nm = document.createElement("span"); nm.className = "pname"; nm.textContent = f.n;
+    const sz = document.createElement("span"); sz.className = "psize"; sz.textContent = fmtSize(f.s);
+    it.append(ck, nm, sz);
+    it.onclick = () => {
+      if (picked.has(f.full)) picked.delete(f.full); else picked.set(f.full, {name: f.n, size: f.s});
+      it.classList.toggle("selected", picked.has(f.full));
+      updatePickCount();
+    };
+    list.append(it);
+  });
+
+  if (!FB.dirs.length && !FB.files.length) fbMsg("这个文件夹里没有子文件夹，也没有 .ttf/.otf 字体");
+  updatePickCount();
+}
+
+function updatePickCount() {
+  const b = document.getElementById("fbImport");
+  b.textContent = "导入选中 (" + picked.size + ")";
+  b.disabled = picked.size === 0;
+  const all = FB.files.length > 0 && FB.files.every(f => picked.has(f.full));
+  document.getElementById("fbAllBtn").textContent = all ? "取消全选" : "全选本页";
+}
+
+function fbUp() {
+  if (FB.path === FB_ROOT) return;
+  fbLoad(FB.path.replace(/\/[^\/]+$/, "") || FB_ROOT);
+}
+function fbSelectAll() {
+  if (!FB.files.length) { showToast("这个文件夹里没有字体"); return; }
+  const all = FB.files.every(f => picked.has(f.full));
+  FB.files.forEach(f => { if (all) picked.delete(f.full); else picked.set(f.full, {name: f.n, size: f.s}); });
+  renderBrowser();
+}
+function fbClear() { picked.clear(); renderBrowser(); }
+
+function fbImport() {
+  if (!picked.size) return;
+  const items = [...picked.entries()].map(([path, v]) => [path, v.name]);
+  picked.clear();
+  closeBrowser();
+  importMany(items);
+}
+
+/* ---------- 系统选择器（备用，慢：按块经 WebView 传输） ---------- */
+const CHUNK = 45000; // 每块字节数（3 的倍数，base64 后约 60KB）
+
+function toB64(u8) {
+  let s = "";
+  for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return btoa(s);
+}
+
+async function onFilePicked(input) {
+  const list = Array.from(input.files || []);
+  input.value = "";
+  if (!list.length || busy) return;
+  busy = true; setImporting(true);
+  let ok = 0; const fails = []; let lastMeta = null;
+  try {
+    for (let k = 0; k < list.length; k++) {
+      const file = list[k];
+      const tag = list.length > 1 ? "(" + (k + 1) + "/" + list.length + ") " : "";
+      if (!/\.(ttf|otf)$/i.test(file.name)) { fails.push(file.name + "：不是 ttf/otf"); continue; }
+      try {
+        await ksuExec(`sh ${MODDIR}/fontctl.sh upload-start`);
+        for (let off = 0; off < file.size; off += CHUNK) {
+          const buf = new Uint8Array(await file.slice(off, off + CHUNK).arrayBuffer());
+          await ksuExec(`printf '%s' '${toB64(buf)}' | base64 -d >> ${LIB}/.upload.part`);
+          const done = Math.min(off + CHUNK, file.size);
+          setProgress(tag + "传输 " + file.name + " " + fmtSize(done) + "/" + fmtSize(file.size), done / file.size);
+        }
+        const out = await ksuExec(`sh ${MODDIR}/fontctl.sh upload-finish ${file.size} ${shq(stripExt(file.name))}`);
+        if (out.indexOf("OK:") === 0) { ok++; lastMeta = await probeAndSave(out.trim().slice(3)); }
+        else fails.push(file.name + "：" + out.replace(/^ERROR:/, ""));
+      } catch (e) {
+        fails.push(file.name + "：" + errText(e));
+        try { await ksuExec(`rm -f ${LIB}/.upload.part`); } catch (_) {}
+      }
+    }
+    showToast(summarize(ok, fails) + (ok === 1 && lastMeta ? "\n" + coverageText(lastMeta, fonts) : ""));
+  } finally {
+    busy = false; setImporting(false);
+    await refreshAll();
+  }
+}
+
 /* ---------- 替换范围设置 / 诊断 ---------- */
-const settings = {mount_mode: "self", theme_fonts: "0", keep_lockscreen: "0"};   // 1.0.9：只剩这两个开关
+const settings = {mount_mode: "self", theme_fonts: "0", keep_lockscreen: "0"};   // 1.0.9：只剩这两个开关；v1.1.1 加了「保留锁屏时钟字体」
 let mountMode = "self";
+// 恢复上次的折叠状态（默认展开）
+try { if (localStorage.getItem("cf_lib_collapsed") === "1") toggleLib(true); } catch (e) {}
 async function loadSettings() {
   try {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh settings`);
@@ -1531,7 +2131,7 @@ async function toggleSetting(key) {
     row.classList.add("loading");
     const ov = document.createElement("div");
     ov.className = "overlay";
-    ov.innerHTML = '<span class="spin"></span><span>' + (pendingId !== "none" ? "正在更新设置…" : "正在保存设置…") + '</span>';
+    ov.innerHTML = '<span class="spin"></span><span>' + (pendingId !== "none" ? "正在重新扫描系统字体配置…" : "正在保存设置…") + '</span>';
     row.appendChild(ov);
   }
   busy = true;
@@ -1826,7 +2426,11 @@ function repPaintEta() {
     const e = repEtaText(kv, used);
     if (e && e.soon) bits.push("<b>马上就好</b>");
     else if (e && e.left > 3) bits.push((e.exact ? "预计还要 " : "大概需要 ") + "<b>" + fmtClock(e.left) + "</b>");
-    else if (!used) bits.push("正在准备…");
+    else if (!used) bits.push("正在启动检测…");
+    // ★ 2026-10-14：**不再提示"可以关窗口去后台"**。
+    //   原因（作者的话）：Android 上切到后台很可能被墓碑/省电策略**冻结**，
+    //   用户过几十分钟切回来看进度没动，会以为"这么慢"而直接中止 ——
+    //   提示反而把事情搞坏。所以这里只说"要花点时间"+ 能停在哪。
     bits.push('<span style="opacity:.75;font-weight:400">（生成期间请留在这一页，切走可能被系统冻结）</span>');
     el.innerHTML = bits.join(" · ");
     el.style.display = "block";
@@ -1868,25 +2472,27 @@ function repPaintRunning(kv, sub) {
   const pct = repPctOf(kv);
   repEl("reportLoading").style.display = "none";
   repEl("reportProgress").style.display = "block";
-  repEl("reportBanner").style.display = "flex";
-  repEl("reportBannerText").textContent =
-    "⏳ 还在生成中，还没完成：第 " + (p.step || "?") + " 步 " + p.label +
-    (sub ? "（" + sub + "）" : "") + " —— 完成后这里会自动补全";
+  // ★ 2026-10-14：不再显示横幅（它和下面进度区信息重复，见 HTML 里的注释）。
+  //   这里显式保持隐藏；留着这行是为了"改回去很容易"。
+  repEl("reportBanner").style.display = "none";
   repEl("reportProgressBar").parentElement.classList.add("running");
   setRepBar(p.step, p.label, pct / 100, (sub ? sub + " · " : "") + "已完成 " + pct + "%");
   repEl("reportCancelBtn").style.display = "";
   repEl("reportRegenBtn").style.display = "none";
   repEl("reportChoice").style.display = "none";
   repEl("reportChoiceHint").style.display = "none";
-  repEl("reportTip").style.display = "block";
+  // 新一轮生成开始 → 把上次那份的"上传给作者"收起来（避免误传旧报告）
+  try { repEl("reportServerBtn").style.display = "none"; } catch (e) {}
+      repEl("reportTip").style.display = "block";
   repEl("reportTip").innerHTML = repTipText(kv);
   repPaintEta();
 }
   function repTipText(kv) {
-    // ★ 1.0.9.2：压缩成**一句**。
-    //   原来这里堆了三段话（预计耗时 / 主动降优先级 / 同一份文件只读一次），
-    //   真机反馈"太占位置，把下面的报告框都挤没了"。估算数字在进度条上方已经有了，
-    //   这里只留"可以关窗口"这一个用户真正需要知道的操作提示。
+    // ★ 1.0.9.2：压缩成**一句**（原来堆了三段，真机反馈"太占位置，把报告框挤没了"）。
+    // ★ 2026-10-14：**把"可以关窗口去干别的"删掉**。
+    //   原因：Android 会把后台的 WebView / 任务冻结或墓碑化，用户切走再回来
+    //   看到进度纹丝不动，会以为"怎么这么慢"然后中止 —— 这个提示是**帮倒忙**。
+    //   现在只留"慢是为什么"和"想停在哪"。
     const slow = !(kv && kv.speed === "full");
     return (slow ? "生成中自动让路给系统（所以慢一些）" : "全速生成中") +
       " · 期间请留在这一页 · 想停就点「中止生成」";
@@ -1908,6 +2514,8 @@ async function repPaintDone(kv) {
   repEl("reportRegenBtn").style.display = "";
   repEl("reportChoice").style.display = "none";
   repEl("reportChoiceHint").style.display = "none";
+  // ★ 2026-10-16：生成完成了 → 才把"上传给作者"露出来（没生成就没有文件可传）
+  try { repEl("reportServerBtn").style.display = ""; } catch (e) {}
   const meta = await readReportMeta();
   const size = +kv.size || +meta.size || 0;
   const head = await readHeadText();
@@ -1951,7 +2559,10 @@ function repPaintSimple(kind, msg) {
   repEl("reportChoice").style.display = "none";
   repEl("reportChoiceHint").style.display = "none";
   repEl("reportEtaText").style.display = "none";
-  repEl("reportProgressBar").parentElement.classList.remove("running");
+  // 中止/失败时没有新报告可传 → 收起"上传给作者"
+  // （注意：如果这次是"未完成"，文件里仍有已生成的部分，但由用户自己决定发不发；
+  //   这里先收起，避免误发一份残缺的报告。）
+    repEl("reportProgressBar").parentElement.classList.remove("running");
     // 显示由 repPutText 统一处理
     repPutText(msg, false);
   repEl("reportTip").style.display = "none";
@@ -1968,7 +2579,7 @@ function repPaintChooser(reason) {
   repEl("reportCancelBtn").style.display = "none";
   repEl("reportRegenBtn").style.display = "none";
   repEl("reportMoreBtn").style.display = "none";
-  repTxt().style.display = "none";
+    repTxt().style.display = "none";
   repEl("reportChoice").style.display = "flex";
   repEl("reportChoiceHint").style.display = "block";
   repEnableChoice(true);
@@ -2147,8 +2758,10 @@ async function repFinish(kv) {
     return;
   }
   if (kv.state === "none") { repPaintChooser(""); return; }
+  // ★ 2026-10-14：原来这里建议"先点关闭去干别的"。但 Android 会把切走的页面冻住，
+  //   用户回来看到没进展 → 以为卡死 → 反而更容易误操作。改成给"留在本页"和"重来"两条路。
   repPaintSimple("timeout",
-    "等了很久都没结果：任务可能还在后台慢慢跑，也可能已经被系统停掉了。\n\n" +
+    "等了很久都没结果：任务可能还在慢慢跑，也可能已经被系统停掉了。\n\n" +
     "如果还在这一页，可以再等等 —— 报告是边写边存进 Download/完整体检报告.txt 的；\n" +
     "也可以点「重新生成」从头再来，或点「中止生成」把它彻底停掉。");
 }
@@ -2193,7 +2806,9 @@ async function reportMore() {
   }
 }
 
-// 关闭：同步执行，秒关（不等任何后台调用）；任务继续在后台跑
+// 关闭：同步执行，秒关（不等任何后台调用）；后台那个 diag 进程本身不会因此被杀
+// ★ 2026-10-14：界面上不再宣传"关了也在后台跑"（Android 会冻结后台，切走反而更像卡死）。
+//   但**代码行为没变** —— 关窗口仍然不中止生成，这样"误触关闭"不会白跑一遍。
 function closeReport() {
   repEl("reportMask").classList.remove("show");
   repTickStop();
@@ -2224,6 +2839,451 @@ function regenReport() {
   repPaintChooser("重新生成会丢弃现在这一份（已经存到 Download 的不受影响），从头再跑一遍。选一种口径：");
   if (!repEst) loadEstimate();
 }
+/* ---------- 免重启生效（2026-10-16 新增） ----------
+   为什么以前做不到：界面点「应用」只写挂载计划(slots.map)，
+   真正挂载发生在下次开机。这里调 live.sh 补上"现在就挂"。
+
+   ★ 两条硬知识（live.sh 里也写了，这里重复一遍免得以后忘了）：
+     ① su 会话的挂载 system_server **看不见** —— 必须 nsenter 进 init 命名空间，
+        否则"挂载成功"但字体一点没变（这是这类功能最常见的失败原因）。
+     ② 挂载后必须让框架重新读一次（软重启 zygote），
+        否则字体已经换了、界面还是旧的。
+
+   安全设计：软重启是不可逆操作，所以**单独一个按钮 + 二次确认**，
+   而且不做成"点错就重启" —— 「只挂载」那步是随时可撤销的。
+*/
+
+function liveSay(html, kind) {
+  const el = document.getElementById("liveStatus");
+  if (!el) return;
+  el.style.display = "";
+  el.style.color = kind === "err" ? "var(--urgent, #e5484d)"
+                 : kind === "ok" ? "var(--ok, #30a46c)" : "";
+  el.innerHTML = html;
+}
+
+function liveBusy(on) {
+  ["liveFreeBtn", "liveRevertBtn"].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = on;
+  });
+}
+
+// 只挂载（**界面上不再暴露这个按钮**）
+// 作者问过只挂载有什么意义 —— 确实没有：挂载成功与否用户看不出来，
+// 而「让新字体生效」一次就把挂载+重读都做了。
+// 保留这个函数是为了以后排查（命令行 sh live.sh mount 也能做同样的事）。
+async function liveMountOnly() {
+  try {
+    const out = await ksuExec("sh " + MODDIR + "/live.sh mount");
+    liveSay("<b>只挂载的结果</b><br>" + repEsc(out).replace(/\n/g, "<br>"));
+  } catch (e) {
+    liveSay("❌ 挂载失败：" + repEsc(errText(e)), "err");
+  }
+}
+
+// 撤销现场挂载 —— 回到"原字体"
+// ★ 关键认知（作者问过"点撤销就变回默认字体吗"）：
+//   撤销只是把**文件**还原了；框架已经把字体读进内存，
+//   不重读的话**屏幕上的字不会变** —— 用户会以为撤销失败。
+//   所以这个按钮做两件事：撤销 + 让框架重读（这一步不可逆，先确认）。
+async function liveRevert() {
+  const btn = document.getElementById("liveRevertBtn");
+  if (btn && btn.disabled) return;
+  let go = null;
+  try {
+    go = await dialog({
+      title: "变回原字体？",
+      msg: "会做两件事：\n\n" +
+           "  ① 撤掉刚才的挂载（这一步随时可重来）\n" +
+           "  ② 让系统界面重新读一次\n\n" +
+           "第 ② 步是必须的 —— 光撤销挂载，屏幕上的字不会变，\n" +
+           "因为系统已经把字体读进内存了。\n\n" +
+           "第 ② 步会让屏幕黑一下、约 30~60 秒恢复。",
+      okText: "变回原字体",
+    });
+  } catch (e) { go = true; }
+  if (!go) return;
+
+  liveBusy(true);
+  liveSay("正在撤销…");
+  try {
+    const out = await ksuExec(`sh ${MODDIR}/live.sh unmount`);
+    liveSay("已撤销，正在让系统重新读…<br>" + repEsc(out).replace(/\n/g, "<br>"));
+    try { await ksuExec(`sh ${MODDIR}/live.sh reboot`); } catch (e) {}
+    liveSay("✅ 已发出。屏幕黑一下，30~60 秒后恢复 —— 那时就是原字体了。" +
+            "<br><span style='opacity:.75'>卡住的话长按电源键真重启。</span>", "ok");
+  } catch (e) {
+    liveSay("❌ 失败：" + repEsc(errText(e)) +
+            "<br><span style='opacity:.75'>没有做软重启，你的手机状态没变。</span>", "err");
+  } finally {
+    liveBusy(false);
+  }
+}
+
+// 一键：挂载 + 软重启（软重启不可逆，先二次确认）
+async function liveFree() {
+  const btn = document.getElementById("liveFreeBtn");
+  if (btn && btn.disabled) return;
+  let go = null;
+  try {
+    go = await dialog({
+      title: "现在就让新字体生效？",
+      msg: "会做两件事：\n\n" +
+           "  ① 把字体挂到系统上（随时可撤销）\n" +
+           "  ② 让系统界面重新读一次\n\n" +
+           "第 ② 步会让屏幕黑一下、所有 App 重新加载，\n" +
+           "大约 30~60 秒恢复。这期间别乱点。\n\n" +
+           "如果只是想看效果、不想折腾 —— 建议直接重启手机，更稳。",
+      okText: "就这样做",
+    });
+  } catch (e) { go = true; }
+  if (!go) return;
+
+  liveBusy(true);
+  liveSay("正在挂载…");
+  try {
+    const out = await ksuExec(`sh ${MODDIR}/live.sh mount`);
+    liveSay("挂载完成，正在让系统重新读…<br>" + repEsc(out).replace(/\n/g, "<br>"));
+    // 软重启会让 WebView 断开，所以这条命令不 await 它的输出
+    try { await ksuExec(`sh ${MODDIR}/live.sh reboot`); } catch (e) {}
+    liveSay("✅ 已发出。<b>屏幕可能黑一下，30~60 秒后恢复</b> —— 那时字体就是新的了。" +
+            "<br><span style='opacity:.75'>如果卡住不动，长按电源键真重启（字体回原样，不会出问题）。</span>", "ok");
+  } catch (e) {
+    liveSay("❌ 失败：" + repEsc(errText(e)) +
+            "<br><span style='opacity:.75'>没有做软重启，你的手机状态没变。可以直接重启手机。</span>", "err");
+  } finally {
+    liveBusy(false);
+  }
+}
+
+/* ---------- 反馈上报（2026-10-16 新增） ----------
+   目的：把"发报告"的成本降到用户愿意点一下。
+   采集端是 diag-quick.sh —— 只读现成状态文件（slots.map / .plan.$PID / mount.log …），
+   不扫字体内容、不算哈希，所以是**秒级**（完整报告那份要几分钟）。
+
+   ★ 三个容易踩的坑，这里都处理了：
+     ① WebView 里 fetch 卡住不会自己超时 → 一律套 withTimeout（30 秒）
+     ② 跳外部网址用 location.href 在部分 WebView 上**没反应**
+        → 改成动态建 <form> 并 submit（和既有做法一致，真机可用）
+     ③ 报告里可能有让 HTML 变形的字符 → 进 DOM 前一律 repEsc
+*/
+
+// 给 Promise 套一个超时，避免弱网下按钮一直转、用户以为死机
+function fbkTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const t = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error((label || "操作") + "超时（网络太慢或连不上）"));
+    }, ms);
+    promise.then(v => { if (!done) { done = true; clearTimeout(t); resolve(v); } },
+                 e => { if (!done) { done = true; clearTimeout(t); reject(e); } });
+  });
+}
+
+// 状态行（比 toast 好：能显示多行、能一直挂着让人看完）
+function fbkSay(html, kind) {
+  const el = document.getElementById("fbkStatus");
+  if (!el) return;
+  el.style.display = "";
+  el.style.color = kind === "err" ? "var(--urgent, #e5484d)"
+                 : kind === "ok"  ? "var(--ok, #30a46c)" : "";
+  el.innerHTML = html;
+}
+
+function fbkBusy(on, which) {
+  const ids = which ? [which] : ["fbkQuickBtn", "fbkExportBtn", "fbkTestBtn"];
+  ids.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = on; });
+}
+
+// 采集快捷报告 → 返回文本（失败抛错）
+async function fbkCollect() {
+  const p = "/data/local/tmp/cfs-quick.txt";
+  await ksuExec("sh " + MODDIR + "/diag-quick.sh file " + p);
+  const txt = await ksuExec("cat " + p + " 2>/dev/null");
+  if (!txt || !txt.trim()) throw new Error("采集结果为空");
+  return txt;
+}
+
+// 「一键上报」：采集 → 发给 Web3Forms → 作者邮箱
+// ★ 2026-10-16 作者要求：**发送前必须有一次确认**，并把"不会泄露隐私"讲清楚。
+//   讲清"不采集什么"比空泛的"绝对安全"更有说服力 —— 用户能自己核对。
+//   注意 dialog() 的 msg 是走 textContent，所以换行直接写 \n 就是真换行。
+const FBK_PRIVACY =
+  "会上报：设备品牌/型号、Android 版本、模块版本、\n" +
+  "生效状态、字体槽位计划、字体文件名清单、挂载日志。\n" +
+  "大小约 2KB。\n\n" +
+  "不会采集：\n" +
+  "  ✗ 手机号 / 账号 / 通讯录\n" +
+  "  ✗ IMEI / 序列号等设备标识\n" +
+  "  ✗ 你装了哪些 App\n" +
+  "  ✗ 照片 / 文件 / 聊天 / 位置\n\n" +
+  "只发到作者手里，不公开、不外传。\n" +
+  "（传到作者自己的服务器；服务器在国外，上传失败就挂个梯子再试）\n" +
+  "本地也留一份：Download/快捷报告.txt\n" +
+  "（可先用「导出小报告」看一遍再发）";
+
+// ★ 2026-10-16 踩坑：**HTTP 头的值只能是 ASCII**。
+//   设备名经常带中文（"小米 23127PN0CC"）→ 中文直接塞进头里，
+//   WebView 会抛编码异常。实测复现报错：
+//     UnicodeEncodeError: 'latin-1' codec can't encode characters in position 6-12
+//   所以 X-CFS-* 这些头一律先 encodeURIComponent，Worker 那边再 decodeURIComponent。
+function fbkHdr(v, n) {
+  try { return encodeURIComponent(String(v == null ? "" : v)).slice(0, n || 200); }
+  catch (e) { return ""; }
+}
+
+/* ===========================================================================
+   ★ 2026-10-16：上传改走 shell（真机实测 fetch 走不通）
+   ---------------------------------------------------------------------------
+   现象：手机浏览器能打开 https://…/health（显示 ok），
+        但模块界面里 fetch 同一地址 = "Failed to fetch"。
+   结论：KernelSU 管理器的 WebView **不走梯子的代理**，而 `su` 会话走。
+        所以凡是要出网的请求，都得交给 shell 里的 curl / toybox 去做。
+
+   流程：
+     ① 报告写到 $TMP（设备上的临时文件）—— 用 here-doc，不把长文本塞进命令行
+     ② curl -sS --data-binary @文件 + 几个 x-cfs-* 头
+     ③ 读响应：含 "ok" 或 id 就算成功
+   =========================================================================== */
+const UP_TMP = "/data/local/tmp/cfs-up.txt";
+
+// 把文本安全地写进设备文件（用 base64 中转，避免引号/换行被 shell 吃掉）
+async function shWriteB64(text, path) {
+  const b64 = toB64(new TextEncoder().encode(text));
+  // base64 里只有 A-Za-z0-9+/= —— 没有引号，可以安全放进单引号
+  await ksuExec("printf '%s' '" + b64 + "' | base64 -d > " + path);
+}
+
+async function fbkSendViaShell(txt, hdr) {
+  await shWriteB64(txt, UP_TMP);
+
+  const h = (k, v) => " -H '" + k + ": " + String(v).replace(/'/g, "") + "'";
+  const hs = h("x-cfs-key", WORKER_KEY) +
+             h("x-cfs-device", hdr["x-cfs-device"]) +
+             h("x-cfs-ver", hdr["x-cfs-ver"]) +
+             h("x-cfs-rom", hdr["x-cfs-rom"]) +
+             h("x-cfs-note", hdr["x-cfs-note"] || "") +
+             h("Content-Type", "text/plain; charset=utf-8");
+
+  // curl 优先；没有就试 toybox wget
+  const cmd =
+    'T=' + UP_TMP + '; U=' + WORKER_URL + '/report; ' +
+    'if command -v curl >/dev/null 2>&1; then ' +
+      'curl -sS -m 90 -X POST' + hs + ' --data-binary @$T $U; ' +
+    'elif toybox wget >/dev/null 2>&1; then ' +
+      'toybox wget -q -O - --header "x-cfs-key: ' + WORKER_KEY + '" ' +
+      '--post-file $T $U 2>&1; ' +
+    'else echo NOHTTPTOOL; fi';
+
+  const out = String(await ksuExec(cmd) || "");
+  if (out.indexOf("NOHTTPTOOL") >= 0) {
+    throw new Error("设备上没有 curl / toybox wget，没法走 shell 上传");
+  }
+  if (/bad key/i.test(out)) throw new Error("服务器说口令不对（bad key）");
+  if (/too big/i.test(out)) throw new Error("报告太大（服务器上限 8MB）");
+  if (/daily limit/i.test(out)) throw new Error("今天这台机器的上传次数用完了");
+  if (/internal|error/i.test(out) && !/"id"|ok/i.test(out)) {
+    throw new Error(out.slice(0, 100) || "服务器内部错误（R2 桶没绑？）");
+  }
+  if (!/ok|\"id\"/i.test(out)) {
+    throw new Error(out.slice(0, 100) || "没有响应（网络不通？）");
+  }
+  return { raw: out };
+}
+
+
+// 走作者自己的 Worker（Cloudflare R2）—— 完整报告，不截断
+// 返回 { id, bytes }；失败抛错，调用方回退到 Web3Forms
+async function fbkSendWorker(txt) {
+  const hdr = {
+    "x-cfs-key": WORKER_KEY,
+    "x-cfs-device": fbkHdr(fbkDevTag(txt), 80),
+    "x-cfs-ver": fbkHdr(fbkVerTag(txt), 24),
+    "x-cfs-rom": fbkHdr((function () {
+      try {
+        const m = String(txt).match(/系统识别[:：]\s*(\S.*)/);
+        return m ? m[1].trim() : "";
+      } catch (e) { return ""; }
+    })(), 40),
+    "x-cfs-note": fbkHdr("快捷报告", 60),
+  };
+  // ★ 走 shell —— WebView 的 fetch 不经过梯子，实测会 "Failed to fetch"
+  return await fbkSendViaShell(txt, hdr);
+}
+
+async function fbkQuickSend() {
+  const btn = document.getElementById("fbkQuickBtn");
+  if (btn && btn.disabled) return;              // 防连点
+  // ---- 发送前确认 ----
+  let go = null;
+  try {
+    go = await dialog({ title: "发送这份状态给作者？", msg: FBK_PRIVACY, okText: "发送" });
+  } catch (e) { go = true; }                    // 弹窗不可用时不要挡住功能
+  if (!go) return;                              // 用户取消 → 什么都不做
+
+  fbkBusy(true, "fbkQuickBtn");
+  fbkSay("正在生成（两秒左右）…");
+  try {
+    let txt = await fbkCollect();
+
+    // 顺手留一份在本地，万一发送失败用户还能自己发
+    try { await ksuExec("cp -f /data/local/tmp/cfs-quick.txt /sdcard/Download/快捷报告.txt"); } catch (e) {}
+
+    // ---------------- 唯一的通道：作者自己的服务器 ----------------
+    fbkSay("正在上传…");
+    const r = await fbkSendWorker(txt);
+    const rid = (r && r.id) ? String(r.id) : "";
+    fbkSay("✅ 已上传，谢谢！" + (rid ? "（编号 <b>" + repEsc(rid) + "</b>）" : "") +
+          "<br><span style='opacity:.75'>这份是完整的，没有被截断 —— " +
+          "作者能看到全部内容。</span>", "ok");
+    showToast("已上传，谢谢！");
+
+  } catch (e) {
+    // 失败一定要给出**可执行的下一步**，不能只说"失败"。
+    // ★ 2026-10-16：只剩这一条通道了，所以提示必须直说"挂梯子"
+    //   （workers.dev 在国内大多连不上；作者自己也是挂梯子用的）
+    fbkSay("❌ 上传失败：" + repEsc(errText(e)) +
+          "<br><b>挂个梯子再点一次就行</b> —— 这台服务器在国外，不挂梯子连不上。" +
+          "<br>报告已经存在 <b>Download/快捷报告.txt</b>，实在不行可以把这个文件发我。", "err");
+    showToast("上传失败，挂梯子再试");
+  } finally {
+    fbkBusy(false, "fbkQuickBtn");
+  }
+}
+
+// 设备标签（给邮件主题 / Issue 标题用）
+// ★ 不从 DOM 取 —— 实测界面里没有 brandLabel/modelLabel 这两个 id，
+//   靠 textContent 会静默拿到空值。改成**从刚采集的报告文本里解析**，更可靠。
+function fbkDevTag(txt) {
+  try {
+    const s = String(txt || "");
+    let dev = "";
+    // ★ 用 (\S.*) 而不是 (.+)：后者会把行的**尾随空格**也算成内容，
+    //   于是"设备:   "（采集失败时会出现的空行）被当成有效值，
+    //   还会错误地跳过"构建"行的兜底。测试抓到的边界 bug。
+    let m = s.match(/^设备:[ \t]*(\S.*)$/m);
+    if (m) dev = m[1].trim();
+    if (!dev) { m = s.match(/^构建:[ \t]*(\S.*)$/m); if (m) dev = m[1].trim(); }
+    dev = dev.replace(/\s*\|\s*$/, "").trim();
+    return dev || "未知设备";
+  } catch (e) { return "未知设备"; }
+}
+function fbkVerTag(txt) {
+  try {
+    const m = String(txt || "").match(/^模块:\s*(\S+)/m);
+    if (m) return m[1];
+  } catch (e) {}
+  try { return (document.getElementById("curVerLabel") || {}).textContent || ""; }
+  catch (e) { return ""; }
+}
+
+// ---- 报告弹窗里的「上传给作者」----（2026-10-16 起走作者自己的服务器）
+// 只在生成完成后才出现（见 repPaintDone）。先把报告开头读出来当摘要，
+// 再打开 Issue 页面；完整报告本身作为附件由用户拖动上传。
+/* 上传【完整报告】到作者自己的服务器（Cloudflare Worker → R2）
+   ★ 2026-10-16 作者要求："完整报告也走这个渠道"
+     · 以前这个按钮是"打开 GitHub 新建 Issue，让你把报告拖进去"
+       —— 手机上 github.com 在没梯子时打不开，而且拖文件很别扭
+     · 现在直接 POST 上来，一次到位；报告整份存 R2，**不截断**
+
+   两种上传方式（按文件大小自动选）：
+     · 小于 1.5MB：用 fetch 直接发（简单，走 WebView 的网络栈）
+     · 更大：用设备上的 curl 发（避免把几十万字符塞过 shell 桥）
+   两者都带上 x-cfs-* 头，作者后台列表里能直接看出是谁的问题。 */
+async function repSendServer() {
+  const btn = repEl("reportServerBtn");
+  if (btn && btn.disabled) return;
+  if (!WORKER_URL || !WORKER_KEY) {
+    showToast("上报服务器没配置");
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const kv = await readReportMeta();
+    const name = repSavedName(kv);
+    const path = "/sdcard/Download/" + name;
+
+    const szs = (await ksuExec(`wc -c < ${path} 2>/dev/null`)).trim();
+    const sz = parseInt(szs, 10) || 0;
+    if (!sz) { showToast("找不到报告文件，请先生成"); return; }
+
+    showToast("正在上传 " + Math.round(sz / 1024) + " KB…");
+
+    // ★ 走 shell（curl / toybox）—— WebView 的 fetch 不经过梯子，实测会失败。
+    //   报告已经在设备上是个文件了，直接 --data-binary @它，不用读进内存。
+    const hdr = " -H 'x-cfs-key: " + WORKER_KEY + "'" +
+                " -H 'x-cfs-device: " + fbkHdr(fbkDevTagFromKv(kv), 80) + "'" +
+                " -H 'x-cfs-ver: " + fbkHdr((kv && kv.ver) || "", 24) + "'" +
+                " -H 'x-cfs-rom: " + fbkHdr((kv && kv.rom) || "", 40) + "'" +
+                " -H 'x-cfs-note: " + fbkHdr("完整报告 " + name, 120) + "'" +
+                " -H 'Content-Type: text/plain; charset=utf-8'";
+    const cmd =
+      'F="' + path + '"; U=' + WORKER_URL + '/report; ' +
+      'if command -v curl >/dev/null 2>&1; then ' +
+        'curl -sS -m 180 -X POST' + hdr + ' --data-binary @$F $U; ' +
+      'else echo NOHTTPTOOL; fi';
+    const out = String(await ksuExec(cmd) || "");
+    if (out.indexOf("NOHTTPTOOL") >= 0) throw new Error("设备上没有 curl，没法上传");
+    if (/bad key/i.test(out)) throw new Error("服务器说口令不对");
+    if (/too big/i.test(out)) throw new Error("报告太大（服务器上限 8MB）");
+    if (!/ok|"id"/i.test(out)) throw new Error(out.slice(0, 100) || "没有响应");
+
+    showToast("已上传，谢谢！");
+  } catch (e) {
+    showToast("上传失败：" + errText(e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// 报告 meta 里的设备信息（完整报告那条路拿不到报告正文，只能从 meta 取）
+function fbkDevTagFromKv(kv) {
+  try {
+    const b = String((kv && (kv.brand || kv.device_brand)) || "");
+    const m = String((kv && (kv.model || kv.device_model)) || "");
+    const s = (b + " " + m).trim();
+    return s || "unknown";
+  } catch (e) { return "unknown"; }
+}
+
+// 「导出小报告」：存到 Download，用户自己发
+// 也加一次确认 —— 它会往你的 Download 里写文件，先问一声更规矩。
+async function fbkExportFile() {
+  const btn = document.getElementById("fbkExportBtn");
+  if (btn && btn.disabled) return;
+  let go = null;
+  try {
+    go = await dialog({
+      title: "导出到 Download？",
+      msg: "会在手机里生成一个文本文件：\n\n" +
+           "  Download/快捷报告.txt\n\n" +
+           "内容跟「一键上报」发出去的**完全一样**（约 2KB），\n" +
+           "不含手机号、账号、IMEI 等任何个人数据 ——\n" +
+           "你可以先打开看一遍，确认没问题再发给我。",
+      okText: "导出",
+    });
+  } catch (e) { go = true; }
+  if (!go) return;
+
+  fbkBusy(true, "fbkExportBtn");
+  fbkSay("正在导出…");
+  try {
+    await ksuExec("sh " + MODDIR + "/diag-quick.sh file /sdcard/Download/快捷报告.txt");
+    const sz = (await ksuExec("wc -c < /sdcard/Download/快捷报告.txt 2>/dev/null")).trim();
+    fbkSay("✅ 已存到 <b>Download/快捷报告.txt</b>（" + repEsc(sz) + " 字节）<br>" +
+          "可以把它发我。", "ok");
+    showToast("已导出到 Download");
+  } catch (e) {
+    fbkSay("❌ 导出失败：" + repEsc(errText(e)), "err");
+    showToast("导出失败");
+  } finally {
+    fbkBusy(false, "fbkExportBtn");
+  }
+}
+
 /* ---------- 重启 / 谷歌兼容 ---------- */
 // 重启：先停掉所有后台轮询（它们会抢提示条），再用独立遮罩显示进度，
 // 并依次尝试 3 种重启方式；8 秒还没重启就明确提示用户手动重启。
@@ -2337,7 +3397,7 @@ async function checkUpdate(manual) {
       if (s.indexOf("READY=1") === 0) { out = s.slice(7); break; }
     }
     void start;
-    if (!out) { setValue("newVerLabel", "检查超时"); lbl.classList.add("off"); if (manual) showToast("检查超时，请稍后再试"); return; }
+    if (!out) { setValue("newVerLabel", "检查超时"); lbl.classList.add("off"); if (manual) showToast("检查超时 —— 挂个梯子再试（更新走 GitHub，国内直连大多不通）"); return; }
     const u = parseKV(out);
     try { localStorage.setItem(updateCheckKey(), String(Date.now())); } catch (e) {}
     lbl.classList.remove("ok", "warn", "off");
@@ -2436,7 +3496,7 @@ function startUpdateProgress() {
         // 网络抖动一下很常见，乱报错比慢更烦人。
         if (cur > 0 && cur === lastCur) {
           stuck++;
-          if (stuck === 30) updProg("下载好像卡住了（" + fmtSize(cur) + "）… 还在重试，如果一直不动可以换网络再试", Math.min(0.95, total ? cur / total : 0.5));
+          if (stuck === 30) updProg("下载好像卡住了（" + fmtSize(cur) + "）… 还在重试。一直不动就挂个梯子 —— 更新包在 GitHub 上", Math.min(0.95, total ? cur / total : 0.5));
         } else { stuck = 0; }
         lastCur = cur;
       } else if (stage === "verify") {
@@ -2543,8 +3603,8 @@ async function installUpdate() {
     if (last.indexOf("OK:") !== 0) {
       done = true;
       const msg = last.replace(/^ERROR:/, "") || "无法开始下载";
-      updProg("更新失败：" + msg, 0);
-      showToast("更新失败：" + msg);
+      updProg("更新失败：" + msg + "\n（更新包从 GitHub 下载，挂个梯子再试）", 0);
+      showToast("更新失败 —— 挂梯子再试");
       btn.disabled = false;
       setTimeout(hideUpdProg, 8000);
       return;
@@ -2562,15 +3622,15 @@ async function installUpdate() {
       setTimeout(hideUpdProg, 6000);
     } else {
       const msg = (rc && rc.msg) || "下载或安装失败，请重试";
-      updProg("更新失败：" + msg, 0);
-      showToast("更新失败：" + msg);
+      updProg("更新失败：" + msg + "\n（更新包从 GitHub 下载，挂个梯子再试）", 0);
+      showToast("更新失败 —— 挂梯子再试");
       btn.disabled = false;
       setTimeout(hideUpdProg, 8000);
     }
   } catch (e) {
     done = true;
-    updProg("更新失败：" + errText(e), 0);
-    showToast("更新失败：" + errText(e));
+    updProg("更新失败：" + errText(e) + "\n（更新包从 GitHub 下载，挂个梯子再试）", 0);
+    showToast("更新失败 —— 挂梯子再试");
     btn.disabled = false;
     setTimeout(hideUpdProg, 8000);
   } finally { clearTimeout(watchdog); stopPoll(); busy = false; }
@@ -2678,7 +3738,6 @@ async function waitUpdateWorker() {
   setTimeout(() => checkUpdate(false), 600);
 })();
 </script>
-
 
 
 </body>
