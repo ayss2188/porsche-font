@@ -1,7 +1,7 @@
 id=porsche_font_multi
 name=保时捷字体（三合一）
-version=v4.2.1
-versionCode=4201
+version=v4.2.2
+versionCode=4202
 author=暗影双生
 description=[系统：自动识别 | 当前生效：718素装版（无色版）] 内置配色版：素装(无色)/一点红/烈焰 三套一键切换，含在线更新与诊断报告。
 updateJson=https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/update.json
