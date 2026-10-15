@@ -2447,11 +2447,17 @@ function startUpdateProgress() {
         //   放在 total 里（0~97）。所以这里能显示“解包中…（大概 40%）”，进度条也在动。
         //   管理器（ksud/magisk）不保证输出节奏，所以这个百分比是**按耗时估的**，
         //   不是假的“精确值”—— 但比一动不动强得多。
-        const est = total > 0 && total <= 100 ? total / 100 : 0.98;
-        const tip = total > 0 && total <= 100
+        // ★ 2026-10-15 修「进度条是摆设」（作者真机反馈）：
+        //   原来这里写的是 Math.max(0.97, est) —— 0.97 是**下限**，
+        //   于是条子一到安装阶段就跳满 97% 宽、然后一直不动；而文字在说"大概 3%、5%…"。
+        //   现在把后端给的 0~97 映射到 **97%~100% 那一段**：下载占 0~97%、安装占 97~100%，
+        //   整条进度连贯 —— 不跳变、也不假装知道精确值（这个百分比本来就是按耗时估的）。
+        const inRange = total > 0 && total <= 97;
+        const est = inRange ? 0.97 + (total / 100) * 0.03 : 0.975;
+        const tip = inRange
           ? "正在安装（管理器解包中）… 大概 " + total + "%"
           : "正在安装（管理器解包中，请稍等）…";
-        updProg(cur > 0 ? tip + "（安装器输出 " + fmtSize(cur) + "）" : tip, Math.max(0.97, est));
+        updProg(cur > 0 ? tip + "（安装器输出 " + fmtSize(cur) + "）" : tip, est);
       } else if (stage === "finished") {
         updProg("安装完成，重启后生效", 1);
         break;
@@ -2472,8 +2478,18 @@ function renderUpdate(u) {
   updateInfo = u;
   const has = u.HAS === "1";
   const done = updateDoneCode();
-  const pendingReboot = has && !!done && done === String(u.NEW_CODE);
-  if (!has) setUpdateDone("");   // 已经跑上新版了，清掉「待重启」标记
+  // ★ 2026-10-15 修「装完了按钮却变回『下载并安装』」（作者真机实测）：
+  //   原来只信 localStorage 里那个标记（它只在"UI 认为成功"时才写）。
+  //   而 UI 可能误报失败（那条路上不写标记）→ 重启后 has 变 false（已是最新）
+  //   → pendingReboot 直接为假 → 按钮变回「下载并安装」，用户以为没装上。
+  //   现在多两条**跟标记无关**的判据：
+  //     · curVer === NEW_VER  → 当前实际跑的版本就是刚装的那个
+  const curVer = (document.getElementById("curVerLabel").textContent || "").trim();
+  //   （界面上只有 curVerLabel，没有单独的 versionCode 元素 —— 所以只比版本号。）
+  const runningNew = !!u.NEW_VER && curVer === u.NEW_VER;
+  const pendingReboot = (has && !!done && done === String(u.NEW_CODE)) || runningNew;
+  if (pendingReboot) setUpdateDone(u.NEW_CODE);   // 补记，刷新/重启后也稳
+  else if (!has) setUpdateDone("");                // 真跑上新版且没在等重启 → 清掉
   setValue("newVerLabel", pendingReboot ? u.NEW_VER + "（已安装，待重启）"
     : has ? u.NEW_VER + "（可更新）" : u.NEW_VER + "（已是最新）");
   lbl.classList.remove("ok", "warn", "off");
@@ -2568,6 +2584,16 @@ async function installUpdate() {
 async function waitUpdateWorker() {
   const T0 = Date.now();
   let lastStage = "", lastMsg = "";
+  // ★ 2026-10-15 修「更新失败」误报（真机实测）：
+  //   以前把 `stage === "none"` 也当成"结束"了。而 installstate 在 worker
+  //   **还没来得及写状态文件**时就是返回 none —— installbg 刚派发出去、
+  //   轮询第一次读就是 none，于是立刻"结束"→ 走 else 分支 → 报"更新失败"；
+  //   而 worker 还在后台跑、最后真装完了 → 界面说失败、实际成功，按钮/进度条全乱。
+  //
+  //   现在：none 只有在**先见过真实阶段、之后又退回 none** 时才当结束
+  //   （worker 收尾会清状态）。另外给"一直没见过状态"一个 30 秒兜底，
+  //   免得 worker 真的没能启动时界面无限等下去。
+  let seenRealStage = false;
   while (true) {
     let s = "";
     try { s = await ksuExec(`sh ${MODDIR}/update.sh installstate 2>/dev/null`); } catch (e) { s = ""; }
@@ -2575,8 +2601,18 @@ async function waitUpdateWorker() {
     String(s || "").split("\n").forEach(l => { const m = l.match(/^(\w+)=(.*)$/); if (m) kv[m[1]] = m[2]; });
     if (kv.stage) lastStage = kv.stage;
     if (kv.msg) lastMsg = kv.msg;
-    if (lastStage === "finished" || lastStage === "error" || lastStage === "none") {
+    if (lastStage && lastStage !== "none") seenRealStage = true;
+
+    if (lastStage === "finished" || lastStage === "error") {
       return { stage: lastStage, msg: lastMsg, rc: kv.done };
+    }
+    // 见过真实阶段之后又回到 none → worker 收尾了（正常结束，按 finished 处理）
+    if (lastStage === "none" && seenRealStage) {
+      return { stage: "finished", msg: lastMsg || "安装完成，重启后生效", rc: kv.done };
+    }
+    // 一开始就一直是 none：给 30 秒让它写出第一个状态；超时才算失败
+    if (!seenRealStage && Date.now() - T0 > 30000) {
+      return { stage: "error", msg: "没能启动下载（管理器没响应），请重试或到 Root 管理器里手动安装" };
     }
     // 兜底：15 分钟还没结束就不再挂着（正常下载不可能这么久）
     if (Date.now() - T0 > 15 * 60 * 1000) {
