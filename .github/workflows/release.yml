@@ -137,8 +137,11 @@ jobs:
           set -e
           # ⚠️ changelog 用 jsDelivr CDN，不要用 raw.githubusercontent.com：
           #    raw 域名在国内经常被墙，管理器弹窗会显示 "Not Found"（真机踩过）。
-          #    内容指向 UPDATE-<版本>.md ——
-          #    update.json 的 changelog 会被管理器弹窗直接显示。
+          #    内容指向 CHANGELOG.md（**带完整历史**）——
+          #    update.json 的 changelog 会被管理器弹窗直接显示；
+          #    用户从旧版本升上来时要能看到「我一共得到了什么」。
+          #    （2026-10-15 修：以前指向 UPDATE-<版本>.md，只有本版、没有历史，
+          #      跟下面第 147 行写明的意图自相矛盾 —— 那边一直想给历史，这边只给单版。）
           #
           # ⚠️ 这里**不要用 `head -n 20 dist/notes.md` 覆盖**（2026-10-13 订正）：
           #    · "20 行"从来不是显示上限 —— 管理器读的是**这个文件本身**，
@@ -160,9 +163,9 @@ jobs:
           fi
           while IFS='|' read -r key id zipname upfile sum; do
             [ -n "$key" ] || continue
-            printf '{\n  "version": "%s",\n  "versionCode": %s,\n  "zipUrl": "%s/%s/releases/download/%s/%s",\n  "changelog": "https://cdn.jsdelivr.net/gh/%s@main/UPDATE-%s.md",\n  "sha256": "%s"\n}\n' \
+            printf '{\n  "version": "%s",\n  "versionCode": %s,\n  "zipUrl": "%s/%s/releases/download/%s/%s",\n  "changelog": "https://cdn.jsdelivr.net/gh/%s@main/CHANGELOG.md",\n  "sha256": "%s"\n}\n' \
               "$VER" "$CODE" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$VER" "$zipname" \
-              "$GITHUB_REPOSITORY" "$VER" "$sum" > "$upfile"
+              "$GITHUB_REPOSITORY" "$sum" > "$upfile"
             echo "已写 $upfile -> $zipname ($sum)"
           done < dist/sha256.txt
 
