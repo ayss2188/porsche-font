@@ -44,6 +44,16 @@ fi
 # 带超时执行：没有 timeout、或者 timeout 用不了（个别 ROM 上会返回 127）就直接执行。
 # 目的只有一个 —— 任何一次 mount 都不允许把阻塞的 post-fs-data 阶段卡死。
 # _to_s <秒数> <命令...>；_to 是"默认 5 秒"的简写。_to_n / _to_rc 是临时变量。
+# ---------------------------------------------------------------------------
+# boot_id —— 自带一份，不依赖调用方有没有 source common.sh。
+#   ★ 2026-10-16：mount.sh 原先只"用" boot_id 却不定它，靠开机脚本先
+#     source common.sh 才成立。直接 `sh mount.sh` 时它会静默变成空值，
+#     而 mount.state 里 `boot=` 一空，mount_result 比对就失败
+#     → 界面显示"本次开机未挂载"（live.sh 已经踩过这个坑）。
+# ---------------------------------------------------------------------------
+command -v boot_id >/dev/null 2>&1 || boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n'; }
+
+
 _to_s() {
   _to_n="$1"; shift
   if command -v timeout >/dev/null 2>&1; then
