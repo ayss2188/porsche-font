@@ -574,24 +574,32 @@ _lk_load() {   # 命中就 set LOCKSCREEN_CACHE 并返回 0
 #     于是"只有文件、配置里没引用"的那批（真机例子：/product/fonts/MiClock.otf、
 #     MitypeClock.otf 及其 Mono 变体）进了计划却不在名单里 → 开关对它们无效。
 #   这里按文件名再扫一遍字体目录，把漏的补上。
-_lk_add_byname() {   # $1=已有名单（换行分隔）→ 输出补全后的名单
+_lk_add_byname() {   # $1=已有名单 → 输出补全后的名单
+  # 按**文件名**补认锁屏字体（作者真机实测出来的缺口）。
+  #
+  # 为什么需要：`_role_set` 是按**文件名**判 clock 角色的（*clock*），
+  #   而这份名单原来只扫 XML 的 family 名 —— 两边判据不一致，
+  #   于是"只有文件、配置里没引用"的那批（真机例子：/product/fonts/MiClock.otf、
+  #   MitypeClock.otf 及其 Mono 变体）进了替换计划却不在名单里 → 开关对它们无效。
+  #
+  # ⚠️ 路径必须写 `"$FSROOT$d"`：`slot_dirs` 给的是**相对系统根**的路径
+  #    （/system/fonts 这种），模块里一律靠 $FSROOT 前缀落到真身
+  #    （沙箱里是 /pfbox/system/fonts）。少了这个前缀就扫到空目录、白扫。
+  #    我前两版分别漏了它、和改成只认配置名（slot_xml_names 也只认配置里引用的），
+  #    两次都没解决问题 —— 这里留个记录，别再犯。
   local d f n out="$1"
   for d in $(slot_dirs 2>/dev/null); do
-    [ -d "$d" ] || continue
-    for f in "$d"/*; do
+    [ -d "$FSROOT$d" ] || continue
+    for f in "$FSROOT$d"/*; do
       [ -f "$f" ] || continue
       n=${f##*/}
-      case "$n" in *'*') continue ;; esac
+      case "$n" in *'*') continue ;; esac      # glob 没匹配到会原样留着
       case "$(_lc "$n")" in
         *clock*|*keyguard*) ;;
         *) continue ;;
       esac
-      case "
-$out
-" in
-        *"
-$n
-"*) ;;                                # 已有，跳过
+      case "$out" in
+        *"$n"*) ;;                             # 已有，跳过
         *) out="$out$n
 " ;;
       esac
