@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # 卸载时先把"商店缓存桥接"还原掉（否则那些缓存文件会一直显示我们的字体）
 [ -f "$MODDIR/gms_cache.sh" ] && sh "$MODDIR/gms_cache.sh" off >/dev/null 2>&1
+rm -f "$LIB/.gms_cache_on" 2>/dev/null   # ★ 清缓存桥接启用标志
 
 # 卸载模块时：恢复本模块停用过的谷歌字体组件，然后删除字体库和设置（/data/adb/custom_font_lib）。
 # 注意：更新 / 覆盖安装模块不会执行本脚本，字体库会保留；只有在管理器里点「卸载」才会清理。
