@@ -811,6 +811,18 @@ do_apply() {
   echo "$sel" > "$MODDIR/pending_font"
   echo "$sel" > "$LIB/last_selection"
   [ -f "$MODDIR/active_font" ] || echo none > "$MODDIR/active_font"
+  # ★ 2026-10-16（B1）：再记一份"最近一次真正生效过的字体"，放在**不会被 none 覆盖**的地方。
+  #   为什么需要：升级时 customize.sh 的恢复链（last_selection → active_font → pending_font）
+  #   全都可能读到 none —— 而"记录丢了"和"用户确实选了无字体"在旧代码里无法区分，
+  #   于是用户的字体凭空消失（真机实测：v1.2.2 → v1.2.5 就这样）。
+  #   规则：
+  #     · 选的是真字体 → 写 .last_good（下次恢复时可以用它）
+  #     · 选的是 none   → 删掉 .last_good（这是用户意图，不该在下次升级被"恢复"回来）
+  if [ "$sel" = none ]; then
+    rm -f "$LIB/.last_good" 2>/dev/null
+  else
+    printf '%s\n' "$sel" > "$LIB/.last_good" 2>/dev/null
+  fi
   refresh_prop
   echo "OK:$(label_of "$sel"):$COUNT:$scope"
 }
@@ -869,6 +881,16 @@ case "${1:-}" in
     echo "R=$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')"
     if [ -f "$MODDIR/rescued" ]; then echo "X=1"; else echo "X=0"; fi
     echo "N=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')"
+    # ★ 2026-10-16：槽位来源拆分（界面显示「系统配置里引用的 / 本模块补充的」）
+    #   由 slots.sh 的 slot_plan 在生成计划时写到 slots.sources —— 事后重建不可靠，
+    #   因为"来源"只在合并候选那一刻知道。
+    if [ -s "$MODDIR/slots.sources" ]; then
+      _xsx=$(sed -n 's/^x=//p' "$MODDIR/slots.sources" 2>/dev/null | head -n1 | tr -dc '0-9')
+      _xsa=$(sed -n 's/^a=//p' "$MODDIR/slots.sources" 2>/dev/null | head -n1 | tr -dc '0-9')
+      echo "SP=x=${_xsx:-0},a=${_xsa:-0}"
+    else
+      echo "SP="
+    fi
     echo "S=$(effective_scope "$P" 2>/dev/null)"
     echo "M=$(mount_mode)"
     echo "PM=$(cat "$MODDIR/payload.mode" 2>/dev/null | tr -d '[:space:]')"
