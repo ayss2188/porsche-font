@@ -17,6 +17,7 @@
 LIB=${LIB:-/data/adb/custom_font_lib}
 JOURNAL="$LIB/.gms_journal.conf"      # user= / original= / changedAt=
 STATUS_CACHE="$LIB/.gms_status"       # 状态缓存（dumpsys 慢，界面每次打开不能都跑）
+CACHE_ON_FLAG="$LIB/.gms_cache_on"    # ★ 缓存桥接的启用标志（gms_cache.sh 开机时看它）
 GFLOG="$LIB/.gms_log"                 # 做过什么
 CACHE_TTL=${CACHE_TTL:-21600}         # 缓存 6 小时；「重新检测」= status fresh 强制刷新
 BOOTID_FILE=${CFS_BOOTID_FILE:-/proc/sys/kernel/random/boot_id}
@@ -150,7 +151,11 @@ original_state() {
 bridge() {   # 商店缓存桥接（让商店也生效）；测试环境不跑
   [ -z "$CFS_ALLOW_NONROOT" ] || return 0
   [ -f "$MODDIR/gms_cache.sh" ] || return 0
-  tmo 60 sh "$MODDIR/gms_cache.sh" "$1" >/dev/null 2>&1
+  # ★ 2026-10-16：这里传 force —— 因为调用方是**界面上的按钮**（用户显式开启/关闭）。
+  #   而 gms_cache.sh 的 do_on 现在有一道门槛：账本不在就拒绝自动挂载
+  #   （修"关掉了还被开机脚本挂回去"那个 bug）。
+  #   用户点「开启兼容」时账本还没建立，不传 force 就会被那道门槛挡掉。
+  tmo 60 sh "$MODDIR/gms_cache.sh" "$1" force >/dev/null 2>&1
 }
 cur_user() {
   local u=""
@@ -221,6 +226,13 @@ do_status() {
   if is_disabled; then
     if owned; then put_status on; printf 'on\n'
     else put_status foreign; printf 'foreign\n'; fi
+    # ★ 2026-10-16：用户点了「开启兼容」→ 记下"缓存桥接要开着"。
+    #   原来这里直接 return 0，**既没写标志也没调 bridge on** ——
+    #   于是"用户点了开启、桥接却没被标记"；而如果库目录里还留过老账本，
+    #   开机脚本就会照挂，用户看到"我没开啊，怎么还有挂载"（真机反馈过）。
+    #   组件是谁停的不影响"用户要桥接"这个意图，所以两条路都写。
+    mkdir -p "$LIB" 2>/dev/null
+    : > "$CACHE_ON_FLAG" 2>/dev/null
     return 0
   fi
   if owned; then put_status on; printf 'on\n'; return 0; fi   # pm 说过成功 = 就是我们开的
@@ -283,6 +295,10 @@ do_restore() {
     if [ "$rc" -eq 0 ] || printf '%s' "$out" | grep -q "new state"; then ok=1; break; fi
     sleep 2
   done
+  # ★ 先删"缓存桥接启用标志"（无论组件还原成不成功）：
+  #   用户点了「关闭兼容」，就不该再有桥接挂载 ——
+  #   否则开机脚本还会照挂，用户看到"关了还在挂"（真机反馈过）。
+  rm -f "$CACHE_ON_FLAG" 2>/dev/null
   if [ "$ok" = 1 ]; then
     rm -f "$JOURNAL" 2>/dev/null
     put_status off
@@ -311,6 +327,8 @@ do_reconcile() {
   out=$(tmo 20 "$PM" disable --user "$u" "$COMPONENT" 2>&1); rc=$?
   if [ "$rc" -eq 0 ] || printf '%s' "$out" | grep -q "new state"; then
     put_status on
+    mkdir -p "$LIB" 2>/dev/null
+    : > "$CACHE_ON_FLAG" 2>/dev/null
     log_gf "复查：组件不是「已停用」（多半被 GMS 更新重置），已补上（用户 $u）"
   else
     log_gf "复查：组件不是「已停用」，补停用失败（用户 $u），下次开机再试"
