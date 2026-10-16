@@ -70,27 +70,100 @@ jstr() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^
 jnum() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p"; }
 
 
+# ---------------------------------------------------------------------------
+# ★ 2026-10-16（A2）：多地址取更新信息，谁给的版本新就用谁
+#
+# 为什么必须这么干：module.prop 里的 updateJson 是**随模块发出去的** ——
+#   已经装了旧版的人，那份文件永远指着老地址。只改 module.prop 救不了他们。
+#   而且 jsDelivr 的 @main 别名缓存 purge 不掉：v1.2.5 发布 3 小时后
+#   它仍返回 v1.2.0，用户看到"已是最新"（真机实测，作者手动 purge 才跳过去）。
+#
+# 顺序：先快后稳 ——
+#   ① module.prop 配的（v1.2.6 起 = 作者 Worker，一改就生效）
+#   ② 作者 Worker 固定地址（老 module.prop 没有这条，靠它兜底）
+#   ③ jsDelivr（老地址，缓存慢但一般能通）
+#   ④ raw.githubusercontent.com（最权威，国内常连不上，放最后）
+# 只要有一条返回了**更大的 versionCode**，就用它的整份数据。
+# ---------------------------------------------------------------------------
+UPD_WORKER="https://cfs-report.2188366745q.workers.dev"
+UPD_REPO="ayss2188/porsche-font"          # 在 case 里按仓库替换
+
+_read_json() {   # $1=json 文件；把五个字段填进全局
+  NEW_VER=$(jstr version "$1")
+  NEW_CODE=$(jnum versionCode "$1")
+  ZIP_URL=$(jstr zipUrl "$1")
+  LOG_URL=$(jstr changelog "$1")
+  SHA=$(jstr sha256 "$1")
+}
+
+# 试一个地址：成功就写进 $2，并把字段填好
+#   用了子 shell 会丢变量，所以这里直接把结果放全局，用 _TRY_CODE 回传
+_try_update_url() {   # $1=url  $2=目标文件
+  _TRY_CODE=""
+  rm -f "$2" 2>/dev/null
+  fetch "$1" "$2" 20 || return 1
+  [ -s "$2" ] || return 1
+  _read_json "$2"
+  case "$NEW_CODE" in ''|*[!0-9]*) return 1 ;; esac
+  [ -n "$ZIP_URL" ] || return 1
+  _TRY_CODE="$NEW_CODE"
+  return 0
+}
+
 load_json() {
-  local url
+  local url base repo
   url=$(prop updateJson)
   case "$url" in
     https://*) ;;
-    *) ERR="module.prop 里没有配置 updateJson"; return 1 ;;
+    *) url="" ;;
   esac
-  case "$url" in *__REPO__*) ERR="作者还没有配置 GitHub 仓库地址"; return 1 ;; esac
-  rm -f "$TMP/update.json" 2>/dev/null
-  fetch "$url" "$TMP/update.json" 20
-  # ⚠ fetch 失败时会把目标文件删掉，所以这里必须先判存在再读 ——
-  #   否则每次都会往日志里喷一条 "can't open .../update.json"（测试抓到的）
+  case "$url" in *ayss2188/porsche-font*) url="" ;; esac
+
+  # 本模块的仓库名（用于 Worker 和 raw 两个地址）
+  repo="$UPD_REPO"
+
   NEW_VER=""; NEW_CODE=""; ZIP_URL=""; LOG_URL=""; SHA=""
-  if [ -f "$TMP/update.json" ]; then
-    NEW_VER=$(jstr version "$TMP/update.json")
-    NEW_CODE=$(jnum versionCode "$TMP/update.json")
-    ZIP_URL=$(jstr zipUrl "$TMP/update.json")
-    LOG_URL=$(jstr changelog "$TMP/update.json")
-    SHA=$(jstr sha256 "$TMP/update.json")
+  _BEST=""; _BEST_SRC=""
+
+  # 依次尝试；记下 versionCode 最大的那个
+  for base in \
+      "${url:-}" \
+      "$([ -n "$repo" ] && printf '%s/update?repo=%s' "$UPD_WORKER" "$repo")" \
+      "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/update.json' "$repo")" \
+      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/update.json' "$repo")" ; do
+    [ -n "$base" ] || continue
+    if _try_update_url "$base" "$TMP/update.json"; then
+      if [ -z "$_BEST" ] || [ "$_TRY_CODE" -gt "$_BEST" ] 2>/dev/null; then
+        _BEST="$_TRY_CODE"
+        _BEST_SRC="$base"
+        # 把这份数据固化成"最终结果"（后面可能被更好的覆盖）
+        NEW_VER=$(jstr version "$TMP/update.json")
+        NEW_CODE=$(jnum versionCode "$TMP/update.json")
+        ZIP_URL=$(jstr zipUrl "$TMP/update.json")
+        LOG_URL=$(jstr changelog "$TMP/update.json")
+        SHA=$(jstr sha256 "$TMP/update.json")
+      fi
+      # ★ 2026-10-16：**够新就停**。
+      #   每个不可达地址要等满 fetch 的超时（20 秒），而作者自己的 Worker
+      #   （workers.dev 域名）在部分网络下完全连不上 —— 依次全试最坏 4×20=80 秒，
+      #   用户会以为界面卡死。
+      #   一旦某个地址给出的版本**已经比本地新**，"有更新"这个结论就拿到了，
+      #   后面的地址不必再试。（只有当所有渠道都显示"不比我新"时，
+      #   才需要把它们都问一遍，以免漏掉某条渠道上的新版本。）
+      if [ -n "$CUR_CODE" ] && [ "$_TRY_CODE" -gt "$CUR_CODE" ] 2>/dev/null; then
+        _BEST_SRC="$_BEST_SRC（已够新，提前结束）"
+        break
+      fi
+    fi
+  done
+
+  if [ -z "$_BEST" ]; then
+    ERR="取不到更新信息（网络不可用，或几个地址都拿不到）"
+    NEW_CODE=""
+    return 1
   fi
-  [ -n "$NEW_CODE" ] && [ -n "$ZIP_URL" ] || { ERR="取不到更新信息（网络不可用，或地址上的内容不完整）"; NEW_CODE=""; return 1; }
+  # 记一笔"最终用的是哪个渠道"，排查时有用（诊断报告会打印）
+  printf '%s' "$_BEST_SRC" > "$TMP/update.src" 2>/dev/null
   return 0
 }
 
@@ -99,6 +172,14 @@ CUR_CODE=$(prop versionCode)
 ERR=""
 
 case "${1:-check}" in
+  # ★ 2026-10-16 新增：输出当前"开机标识"。
+  #   界面用它判断"装完之后到底重启过没有" ——
+  #   否则"当前版本 == 最新版本"会被当成"等待重启"，用户明明已经在最新版上，
+  #   却永远看到红色「立即重启生效」（真机反馈）。
+  bootid)
+    boot_id
+    ;;
+
   check)
     HAS=0
     if load_json && [ "$NEW_CODE" -gt "${CUR_CODE:-0}" ] 2>/dev/null; then HAS=1; fi
@@ -280,6 +361,10 @@ case "${1:-check}" in
     # 进度条按**耗时**稳着爬（见下面的 _ipct）—— 不假装知道真实百分比。
     # -------------------------------------------------------------------------
     _ILOG="$TMP/install.log"
+    # ★ 2026-10-16（C1）：把上一份日志轮转走，别直接删 ——
+    #   真机上排查"升级后状态不对"时，最需要的恰恰是**上一次**安装的输出，
+    #   而原来每次 install 都 rm 掉，证据就没了（作者实测踩过）。
+    [ -s "$_ILOG" ] && mv -f "$_ILOG" "$TMP/install-prev.log" 2>/dev/null
     rm -f "$_ILOG" "$TMP/install.rc" 2>/dev/null
     case "$(root_manager)" in
       magisk) _INS_CMD="magisk --install-module" ;;
@@ -325,8 +410,42 @@ case "${1:-check}" in
       prog finished 0 0 "安装完成，重启后生效"
       echo "OK:$NEW_VER"
     else
-      prog error 0 0 "安装失败（$(tail -n 3 "$_ILOG" 2>/dev/null | tr '\n' ' ')）"
-      echo "ERROR:安装失败（$(tail -n 3 "$_ILOG" 2>/dev/null | tr '\n' ' ')）"
+      # ★ 2026-10-16（C2）：把**完整**安装日志复制到 Download ——
+      #   原来只把末 3 行拼成一行塞进进度条，ksud 的多行报错常被截掉关键原因，
+      #   用户只能重来、作者也拿不到证据。现在留一份完整文件，界面能提示去哪看。
+      #   顺手（C4）：区分"存储空间不足"和"网络/其他"——子项目的包有 63MB，
+      #   低存储设备上会撞上，而原来的提示只会说"下载或安装失败"。
+      _LOGOUT="/data/media/0/Download/安装日志.txt"
+      [ -d /data/media/0/Download ] || _LOGOUT="$TMP/install.log"
+      {
+        echo "===== 安装失败时的完整日志 ====="
+        echo "时间：$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+        echo "模块：$(prop version) / $(prop versionCode)"
+        echo "退出码：${rc:-?}"
+        echo
+        echo "----- 本次安装器输出（install.log）-----"
+        cat "$_ILOG" 2>/dev/null
+        echo
+        echo "----- 上一次安装器输出（install-prev.log）-----"
+        cat "$TMP/install-prev.log" 2>/dev/null
+      } > "$_LOGOUT" 2>/dev/null
+
+      # 空间不足？看一眼 /data 剩余再决定怎么说
+      _why=""
+      _free=$(free_kb /data 2>/dev/null)
+      case "$_free" in ''|*[!0-9]*) _free="" ;; esac
+      if [ -n "$_free" ] && [ "$_free" -lt 204800 ] 2>/dev/null; then
+        _why="存储空间不足（/data 只剩 $(( _free / 1024 ))MB，安装需要临时空间）"
+      elif [ ! -s "$_ILOG" ]; then
+        _why="管理器没有输出（可能是下载不完整，或管理器拒绝了安装）"
+      else
+        _why="$(tail -n 3 "$_ILOG" 2>/dev/null | tr '\n' ' ')"
+      fi
+
+      prog error 0 0 "安装失败：$_why"
+      echo "ERROR:安装失败：$_why"
+      echo "      完整日志已存到：$_LOGOUT"
+      echo "      （把它发给作者就能定位）"
       exit 1
     fi
     ;;
