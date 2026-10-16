@@ -25,6 +25,8 @@ CACHE_DIRS=${GMS_CACHE_DIRS:-"/data/data/com.google.android.gms/files/fonts/open
 [ -n "$GMS_CACHE_DIR" ] && CACHE_DIRS="$GMS_CACHE_DIR"
 MOUNTS_FILE=${CFS_MOUNTS_FILE:-/proc/mounts}
 JOURNAL="$LIB/.gms_bridge.list"
+# ★ 「用户启用过缓存桥接」的明确标志（跟账本分开：账本是台账，这个才是开关）
+CACHE_ON_FLAG="$LIB/.gms_cache_on"
 LOG="$LIB/.gms_bridge.log"
 FAM_LIST=${FAM_LIST:-"googlesans googlesanstext googlesansdisplay googlesansflex productsans"}
 
@@ -182,6 +184,24 @@ scan_targets() {
 
 do_on() {
   local src list n=0 t any=0 d
+  # ★ 2026-10-16 修（用户反馈"关掉了还被挂、安全 App 报挂载异常"）：
+  #   这个函数会被 post-fs-data.sh / service.sh **每次开机无条件调用**，
+  #   而它原来完全不看"用户有没有关掉这个功能" ——
+  #   于是用户点过「关闭兼容」之后，重启一次又被挂回去，反复被安全软件报异常。
+  #
+  #   判据：账本（$JOURNAL）本身就是"这个功能启用过"的凭据 ——
+  #     · 只有成功挂过才会有它
+  #     · 用户点「关闭兼容」时 do_off 会把它删掉
+  #   所以自动调用（开机脚本）时：**账本不在就别挂**；
+  #   用户显式点「开启兼容」时会传 force，那条路照挂。
+  #   判据用**明确的启用标志**（$LIB/.gms_cache_on），不用账本 ——
+  #   账本是"挂了哪些、好还原"的台账，可能是老早留下的：
+  #   用户以前开过、后来组件被别的工具停用，账本不会自动消失，
+  #   拿它当开关会导致"用户没开、却每次开机都被挂"。真机反馈过。
+  if [ "${1:-}" != force ] && [ ! -f "$CACHE_ON_FLAG" ]; then
+    echo "谷歌字体兼容未启用，跳过（不会自动挂载）"
+    return 0
+  fi
   src=$(source_font) || { echo "没有可用的字体文件，跳过（缓存桥接）"; return 0; }
   [ -n "$MNT" ] || { echo "ERROR:找不到 mount 命令"; return 1; }
   for d in $CACHE_DIRS; do [ -d "$d" ] && any=1; done
@@ -292,7 +312,7 @@ do_diag() {
 
 case "${1:-status}" in
   families) font_norm_file "$2" ;;
-  on)     do_on; _rc=$?; bridge_into_zygote; exit $_rc ;;
+  on)     do_on "${2:-}"; _rc=$?; bridge_into_zygote; exit $_rc ;;
   off)    do_off ;;
   status) do_status ;;
   diag)   do_diag ;;
