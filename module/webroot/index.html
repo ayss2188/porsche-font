@@ -338,7 +338,7 @@ body { min-height: 100%; }
      现在：弹窗最高占屏幕 82%，内部 flex 纵向；**只有中间的报告区滚动**，
      标题、进度、按钮永远留在屏幕内。
      为什么不是 88vh：真机上状态栏 + 手势条会吃掉一截，88vh 时底部按钮仍可能被挤出去。 */
-  #reportMask .modal { max-height: calc(82vh - env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; }
+  #reportMask .modal { max-height: calc(88vh - env(safe-area-inset-bottom, 0px)); /* ★ 2026-10-17 作者反馈按钮被切：82vh 装不下换行的按钮行，放到 88vh */ display: flex; flex-direction: column; overflow: hidden; }
   #reportMask .modal > * { flex: 0 0 auto; min-height: 0; }
   /* ★ 2026-10-14 修：两个视图的高度必须**一样**，而且必须**填满**可用空间。
      以前写的是 `flex: 1 1 auto; min-height: 90px`：
@@ -476,6 +476,7 @@ body { min-height: 100%; }
     padding: 7px 0 7px 10px;
     background: color-mix(in srgb, var(--card) 55%, transparent);
     border-radius: 0 8px 8px 0;
+    font-size: 12px;
   }
   .vpn-tip b { color: var(--text); }
   .fbk-entry { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
@@ -585,12 +586,27 @@ try {
       <span class="label">已替换槽位</span>
       <span class="value" id="slotLabel">-</span>
     </div>
-        <!-- ★ 2026-10-16 作者反馈：光看"172 个槽位"不知道为什么这么多。
-             拆成"系统配置里引用的 / 本模块补充的"，并说明我们不改系统配置。 -->
-        <div class="status-row" id="slotSrcRow" style="display:none">
-          <span class="label" style="font-size:12px">其中：系统配置里引用的</span>
-          <span class="value" id="slotSrcLabel" style="font-size:12px"></span>
+        <!-- ★ 2026-10-16（作者定稿 · 方案 C）：两行普通状态行（去掉说明行 —— 作者要求）。
+             ⚠️ 分隔线为什么写死（调错 4 次的教训）：
+               原来靠 `.status-row + .status-row { border-top: 1px solid var(--border) }`，
+               依赖链太长，任何一环坏掉用户就看到"没有线"：
+                 相邻兄弟选择器（不能包容器）
+                 → 主题属性挂载位置（:root[data-theme] 必须在 <html> 上）
+                 → localStorage 异常（file:// 下会抛）→ 变量解析
+               现在写成内联的 border-top + margin/padding，颜色用中性半透明灰
+               rgba(128,128,128,.28) —— 白底黑底都看得见，不依赖主题变量。
+             ⚠️ 颜色：.value.active = 紫 / .value.pending = 蓝 / .value.ok = 绿 /
+               .value.warn = 琥珀 / .value.off = 灰（跟卡片里其他行同一套语义类）。
+             数据来源：SP4 里的 x（配置里列的名字数）和 extra（扫描真正多补的名字数）。 -->
+        <div class="status-row" id="ssRowX" style="border-top:1px solid rgba(128,128,128,.28);margin-top:10px;padding-top:10px">
+          <span class="label">系统字体配置里列的</span>
+          <span class="value active" id="ssX">-</span>
         </div>
+        <div class="status-row" id="ssRowExtra" style="border-top:1px solid rgba(128,128,128,.28);margin-top:10px;padding-top:10px">
+          <span class="label">模块额外补的</span>
+          <span class="value pending" id="ssExtra">-</span>
+        </div>
+
     <div class="status-row">
       <span class="label">实际挂载</span>
       <span class="value" id="mountLabel">-</span>
@@ -803,20 +819,26 @@ try {
         <button class="g-btn" id="reportChoiceSlow" onclick="repStart('full','gentle')">慢慢生成</button>
       </div>
       <div class="g-hint" id="reportChoiceHint" style="display:none"></div>
+      <!-- ★ 2026-10-16（作者要求）：上传前提醒挂梯子。
+           为什么需要：上传走设备上的 curl，而服务器在境外 ——
+           梯子没覆盖到那个域名时，现象就是"点了没反应 / 上传失败"，
+           用户会以为是模块坏了（作者真机反馈过好几次）。 -->
       <div class="btn-row">
         <button class="g-btn urgent" id="reportCancelBtn" onclick="cancelReport()" style="display:none">中止生成</button>
-        <button class="g-btn" id="reportMoreBtn" onclick="reportMore()" style="display:none">看更多</button>
-        <button class="g-btn" id="reportViewBtn" onclick="repShowView(repViewMode === 'raw' ? 'pretty' : 'raw')" style="display:none">原样文本</button>
-        <button class="g-btn" id="reportRegenBtn" onclick="regenReport()" style="display:none">重新生成</button>
+        <button class="g-btn" id="reportMoreBtn" onclick="reportMore()" style="display:none">更多</button>
+        <button class="g-btn" id="reportViewBtn" onclick="repShowView(repViewMode === 'raw' ? 'pretty' : 'raw')" style="display:none">文本</button>
+        <button class="g-btn" id="reportRegenBtn" onclick="regenReport()" style="display:none">重生成</button>
         <!-- ★ 2026-10-16：生成完成后就地提供"上传给作者"（传作者自己的服务器）。
              作者的意见：它属于完整报告的一部分，放在外面的区块里"感觉很奇怪" ——
              而且它依赖这次刚生成的文件，就地放才说得通。
              所以只在**生成完成**（repPaintDone）后才出现。 -->
-        <button class="g-btn primary-blue" id="reportServerBtn" onclick="repSendServer()" style="display:none">上传给作者</button>
+        <button class="g-btn primary-blue" id="reportServerBtn" onclick="repSendServer()" title="需要先连 VPN（服务器在境外）" style="display:none">上传</button>
         <button class="g-btn primary-blue" onclick="closeReport()">关闭</button>
       </div>
     </div>
   </div>
+  
+
 
 <div class="sheet" id="fbkSheet">
     <div class="sheet-head">
@@ -897,6 +919,7 @@ try {
       <h3 id="modalTitle"></h3>
       <p id="modalMsg"></p>
       <input class="txt" id="modalInput" type="text" maxlength="40" style="display:none">
+      <textarea class="txt" id="modalArea" rows="4" maxlength="300" style="display:none;resize:vertical;line-height:1.5;font-family:inherit"></textarea>
       <div class="lbl" id="modalSelLbl" style="display:none"></div>
       <select class="txt" id="modalSelect" style="display:none"></select>
       <div class="btn-row">
@@ -1165,7 +1188,7 @@ function cycleTheme() {
 
 /* ---------- 弹窗 ---------- */
 // altText：可选的第三个按钮，点它 resolve "alt"（用于"快速/完整"这种二选一）
-function dialog({title, msg = "", input = null, select = null, okText = "确定", danger = false, altText = ""}) {
+function dialog({title, msg = "", input = null, select = null, okText = "确定", danger = false, altText = "", text = null, textHint = "", maxLen = 300}) {
   return new Promise(resolve => {
     const mask = document.getElementById("modalMask");
     const inp = document.getElementById("modalInput");
@@ -1179,6 +1202,19 @@ function dialog({title, msg = "", input = null, select = null, okText = "确定"
     p.textContent = msg; p.style.display = msg ? "block" : "none";
     inp.style.display = input === null ? "none" : "block";
     if (input !== null) inp.value = input;
+    // ★ 2026-10-16：多行输入（上传报告时让用户填"遇到什么问题"）。
+    //   单独一个 textarea，不动 modalInput —— 老调用（重命名字体等）不受影响。
+    const area = document.getElementById("modalArea");
+    if (area) {
+      const multi = text !== null;
+      area.style.display = multi ? "block" : "none";
+      if (multi) {
+        area.value = text || "";
+        area.maxLength = maxLen;
+        area.placeholder = textHint || "";
+        area.rows = 4;
+      }
+    }
     sel.textContent = "";
     selLbl.style.display = sel.style.display = select ? "block" : "none";
     if (select) {
@@ -1191,11 +1227,16 @@ function dialog({title, msg = "", input = null, select = null, okText = "确定"
     alt.textContent = altText;
     alt.style.display = altText ? "" : "none";
     const done = v => { mask.classList.remove("show"); ok.onclick = cancel.onclick = null; if (alt) alt.onclick = null; resolve(v); };
-    ok.onclick = () => done(select ? {text: inp.value.trim(), sel: sel.value} : (input === null ? true : inp.value.trim()));
+    // ★ 多行模式返回"用户填的文本"（没填就返回空串 —— 调用方自己决定要不要继续）
+    ok.onclick = () => done(
+      select ? {text: inp.value.trim(), sel: sel.value}
+             : (text !== null ? (area ? area.value.trim() : "")
+                              : (input === null ? true : inp.value.trim())));
     cancel.onclick = () => done(null);
     alt.onclick = () => done("alt");
     mask.classList.add("show");
-    if (input !== null) setTimeout(() => { inp.focus(); inp.select(); }, 80);
+    if (text !== null) setTimeout(() => { if (area) area.focus(); }, 80);
+    else if (input !== null) setTimeout(() => { inp.focus(); inp.select(); }, 80);
   });
 }
 
@@ -1305,20 +1346,26 @@ function applyStatus(st) {
     const rom = g("R").trim();
     const nSlots = g("N").trim();
     setValue("slotLabel", nSlots && +nSlots > 0 ? nSlots + " 个" : "0（未替换）");
-    // ★ 槽位来源拆分（作者反馈"170 多个看着奇怪"）：SP=x=98,a=74
-    //   x = 系统字体配置里引用的；a = 本模块补充的（机型清单/厂商命名/目录扫描）
-    //   没有这个数据（旧计划、还没重新应用）就整行隐藏，不显示误导性的 0。
+    // ★ 槽位来源（定稿）：两行 —— 配置里列的 / 模块额外补的
+    //   这两行没有外层容器（否则分隔线会被切断），所以按 id 分别隐藏。
     (function () {
-      const row = document.getElementById("slotSrcRow");
-      if (!row) return;
-      const sp = g("SP").trim();
-      const mx = /x=(\d+)/.exec(sp);
-      const ma = /a=(\d+)/.exec(sp);
-      if (!nSlots || !mx) { row.style.display = "none"; return; }
-      const x = +mx[1], a = ma ? +ma[1] : 0;
-      row.style.display = "";
-      setValue("slotSrcLabel",
-        x + " 个" + (a > 0 ? "（其余 " + a + " 个为本模块补充）" : ""));
+      const rowX = document.getElementById("ssRowX");
+      const rowE = document.getElementById("ssRowExtra");
+      const hide = () => {
+        if (rowX) rowX.style.display = "none";
+        if (rowE) rowE.style.display = "none";
+      };
+      const raw = g("SP4").trim();
+      const m = /x=(\d+),s=(\d+),o=(\d+),d=(\d+)/.exec(raw);
+      if (!nSlots || !m) { hide(); return; }
+      const x = +m[1];
+      const em = /extra=(\d+)/.exec(raw);
+      const extra = em ? +em[1] : -1;          // -1 = 老版本没这个字段
+      if (x <= 0 && extra <= 0) { hide(); return; }
+      if (rowX) rowX.style.display = "";
+      if (rowE) rowE.style.display = "";
+      setValue("ssX", x + " 个");
+      setValue("ssExtra", extra >= 0 ? extra + " 个" : "-");
     })();
     document.getElementById("rescueBanner").classList.toggle("show", g("X") === "1");
     document.getElementById("stoppedBanner").classList.toggle("show", g("RS") === "1");
@@ -2267,7 +2314,7 @@ const repTxt = () => repEl("reportText");
     const out = [];
     if (partial) {
       out.push('<div class="rv-concl warn"><div class="rv-line">⚠ 这一份是<b>未完成</b>的（生成被中断或超时），' +
-               '下面只是已经写好的部分。</div><div class="rv-line">点「重新生成」可以拿到完整的报告。</div></div>');
+               '下面只是已经写好的部分。</div><div class="rv-line">点「重生成」可以拿到完整的报告。</div></div>');
     }
     for (const sec of secs) {
       if (sec.concl) {
@@ -2547,7 +2594,7 @@ async function repPaintDone(kv) {
   // 未完成的报告前面加一段说明（这段只在"中止/超时"时出现）
   const body = (partial
     ? "⚠ 这一份是【未完成】的（生成被中断或超时），下面是已经生成好的部分。\n" +
-      "想要完整报告，请点下面的「重新生成」。\n" +
+      "想要完整报告，请点下面的「重生成」。\n" +
       "────────────────────────────────────────\n"
     : "") + (String(head || "").trim() || "（报告为空）");
     // 1.0.9：同时喂给"结构化视图"和"原样文本"，默认显示结构化
@@ -2559,7 +2606,7 @@ async function repPaintDone(kv) {
   repEl("reportTip").style.display = "block";
   repEl("reportTip").innerHTML =
     (partial ? "这份报告没跑完，已经生成好的部分在文件里了。" : "报告已生成，已自动保存。") +
-    "界面只预览开头一部分" + (size > REP_PREVIEW ? "（点「看更多」继续往后看）" : "") +
+    "界面只预览开头一部分" + (size > REP_PREVIEW ? "（点「更多」继续往后看）" : "") +
     "，完整内容：<b>Download/" + repSavedName(kv) + "</b>；" +
     "生成过程每一步的耗时在报告最后的「每一步耗时」里。";
   repUpdateMore();
@@ -2679,7 +2726,7 @@ async function showReport(mode) {
   openReportModal("正在读取状态…");
   await nextPaint();
   try { await repAttach(mode); }
-  catch (e) { repPaintSimple("error", "出错了：" + errText(e) + "\n\n可以点「重新生成」再试一次。"); }
+  catch (e) { repPaintSimple("error", "出错了：" + errText(e) + "\n\n可以点「重生成」再试一次。"); }
 }
 // 挂到"正在跑的那一份"上，或者显示已经生成好的
 async function repAttach(mode) {
@@ -2766,7 +2813,7 @@ async function repFinish(kv) {
       showToast("已中止生成；已经生成好的部分仍然可以看、可以保存");
       return;
     }
-    repPaintSimple("cancelled", "已中止生成。\n\n已经生成好的部分仍然保存在 Download/未完成的体检报告.txt。\n想要完整报告就点「重新生成」。");
+    repPaintSimple("cancelled", "已中止生成。\n\n已经生成好的部分仍然保存在 Download/未完成的体检报告.txt。\n想要完整报告就点「重生成」。");
     return;
   }
   if (kv.state === "done" || kv.state === "partial") {
@@ -2775,7 +2822,7 @@ async function repFinish(kv) {
     return;
   }
   if (kv.state === "error") {
-    repPaintSimple("error", "生成失败：" + (kv.msg || "未知错误") + "\n\n可以点「重新生成」再试一次。");
+    repPaintSimple("error", "生成失败：" + (kv.msg || "未知错误") + "\n\n可以点「重生成」再试一次。");
     return;
   }
   if (kv.state === "none") { repPaintChooser(""); return; }
@@ -2784,7 +2831,7 @@ async function repFinish(kv) {
   repPaintSimple("timeout",
     "等了很久都没结果：任务可能还在慢慢跑，也可能已经被系统停掉了。\n\n" +
     "如果还在这一页，可以再等等 —— 报告是边写边存进 Download/完整体检报告.txt 的；\n" +
-    "也可以点「重新生成」从头再来，或点「中止生成」把它彻底停掉。");
+    "也可以点「重生成」从头再来，或点「中止生成」把它彻底停掉。");
 }
 function loadEstimate() {
   if (repEst) return;
@@ -2846,7 +2893,7 @@ function cancelReport() {
   repEl("reportBanner").style.display = "none";
   repEl("reportProgressBar").parentElement.classList.remove("running");
   try { ksuExec(`sh ${MODDIR}/fontctl.sh diag cancel`); } catch (e) {}
-  repPaintSimple("cancelled", "已中止生成。\n\n已经生成好的部分仍然保存在 Download/未完成的体检报告.txt。\n想要完整报告就点「重新生成」。");
+  repPaintSimple("cancelled", "已中止生成。\n\n已经生成好的部分仍然保存在 Download/未完成的体检报告.txt。\n想要完整报告就点「重生成」。");
   btnBusy(btn, false);
   btn.style.display = "none";
   showToast("已中止生成");
@@ -3056,6 +3103,67 @@ function fbkHdr(v, n) {
   catch (e) { return ""; }
 }
 
+/* ★ 2026-10-16（作者要求）：上报前弹一次窗 —— 让用户**描述遇到的问题** + 确认隐私/VPN。
+   两条上报路径（完整报告 / 快捷上报）共用这一个函数，话术只有一份。
+   返回：null = 用户取消；字符串（可能是空串）= 用户填的描述。 */
+/* ★ 2026-10-16 修（真机实测发现）：完整报告上传后，后台列表里设备显示 unknown、系统显示 ?
+   根因：meta.txt 只写了 size/lines/saved（diag.sh 里就写了这三个），
+        没有设备/系统/模块 —— 而 fbkDevTagFromKv(kv) 是从 meta 里读的，读不到就 unknown。
+   其实报告正文里**有**这些字段（快捷上报早就是从正文解析的，完整报告漏了）。
+   这里补一个统一的解析，两个路径共用。 */
+function repMetaFromText(txt) {
+  const s = String(txt || "");
+  const pick = (re) => { try { const m = s.match(re); return m ? m[1].trim() : ""; } catch (e) { return ""; } };
+  let dev = pick(/^设备[:：]\s*(.+)$/m);
+  // 设备行后面常带 Android 版本，去掉它更干净（例："Xiaomi 23116PN5BC   Android 17   构建号: ..."）
+  dev = dev.split(/\s{2,}|\t/)[0].trim();
+  const rom = pick(/^系统识别[:：]\s*(.+?)(?:\s{2,}|$)/m);
+  let ver = pick(/^体检脚本[:：]\s*(\S+)/m);
+  if (!ver) ver = pick(/^模块[:：]\s*(\S+)/m);
+  return { dev, rom, ver };
+}
+
+/* ★ 2026-10-17（作者要求去掉悬浮窗）：
+   原来这里是一层全屏遮罩，用来盖住"点上传时下半屏白"。
+   现在改成**只用 toast 提示**（读报告 / 检查网络 / 上传中 / 重试 / 成功 / 失败）。
+   下面两个函数保留成空操作 —— 调用点有 6 处，删掉会让它们抛 ReferenceError。 */
+// ★ 2026-10-17（作者要求）：**去掉上传悬浮窗** —— 有"已上传，谢谢！"那个提示就够了。
+//   这里保留成空函数，因为调用点有 6 处（包括"失败也要撤遮罩"那条路径），
+//   删掉函数会让那些地方抛 ReferenceError。空函数最安全。
+let _repBusyTimer = null;
+function repBusyOn(msg, sub) { /* 悬浮窗已去掉，什么都不做 */ }
+// 悬浮窗去掉后这个只是"清理一下可能残留的状态"，没有界面动作
+function repBusyOff() {
+  try {
+    if (_repBusyTimer) { clearInterval(_repBusyTimer); _repBusyTimer = null; }
+    const m = document.getElementById("repBusyMask");
+    if (m) m.style.display = "none";
+    const rm = document.getElementById("reportMask");
+    if (rm) rm.style.visibility = "";
+    void document.body.offsetHeight;            // 刷一次，避免残留空白
+  } catch (e) {}
+}
+function repBusyHide() { /* 悬浮窗已去掉 */ }
+
+async function askDesc(what) {
+  try {
+    const v = await dialog({
+      title: "把" + (what || "这份报告") + "发给作者？",
+      msg: "报告里是设备型号 / Android 版本 / 模块版本 / 字体挂载情况 /\n" +
+           "字体文件名清单 / 挂载与开机日志。\n" +
+           "不会采集：手机号、账号、通讯录、IMEI、你装了哪些 App、照片 / 聊天 / 位置。\n" +
+           "只发到作者手里，不公开、不外传。\n\n" +
+           "⚠️ 服务器在境外 —— 请先连上 VPN，否则会卡住或失败。",
+      text: "",
+      textHint: "遇到什么问题？（可不填）\n例：某个 App 里字体没变 / 中文变方块 / 只有桌面生效",
+      maxLen: 200,
+      okText: "连了 VPN，发送",
+    });
+    return (v === null || v === undefined) ? null : String(v);
+  } catch (e) { return ""; }   // 弹窗不可用时不挡住功能
+}
+
+
 /* ===========================================================================
    ★ 2026-10-16：上传改走 shell（真机实测 fetch 走不通）
    ---------------------------------------------------------------------------
@@ -3087,6 +3195,7 @@ async function fbkSendViaShell(txt, hdr) {
              h("x-cfs-ver", hdr["x-cfs-ver"]) +
              h("x-cfs-rom", hdr["x-cfs-rom"]) +
              h("x-cfs-note", hdr["x-cfs-note"] || "") +
+             (hdr["x-cfs-desc"] ? h("x-cfs-desc", hdr["x-cfs-desc"]) : "") +
              h("Content-Type", "text/plain; charset=utf-8");
 
   // curl 优先；没有就试 toybox wget
@@ -3130,6 +3239,7 @@ async function fbkSendWorker(txt) {
       } catch (e) { return ""; }
     })(), 40),
     "x-cfs-note": fbkHdr("快捷报告", 60),
+    "x-cfs-desc": fbkHdr(typeof fbkDesc === "string" ? fbkDesc : "", 700),   // ★ 用户填的描述
   };
   // ★ 走 shell —— WebView 的 fetch 不经过梯子，实测会 "Failed to fetch"
   return await fbkSendViaShell(txt, hdr);
@@ -3139,11 +3249,9 @@ async function fbkQuickSend() {
   const btn = document.getElementById("fbkQuickBtn");
   if (btn && btn.disabled) return;              // 防连点
   // ---- 发送前确认 ----
-  let go = null;
-  try {
-    go = await dialog({ title: "发送这份状态给作者？", msg: FBK_PRIVACY, okText: "发送" });
-  } catch (e) { go = true; }                    // 弹窗不可用时不要挡住功能
-  if (!go) return;                              // 用户取消 → 什么都不做
+  const _desc = await askDesc("这份状态");      // ★ 描述 + 隐私/VPN 一次问清
+  if (_desc === null) return;                   // 用户取消 → 什么都不做
+  const fbkDesc = _desc;
 
   fbkBusy(true, "fbkQuickBtn");
   fbkSay("正在生成（两秒左右）…");
@@ -3160,7 +3268,17 @@ async function fbkQuickSend() {
     fbkSay("✅ 已上传，谢谢！" + (rid ? "（编号 <b>" + repEsc(rid) + "</b>）" : "") +
           "<br><span style='opacity:.75'>这份是完整的，没有被截断 —— " +
           "作者能看到全部内容。</span>", "ok");
+    repBusyOff();
     showToast("已上传，谢谢！");
+    // ★ 2026-10-17（作者要求）：上传成功后**自动关掉报告弹窗**。
+    //   原来只撤了遮罩、弹窗还开着，看起来像"什么都没发生/没传上去"。
+    //   延迟 1.2 秒再关，让用户来得及看到"已上传"那个提示。
+    setTimeout(function () {
+      try {
+        const rm = document.getElementById("reportMask");
+        if (rm) rm.classList.remove("show");
+      } catch (e) {}
+    }, 1200);
 
   } catch (e) {
     // 失败一定要给出**可执行的下一步**，不能只说"失败"。
@@ -3217,44 +3335,122 @@ function fbkVerTag(txt) {
 async function repSendServer() {
   const btn = repEl("reportServerBtn");
   if (btn && btn.disabled) return;
+
+  // ★ 2026-10-16（作者要求）：上传前弹一次窗，同时做两件事 ——
+  //   ① 让用户填「遇到什么问题」（可选，但填了排查快很多）
+  //   ② 说清 VPN + 隐私（原来这段是只读话术）
+  //   合成一个窗，避免连弹两次；用户取消就中止上传。
+  const repDesc = await askDesc("这份报告");   // ★ 描述 + 隐私/VPN 一次问清
+  if (repDesc === null) return;                // 用户取消
   if (!WORKER_URL || !WORKER_KEY) {
     showToast("上报服务器没配置");
     return;
   }
   if (btn) btn.disabled = true;
+
+  // ★ 2026-10-17（作者真机反馈"点上传时下半屏白，上传完才恢复"）：
+  //   我第一版推断是"软键盘收起后 WebView 没重排"，加了下面这三步 ——
+  //   但作者实测**白屏仍在**，所以那个推断不成立（别把它当结论）。
+  //   这三步无害，保留着（动一下版面，能救回一部分渲染问题）。
+  //   （要真找根因得有真机 WebView 环境，我这边复现不了。）
+  try {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    void document.body.offsetHeight;
+    window.scrollTo(0, 0);
+  } catch (e) { /* 刷不动也不影响上传 */ }
+
+  showToast("正在读取报告…");
   try {
     const kv = await readReportMeta();
     const name = repSavedName(kv);
     const path = "/sdcard/Download/" + name;
 
+    // ★ 2026-10-16 修（真机实测）：meta.txt 里只有 size/lines/saved，
+    //   没有设备/系统/模块 → 后台列表显示 unknown / ?。
+    //   报告正文里有这些字段（快捷上报早就是从正文解析的，完整报告漏了），
+    //   所以这里读报告开头补上，解析不到就退回 meta.txt 的值。
+    let _kv2 = kv;
+    try {
+      const _head = String(await ksuExec("head -c 4096 '" + path + "' 2>/dev/null") || "");
+      const _rm = repMetaFromText(_head);
+      _kv2 = Object.assign({}, kv, {
+        brand: _rm.dev || (kv && kv.brand) || "",
+        model: "",
+        rom: _rm.rom || (kv && kv.rom) || "",
+        ver: _rm.ver || (kv && kv.ver) || "",
+      });
+    } catch (e) { /* 读不到就维持原样 */ }
+
     const szs = (await ksuExec(`wc -c < ${path} 2>/dev/null`)).trim();
     const sz = parseInt(szs, 10) || 0;
-    if (!sz) { showToast("找不到报告文件，请先生成"); return; }
+    if (!sz) { repBusyOff(); showToast("找不到报告文件，请先生成"); return; }
 
-    showToast("正在上传 " + Math.round(sz / 1024) + " KB…");
+    showToast("正在上传 " + Math.round(sz / 1024) + " KB…（别退出）");
+    showToast("正在检查网络…");
+
+    // ★ 2026-10-17（作者反馈"卡住不知道传没传"）：先花最多 6 秒探一下服务器通不通。
+    //   网络对国内大多不通 —— 不通就**立刻**告诉他，不用等 3 分钟。
+    try {
+      await ksuExec("command -v curl >/dev/null 2>&1 && curl -sS -m 6 -o /dev/null -w '%{http_code}' " +
+                    WORKER_URL + "/health || echo NOCURL");
+    } catch (e) {
+      // 探测本身失败也继续（可能只是 health 被挡，报告接口能用）
+    }
+
+    // 悬浮窗去掉后，靠 toast 告知进度（长传时它会自己消失，所以下面每次都补一句）
 
     // ★ 走 shell（curl / toybox）—— WebView 的 fetch 不经过梯子，实测会失败。
     //   报告已经在设备上是个文件了，直接 --data-binary @它，不用读进内存。
     const hdr = " -H 'x-cfs-key: " + WORKER_KEY + "'" +
-                " -H 'x-cfs-device: " + fbkHdr(fbkDevTagFromKv(kv), 80) + "'" +
-                " -H 'x-cfs-ver: " + fbkHdr((kv && kv.ver) || "", 24) + "'" +
-                " -H 'x-cfs-rom: " + fbkHdr((kv && kv.rom) || "", 40) + "'" +
+                " -H 'x-cfs-device: " + fbkHdr(fbkDevTagFromKv(_kv2), 80) + "'" +
+                " -H 'x-cfs-ver: " + fbkHdr((_kv2 && _kv2.ver) || "", 24) + "'" +
+                " -H 'x-cfs-rom: " + fbkHdr((_kv2 && _kv2.rom) || "", 40) + "'" +
                 " -H 'x-cfs-note: " + fbkHdr("完整报告 " + name, 120) + "'" +
+                // ★ 用户填的"遇到什么问题"（百分号编码 —— 头里不能有中文/换行）
+                " -H 'x-cfs-desc: " + fbkHdr(repDesc, 700) + "'" +
                 " -H 'Content-Type: text/plain; charset=utf-8'";
-    const cmd =
+    // ★ 2026-10-17（作者真机反馈"卡住不动、不知道传没传"）：
+    //   原来是单次 curl -m 90 —— 连接阶段卡住就要干等 90 秒，失败也没原因。
+    //   现在：**每次 35 秒（连接 8 秒就超时）+ 最多 3 次重试**，
+    //   每次更新遮罩的"第 N/3 次"，失败时把 curl 的最后一句话带出来。
+    //   （挂梯子时瞬时抖动很常见，重试能救回来；总时长仍封顶 ~2 分钟）
+    const _mkCmd = () =>
       'F="' + path + '"; U=' + WORKER_URL + '/report; ' +
       'if command -v curl >/dev/null 2>&1; then ' +
-        'curl -sS -m 180 -X POST' + hdr + ' --data-binary @$F $U; ' +
+        'curl -sS --connect-timeout 8 -m 35 --retry 1 --retry-connrefused ' +
+        '-X POST' + hdr + ' --data-binary @$F $U; ' +
       'else echo NOHTTPTOOL; fi';
-    const out = String(await ksuExec(cmd) || "");
+    let out = "";
+    let _lastErr = "";                     // ★ 必须定义：下面失败提示要用
+    for (let _try = 1; _try <= 3; _try++) {
+      if (_try > 1) showToast("网络不稳，重试第 " + _try + "/3 次…");
+      try {
+        out = String(await ksuExec(_mkCmd()) || "");
+        if (out.indexOf("NOHTTPTOOL") >= 0) break;
+        if (/ok|"id"/i.test(out)) break;                 // 成功
+        _lastErr = out.trim().slice(0, 120);
+      } catch (e) {
+        _lastErr = errText(e).slice(0, 120);
+        out = "";
+      }
+    }
     if (out.indexOf("NOHTTPTOOL") >= 0) throw new Error("设备上没有 curl，没法上传");
     if (/bad key/i.test(out)) throw new Error("服务器说口令不对");
     if (/too big/i.test(out)) throw new Error("报告太大（服务器上限 8MB）");
-    if (!/ok|"id"/i.test(out)) throw new Error(out.slice(0, 100) || "没有响应");
+    if (!/ok|"id"/i.test(out)) {
+      throw new Error((_lastErr || "没有响应") +
+                      "（已试 3 次 —— 多半是网络：服务器在境外，需梯子覆盖该域名）");
+    }
 
     showToast("已上传，谢谢！");
   } catch (e) {
-    showToast("上传失败：" + errText(e));
+    repBusyOff();   // ★ 失败也要撤遮罩，否则界面被盖住
+    // ★ 2026-10-16：以前直接抛 errText（curl 的原文，用户看不懂）。
+    //   上传失败九成是网络 —— 服务器在境外，设备上的 curl 得靠梯子覆盖到那个域名。
+    const _e = errText(e);
+    const _net = /could not resolve|timed? ?out|Connection|refused|network|unreachable|SSL|TLS|handshake|NOHTTPTOOL/i.test(_e);
+    showToast(_net ? "上传失败 —— 多半是网络。请连上 VPN 再点一次（服务器在境外）"
+                   : "上传失败：" + _e);
   } finally {
     if (btn) btn.disabled = false;
   }

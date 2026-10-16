@@ -48,6 +48,42 @@ if [ -f "$MODDIR/fontctl.sh" ] && [ ! -s "$MODDIR/slots.map" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# ★ 2026-10-16：**升级后清掉陈旧的状态缓存**。
+#   为什么需要：谷歌兼容的状态缓存（$LIB/.gms_status）有效期 6 小时，
+#   旧版本写下的"已被其它工具停用（foreign）"会被新版本继续沿用，
+#   用户升级后打开界面看到的还是错的，得点「重新检测」才刷新
+#   （作者真机实测："开关一次就正常了" —— 正是那次开关把缓存覆盖了）。
+#   这里比对模块版本，变了（= 刚升级/重装）就删掉缓存，让界面重算。
+if [ -f "$MODDIR/module.prop" ]; then
+  _MV=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
+  _LV=$(cat "$LIB/.seen_version" 2>/dev/null | tr -d '\r\n')
+  if [ -n "$_MV" ] && [ "$_MV" != "$_LV" ]; then
+    rm -f "$LIB/.gms_status" "$LIB/.verify.cache" 2>/dev/null
+    printf '%s' "$_MV" > "$LIB/.seen_version" 2>/dev/null
+    printf '%s %s\n' "$(date '+%m-%d %H:%M' 2>/dev/null)" \
+      "模块版本变化：${_LV:-（首次）} → $_MV，已清状态缓存（谷歌兼容/挂载校验）" \
+      >> "$LIB/boot_events.log" 2>/dev/null
+  fi
+fi
+
+# ★ 2026-10-16：**开机完成后再确认一次识别系统**。
+#   为什么要有这一步：post-fs-data 跑得很早，那一刻分区未必都挂好、
+#   getprop 也可能还没就绪 —— 真机实测在那里把澎湃OS 判成了 aosp，
+#   而 current_rom 一旦写错，slots.sh 就会去读 targets/aosp.list（兜底清单），
+#   覆盖范围跟着错（172 → 152）。
+#   这里（service.sh）开机已完成、目录都在，重算一次最准；不一样就修正。
+if [ -f "$MODDIR/common.sh" ] && [ -f "$MODDIR/current_rom" ]; then
+  _R2=$( . "$MODDIR/common.sh" 2>/dev/null; detect_rom 2>/dev/null )
+  _R1=$(tr -d '[:space:]' < "$MODDIR/current_rom" 2>/dev/null)
+  if [ -n "$_R2" ] && [ "$_R2" != "$_R1" ]; then
+    printf '%s' "$_R2" > "$MODDIR/current_rom" 2>/dev/null
+    printf '%s %s\n' "$(date '+%m-%d %H:%M' 2>/dev/null)" \
+      "识别系统已修正：$_R1 → $_R2（开机完成后复算）" >> "$LIB/boot_events.log" 2>/dev/null
+    # 识别变了 → 替换计划要按新识别重建（否则还会用旧清单的槽位）
+    rm -f "$LIB/.verify.cache" 2>/dev/null
+  fi
+fi
+
 # 谷歌字体兼容：GMS（Play 服务）被更新后会把我们对"下载字体组件"的停用**重置**掉
 # —— 表现就是用户反馈的"英数过一阵子又变回谷歌默认"。这里在开机完成后补一次。
 #

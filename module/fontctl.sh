@@ -884,10 +884,31 @@ case "${1:-}" in
     # ★ 2026-10-16：槽位来源拆分（界面显示「系统配置里引用的 / 本模块补充的」）
     #   由 slots.sh 的 slot_plan 在生成计划时写到 slots.sources —— 事后重建不可靠，
     #   因为"来源"只在合并候选那一刻知道。
-    if [ -s "$MODDIR/slots.sources" ]; then
-      _xsx=$(sed -n 's/^x=//p' "$MODDIR/slots.sources" 2>/dev/null | head -n1 | tr -dc '0-9')
-      _xsa=$(sed -n 's/^a=//p' "$MODDIR/slots.sources" 2>/dev/null | head -n1 | tr -dc '0-9')
-      echo "SP=x=${_xsx:-0},a=${_xsa:-0}"
+    # ★ 2026-10-16：改成**实时算**（读 slots.map + slots.marks）。
+    #   原来读 slots.sources，而那是"计划生成那一刻"的存档 —— 真机上它比
+    #   slots.marks 旧，界面就显示成"系统配置里引用的 0 个"。
+    if command -v slot_sources_report >/dev/null 2>&1; then
+      _xss=$(slot_sources_report "$MODDIR" 2>/dev/null)
+      _xsx=$(printf '%s\n' "$_xss" | sed -n 's/^x=//p' | head -n1 | tr -dc '0-9')
+      _xsa=$(printf '%s\n' "$_xss" | sed -n 's/^a=//p' | head -n1 | tr -dc '0-9')
+      _xss2=$(printf '%s\n' "$_xss" | sed -n 's/^s=//p' | head -n1 | tr -dc '0-9')
+      _xso=$(printf '%s\n' "$_xss" | sed -n 's/^o=//p' | head -n1 | tr -dc '0-9')
+      _xsd=$(printf '%s\n' "$_xss" | sed -n 's/^d=//p' | head -n1 | tr -dc '0-9')
+      if [ -n "$_xsx" ]; then
+        # ★ 四路都输出（界面按这四路分别显示）
+        # ★ 2026-10-16：再带上两个数（界面用它显示"模块额外补的"）
+        _xextra=0; _xsym=0
+        if command -v slot_extra_report >/dev/null 2>&1; then
+          _xer=$(slot_extra_report "$MODDIR" 2>/dev/null)
+          case "$_xer" in *extra=*) _xextra=${_xer#*extra=}; _xextra=${_xextra%%[!0-9]*} ;; esac
+          case "$_xer" in *symskip=*) _xsym=${_xer#*symskip=}; _xsym=${_xsym%%[!0-9]*} ;; esac
+        fi
+        echo "SP4=x=${_xsx:-0},s=${_xss2:-0},o=${_xso:-0},d=${_xsd:-0},extra=${_xextra:-0},symskip=${_xsym:-0}"
+        echo "SP=x=${_xsx:-0},a=$(( ${_xss2:-0} + ${_xso:-0} + ${_xsd:-0} ))"
+      else
+        echo "SP="
+        echo "SP4="
+      fi
     else
       echo "SP="
     fi

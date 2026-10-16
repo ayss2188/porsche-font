@@ -102,12 +102,22 @@ jobs:
         run: |
           set -e
           VER="${{ steps.ver.outputs.ver }}"
-          # 按**版本号**取，不按"第一段"取：以后在文件顶部加别的段落也不会串味。
-          awk -v v="## $VER" '
-            $0 == v { on = 1; next }
-            on && /^## / { exit }
-            on { print }
-          ' CHANGELOG.md > dist/notes.md
+          # ★ 2026-10-17 改：**优先用作者写的发布文案 UPDATE-<版本>.md**
+          #   以前只从 CHANGELOG 抽"## 版本"那一段，而 CHANGELOG 是流水账，
+          #   里面没有「怎么升级」「遇到问题怎么办」这两节 ——
+          #   Release 页面就比作者写的文案少了结尾。
+          if [ -s "UPDATE-$VER.md" ]; then
+            cp "UPDATE-$VER.md" dist/notes.md
+            echo "用 UPDATE-$VER.md 作为 Release 说明"
+          else
+            # 按**版本号**取，不按"第一段"取：以后在文件顶部加别的段落也不会串味。
+            awk -v v="## $VER" '
+              $0 == v { on = 1; next }
+              on && /^## / { exit }
+              on { print }
+            ' CHANGELOG.md > dist/notes.md
+            echo "仓库里没有 UPDATE-$VER.md，退回到从 CHANGELOG 抽取"
+          fi
           if [ ! -s dist/notes.md ]; then
             # 这里必须**直接失败**：没有本版说明 = CHANGELOG 没更新，
             # 管理器弹窗会是一片空白，不如现在就停下来。

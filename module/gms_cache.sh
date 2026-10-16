@@ -240,23 +240,47 @@ do_on() {
 
 do_off() {
   local n=0 t s rev="$LIB/.gms_bridge.rev.$$" keep="$LIB/.gms_bridge.keep.$$"
-  [ -f "$JOURNAL" ] || { echo "没有需要还原的缓存挂载"; return 0; }
-  [ -n "$UMNT" ] || { echo "ERROR:找不到 umount 命令"; return 1; }
-  sed '1!G;h;$!d' "$JOURNAL" > "$rev" 2>/dev/null || cp "$JOURNAL" "$rev" 2>/dev/null
-  : > "$keep" 2>/dev/null
-  while IFS='|' read -r t s; do
-    [ -n "$t" ] || continue
-    if tmo 10 "$UMNT" "$t" 2>/dev/null; then
-      n=$((n + 1)); blog "还原：$t"
-    else
-      printf '%s|%s\n' "$t" "$s" >> "$keep" 2>/dev/null
-      blog "还原失败：$t"
-    fi
-  done < "$rev"
-  rm -f "$rev" 2>/dev/null
-  # 账本 = 只留"没卸掉"的那些（一次重写，别逐行删 —— 那样容易留下半截账本）
-  if [ -s "$keep" ]; then mv -f "$keep" "$JOURNAL" 2>/dev/null; else rm -f "$keep" "$JOURNAL" 2>/dev/null; fi
-  printf 'OK：已还原 %s 个挂载\n' "$n"
+  # ★ 2026-10-16 改：账本不在时**也要**清理克隆与日志（原来直接 return 0，
+  #   于是"只剩残留文件、账本已没了"的机器点关闭之后什么都不清）。
+  if [ -f "$JOURNAL" ]; then
+    [ -n "$UMNT" ] || { echo "ERROR:找不到 umount 命令"; return 1; }
+    sed '1!G;h;$!d' "$JOURNAL" > "$rev" 2>/dev/null || cp "$JOURNAL" "$rev" 2>/dev/null
+    : > "$keep" 2>/dev/null
+    while IFS='|' read -r t s; do
+      [ -n "$t" ] || continue
+      if tmo 10 "$UMNT" "$t" 2>/dev/null; then
+        n=$((n + 1)); blog "还原：$t"
+      else
+        printf '%s|%s\n' "$t" "$s" >> "$keep" 2>/dev/null
+        blog "还原失败：$t"
+      fi
+    done < "$rev"
+    rm -f "$rev" 2>/dev/null
+    # 账本 = 只留"没卸掉"的那些（一次重写，别逐行删 —— 那样容易留下半截账本）
+    if [ -s "$keep" ]; then mv -f "$keep" "$JOURNAL" 2>/dev/null; else rm -f "$keep" "$JOURNAL" 2>/dev/null; fi
+  fi
+
+  # ★ 2026-10-16 加：**把克隆文件与桥接日志也清掉**。
+  #   为什么必须做（作者问"关闭之后还检测得到吗"）：
+  #     gms_cache.sh 桥接时会造 $LIB/.clone.<家族名>.ttf
+  #     （我们的字形 + Google Sans 的 name 表）；
+  #     挂载卸掉之后这些文件就没用了，但原来**留着** ——
+  #     是"这个模块做过谷歌字体桥接"的直接物证，
+  #     任何人 ls 一下字体库目录就看得到。
+  #   注意：只删 .clone.*，不碰用户的字体文件（f*.ttf）与库里的其它东西。
+  rm -f "$LIB"/.clone.*.ttf 2>/dev/null
+  # 顺带把"启用标志"也删掉（正常路径是 google_font.sh restore 删的，
+  # 但直接 `sh gms_cache.sh off` 时也得删 —— 否则开机脚本还会照挂）
+  rm -f "$LIB/.gms_cache_on" 2>/dev/null
+  rm -f "$LIB"/.gms_bridge.rev.* "$LIB"/.gms_bridge.keep.* 2>/dev/null
+  # 桥接日志：留着等于留了个"我做过什么"的日记（关掉就一起清）
+  rm -f "$LIB/.gms_bridge.log" 2>/dev/null
+
+  if [ "$n" -gt 0 ]; then
+    printf 'OK：已还原 %s 个挂载（克隆文件与日志已清理）\n' "$n"
+  else
+    printf 'OK：没有需要还原的挂载（残留文件已清理）\n'
+  fi
   return 0
 }
 

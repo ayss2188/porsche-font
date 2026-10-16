@@ -62,8 +62,22 @@ getp() { getprop "$1" 2>/dev/null | tr -d '\r\n'; }
 #   本函数每个属性只取一次（PROP_CACHE 缓存整个 getprop 输出），
 #     比原来十几次 getprop 进程快，也不会同一台机器上两次读不一致。
 _xm_exclusive_font() {
-  local d f b
-  for d in $(slot_dirs 2>/dev/null); do
+  local d f b dirs
+  # ★ 2026-10-16 加保险（真机 v1.2.6 误判成"原生/类原生"）：
+  #   原先只用 $(slot_dirs) 找目录。而 slot_dirs 有进程内缓存，
+  #   安装最早期（customize.sh 一开始的 detect_rom）调用时若分区还没就绪，
+  #   会算出**空**并被缓存住 → 这里就一个目录都扫不到 → 小米机器被认成类原生。
+  #   （那个缓存问题已单独修了，但"认系统"这件事太关键，不该只剩一条命。）
+  #   所以这里**直接扫最常见的字体目录**，不经过任何缓存/函数。
+  dirs="$(slot_dirs 2>/dev/null)
+/system/fonts
+/system_ext/fonts
+/product/fonts
+/vendor/fonts
+/odm/fonts
+/mi_ext/fonts
+/my_product/fonts"
+  for d in $dirs; do
     [ -d "$FSROOT$d" ] || continue
     for f in "$FSROOT$d"/*.ttf "$FSROOT$d"/*.otf "$FSROOT$d"/*.ttc \
              "$FSROOT$d"/*.TTF "$FSROOT$d"/*.OTF; do
@@ -81,9 +95,17 @@ _xm_exclusive_font() {
 # ---------------------------------------------------------------------------
 _rom_props() {
   # 一次读完全部属性并缓存（getprop 不带参数 = 全量转储）。之后查询走内存，不起进程。
-  if [ -z "${PROP_ALL+x}" ]; then
-    PROP_ALL=$(getprop 2>/dev/null | tr -d '\r')
-    [ -n "$PROP_ALL" ] || PROP_ALL=" "
+  # ★ 2026-10-16 修（真机 v1.2.6 把澎湃OS 判成 aosp）：
+  #   原来读空时把 PROP_ALL 钉成 " "（一个空格）—— 那之后**永远**读不到属性，
+  #   因为缓存已经"有值"了。开机最早期（post-fs-data）如果 getprop 一时不可用，
+  #   整场运行就再也读不到 ro.product.brand → 小米那家判定被整段跳过 → 落到 aosp。
+  #   现在：读空就不缓存，下次调用重试（代价只是一次 getprop）。
+  if [ -z "${PROP_ALL+x}" ] || [ -z "${PROP_ALL// /}" ]; then
+    local _pa
+    _pa=$(getprop 2>/dev/null | tr -d '\r')
+    if [ -n "${_pa// /}" ]; then
+      PROP_ALL="$_pa"
+    fi
   fi
 }
 # 查一个属性（结果写 PROP_V）；从缓存里按行匹配，纯 shell，不起进程
@@ -134,6 +156,20 @@ detect_rom() {
     *[Xx]iaomi*|*[Rr]edmi*|*[Pp][Oo][Cc][Oo]*|*[Xx]IAOMI*|*[Rr]EDMI*) weak=1 ;;
     *) weak="" ;;
   esac
+  # ★ 2026-10-16 加：**属性一个都没读到**时的兜底。
+  #   真机 v1.2.6 现场：这一刻 getprop 全量转储是空的（或读不到 brand），
+  #   weak 不成立 → 小米那一整段被判据跳过 → 直接落到 aosp
+  #   → current_rom 写错 → 之后去读 targets/aosp.list 而不是 hyperos.list
+  #     （计划从 172 变 152，覆盖范围跟着错）。
+  #   现在：属性读不到时**不武断**，改用目录实证 —— 有小米专属路径就是小米。
+  #   宁可认成 hyperos（多换几个槽位），也别认成 aosp（少换、清单也错）。
+  if [ -z "$vbrand" ] && [ -z "$vmanu" ]; then
+    if _rom_has_dir /product/etc/mi_fonts_customization.xml /product/etc/misans_variable_fonts.xml \
+                     /mi_ext /system_ext/etc/hyper_fonts.xml /system_ext/etc/miui_fonts.xml \
+                     /system_ext/priv-app/MiuiSystemUI; then
+      echo "hyperos"; return 0
+    fi
+  fi
   if [ -n "$weak" ]; then
     # ★ 2026-10-15 真机修正（从主项目同步）：**小米这一家也要求实证**，
     #   不再"品牌是小米 + 有强属性"就认。

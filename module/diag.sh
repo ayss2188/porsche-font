@@ -1553,6 +1553,7 @@ sec_unadapted() {
     echo "  （另有 $_nx 个是其它文字体系/符号字体，被排除是正确的，未列出）"
   fi
   hr
+  d2_suggest_targets   # ★ 2026-10-16：建议补进清单的字体（作者看）
 }
 
 
@@ -3680,3 +3681,63 @@ SAVED="$LIB/font_diag.txt"
     ;;
 esac
 exit 0
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-16 新增（作者要求）：**建议补进清单的字体**
+#
+#   背景：`targets/<rom>.list` 是"每个 ROM 手工核过的额外要换的白名单"。
+#   它的特殊价值在于**绕过 slot_dir_names 的文件名过滤** ——
+#   mono / serif / clock 这类名字，扫描会跳过，但清单点名就会换
+#   （实测量过：带清单 293 个槽位、清空清单 279 个，差的 14 个全是这类）。
+#
+#   问题：以前报告看不出"哪些该补进清单" —— 因为报告的 `_should` 判据把
+#   mono/serif/clock 一律归成"正常排除"，跟清单的判据不是一套标准。
+#
+#   这一节用**差集**把候选挑出来：
+#     目录里有 + 角色放行 + 不在计划里
+#     → 只可能是被文件名过滤挡住的 → 补进清单就能换
+#   然后由作者判断"是不是机型级"（别的同 ROM 机器也有 → 补；只这台有 → 不补）。
+# ---------------------------------------------------------------------------
+d2_suggest_targets() {
+  local n=0 nm role
+  [ -n "${D2_EXIST_NAMES:-}" ] || return 0
+  [ -n "${D2_PLAN_NAMES:-}" ] || return 0
+  echo
+  echo "  【建议补进清单的字体】"
+  echo "    判据：目录里有 + 角色放行 + 不在当前计划 → 被文件名过滤挡住的"
+  echo "    怎么用：这些补进 targets/<rom>.list 后就会参与替换。"
+  echo "            「是不是机型级」由你判断 —— 别的同 ROM 机器也有 → 补；只这台有 → 不用补。"
+  echo
+  printf '    %-42s %-10s %s\n' "字体文件" "角色" "说明"
+  printf '    %-42s %-10s %s\n' "------------------------------------------" "----------" "----------------------"
+  for nm in $D2_EXIST_NAMES; do
+    [ -n "$nm" ] || continue
+    # ① 在计划里 → 已经会换，跳过
+    d2_in "$D2_PLAN_NAMES" "$nm" && continue
+    # ② 角色判定放行吗（放行 = 换了是安全的）
+    _role_set "$(_lc "$nm")" 2>/dev/null
+    role="$ROLE"
+    _role_wanted "$role" all 0 0 "$nm" 0 2>/dev/null || continue
+    # ③ 排除"本来就是符号类、且永远不换"的（sym 会被 _role_wanted 挡掉，这里兜一层）
+    case "$role" in sym) continue ;; esac
+    n=$((n + 1))
+    _why="被文件名过滤挡住"
+    _l=$(printf '%s' "$nm" | tr 'A-Z' 'a-z')
+    # ⚠️ 顺序有讲究：MiClockMono 同时含 clock 和 mono，
+    #   先判 clock 才不会被说成"等宽"（真机上这类名字很多）
+    case "$_l" in
+      *clock*)  _why="时钟（扫描按名字跳过）" ;;
+      *serif*)  _why="衬线（扫描按名字跳过）" ;;
+      *mono*)   _why="等宽（扫描按名字跳过）" ;;
+      *emoji*|*symbol*) _why="符号（扫描按名字跳过）" ;;
+    esac
+    printf '    %-42s %-10s %s\n' "$nm" "$role" "$_why"
+  done
+  if [ "$n" = 0 ]; then
+    echo "    （没有 —— 目录里的候选都已在计划里，或都被角色规则正确排除）"
+  else
+    echo
+    echo "    共 $n 个候选。"
+  fi
+  echo
+}

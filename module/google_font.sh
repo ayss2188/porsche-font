@@ -15,6 +15,11 @@
 # 用法：sh google_font.sh status [fresh] | enable | restore | reconcile | diag | uninstall
 
 LIB=${LIB:-/data/adb/custom_font_lib}
+# ★ 2026-10-16 修：这里原来没有 MODDIR，而 do_diag 里用 [ -f "$MODDIR/gms_cache.sh" ]
+#   判断"有没有 gms_cache.sh"—— MODDIR 为空时变成查 /gms_cache.sh，
+#   必然不存在 → 报告里永远打印"没有 gms_cache.sh（装的还是旧版包）"，
+#   跟同一份报告的文件列表自相矛盾（文件明明在）。
+MODDIR=${MODDIR:-${0%/*}}
 JOURNAL="$LIB/.gms_journal.conf"      # user= / original= / changedAt=
 STATUS_CACHE="$LIB/.gms_status"       # 状态缓存（dumpsys 慢，界面每次打开不能都跑）
 CACHE_ON_FLAG="$LIB/.gms_cache_on"    # ★ 缓存桥接的启用标志（gms_cache.sh 开机时看它）
@@ -110,7 +115,25 @@ gms_present() {
 # ---------------------------------------------------------------------------
 is_disabled() {
   [ -n "$DUMP" ] || return 1
-  tmo 12 "$DUMP" package "$GMS" 2>/dev/null | grep -i -A60 "disabledComponents" | grep -q "$PROVIDER"
+  # ★ 2026-10-16 修（真机 v1.2.6 现场）：
+  #   原来用 `grep -A60 disabledComponents` —— 窗口行数是个硬编码的赌注：
+  #   小米/HyperOS 的停用清单很长，FontsProvider 排在窗口外就找不到
+  #   → 判成"没停用" → do_status 去问账本 → 账本没有
+  #   → 显示"已被其它工具停用（本模块不接管）"，跟同一份报告里
+  #      「组件状态=已停用」自相矛盾（作者反馈的就是这个）。
+  #   试过 -A400：1200 行时仍漏。又试过"按小节边界"：真实 dumpsys 缩进不规则，
+  #   会把段内的行判成段外。所以最后用**最不容易错**的写法：
+  #     有 `disabledComponents:` 段头 + 段头之后出现过 provider 名 = 已停用。
+  #   同一份 dump 只跑一次，取回内存里判（原来跑两次，更慢）。
+  local d
+  d=$(tmo 12 "$DUMP" package "$GMS" 2>/dev/null)
+  [ -n "$d" ] || return 1
+  printf '%s\n' "$d" | awk -v want="$PROVIDER" '
+    /^[[:space:]]*disabledComponents[[:space:]]*:/ { hdr = 1; next }
+    hdr && index($0, want) > 0 { found = 1 }
+    { if (index($0, want) > 0) seen = 1 }
+    END { exit((found || (hdr && seen)) ? 0 : 1) }
+  '
 }
 
 cached_status() {
