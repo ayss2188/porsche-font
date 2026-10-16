@@ -1196,14 +1196,27 @@ slot_dir_names() {
 }
 
 # ---------------------------------------------------------------------------
+# 槽位来源标记表的固定路径（跨子 shell 用；见 slot_candidates 里的说明）
+_SLOT_MARKS_FILE="${TMPDIR:-/data/local/tmp}/.cfs_slotmarks"
+
 slot_candidates() {
   local moddir="$1" t name l d dirs
   t="${TMPDIR:-/data/local/tmp}/.cand.$$"
   mkdir -p "${t%/*}" 2>/dev/null
   # ★ 第四层：目录里实际存在的字体文件名（通用，不依赖 ROM 清单）
   #   加在最后，靠 sort -u 去重；角色判定仍在下游统一做
-  { slot_xml_names; slot_static_names "$moddir"; slot_oem_names "$moddir"; slot_dir_names; } \
-    | grep -v '^[[:space:]]*$' | sort -u > "$t"
+  # ★ 2026-10-16：四路**分别**落盘并打上来源标记，再合并。
+  #   以前是一起管道进 sort -u —— 那一步把"这个名字是从哪来的"丢掉了，
+  #   于是界面只能显示一个总数（用户看着"170 多个槽位"不知道为什么）。
+  #   现在只多写两个临时文件，行为与合并顺序完全不变。
+  _mj="$t.mark"
+  : > "$_mj"
+  slot_xml_names               | sed 's/^/x /' >> "$_mj"
+  slot_static_names "$moddir"  | sed 's/^/s /' >> "$_mj"
+  slot_oem_names "$moddir"     | sed 's/^/o /' >> "$_mj"
+  slot_dir_names               | sed 's/^/d /' >> "$_mj"
+  grep -v '^[[:space:]]*$' < "$_mj" | sort -u -k2,2 > "$t.marks"
+  sed 's/^[xsod] //' "$t.marks" | grep -v '^[[:space:]]*$' | sort -u > "$t"
   tr '[:upper:]' '[:lower:]' < "$t" > "$t.l"
   dirs=$(slot_dirs)
   exec 3< "$t"; exec 4< "$t.l"
@@ -1215,7 +1228,11 @@ slot_candidates() {
     done
   done
   exec 3<&- 4<&-
-  rm -f "$t" "$t.l" 2>/dev/null
+  # 标记表留给 slot_plan 统计用（按名字查来源）。
+  # ★ 用**固定路径**，不能靠变量传递 —— slot_candidates 是被 $(...) 调用的，
+  #   跑在子 shell 里，里面设的变量传不到调用方（我第一版就是这么错的）。
+  cp -f "$t.marks" "$_SLOT_MARKS_FILE" 2>/dev/null
+  rm -f "$t" "$t.l" "$t.marks" 2>/dev/null
 
   # .ttc 合集槽位（三星这类机器的中文，见 common.sh 的 ttc_enabled）：
   # 三星简中来自 .ttc 合集，单文件字体顶不了 —— 由 fontctl 把用户的字体包成
@@ -1385,7 +1402,7 @@ slot_plan() {
   #   不再有"保留 XX"开关、也不再按字形自动让路（作者定的：不给开关，省心）。
   #   参数 scope/keep_lang/keep_special 保留只为兼容旧调用方（fontctl / diag）。
   local moddir="$1" scope="${2:-all}" keep_lang="${3:-0}" keep_special="${4:-0}" keep_lock="${5:-0}"
-  local role d name base
+  local role d name base _sp="${TMPDIR:-/data/local/tmp}/.splan.$$"
   #------------------------------------------------------------------------
   # 唯一的**极端保护**：字体里完全没有中文字形时，中文槽位一个都不动。
   #   为什么留这一条：那种情况下替换会把整个界面（含 WebUI 自己）变成方块，
@@ -1419,7 +1436,34 @@ slot_plan() {
   # （否则「已替换槽位」会虚高，挂载日志里也会多出重复的"跳过"）。
   # 注意：不能用文件名去重 —— /product/fonts/X 与 /system/fonts/X 是两条合法槽位，
   # 按文件名去重会把它们误删（真机报告里 same=N 那批正是这种成对槽位）。
-  { printf '%s\n' "$base"; theme_slots "$base"; } | awk '!seen[$0]++'
+  { printf '%s\n' "$base"; theme_slots "$base"; } | awk '!seen[$0]++' > "$_sp"
+  # ★ 2026-10-16：算出"最终计划里，各来源各占多少"并落盘，供界面显示。
+  #   · x = 系统字体配置里引用的（xml）      → 界面叫「系统配置里引用的」
+  #   · s/o/d = 本模块补充的（机型清单/厂商命名/目录扫描） → 界面叫「本模块补充的」
+  #   只统计**进了计划**的：被 _role_wanted 排除掉的不算（否则数字会比槽位数还大）。
+  if [ -f "$_SLOT_MARKS_FILE" ] && [ -s "$_sp" ]; then
+    awk -v map="$_SLOT_MARKS_FILE" -v out="$MODDIR/slots.sources" '
+      BEGIN {
+        while ((getline line < map) > 0) {
+          i = index(line, " "); if (i < 2) continue
+          src = substr(line, 1, i - 1); nm = substr(line, i + 1)
+          if (!(nm in S)) S[nm] = src
+        }
+        close(map)
+      }
+      {
+        # 计划行格式：<角色> <目录>/<文件名>
+        n = split($0, a, "/"); nm = a[n]
+        s = (nm in S) ? S[nm] : "?"
+        if (s == "x") X++; else if (s == "?") U++; else A++
+        T++
+      }
+      END {
+        printf "T=%d\nx=%d\na=%d\nu=%d\n", T + 0, X + 0, A + 0, U + 0 > out
+      }' "$_sp" 2>/dev/null
+  fi
+  cat "$_sp"
+  rm -f "$_sp" 2>/dev/null
 }
 
 # 诊断：按角色统计设备上"候选且存在"的槽位数量
