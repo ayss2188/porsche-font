@@ -54,6 +54,9 @@ if [ -f "$MODDIR/.booting" ]; then
     echo none > "$MODDIR/pending_font"
     echo none > "$MODDIR/active_font"
     echo none > "$LIB/last_selection" 2>/dev/null
+    # ⚠ 刻意**不动** $LIB/.last_good —— 那是"用户原来在用哪套"的唯一保险。
+    #   救援路径清的是"当前生效"（确实没字体重了，该清）；
+    #   而 .last_good 是历史，留着下次升级才能把用户的选择恢复回来（B1）。
     touch "$MODDIR/rescued"
     rm -f "$MODDIR/.booting"
     # -------------------------------------------------------------------------
@@ -88,6 +91,20 @@ if [ -f "$MODDIR/.booting" ]; then
 fi
 
 # 只有真的应用了字体才需要看守
+# ★ 2026-10-16（B3）：重算一次"识别系统"。
+#   原来 current_rom 只在**安装时**写一次（customize.sh），之后没人更新 ——
+#   那次安装若 detect_rom 出过一次偏差，界面就一直显示错的系统名（真机实测过）。
+#   这里每次开机重算并写回：几毫秒的成本，换来永远正确。
+#   ⚠ 只在结果非空时写，避免把好值覆盖成空。
+_NEWROM=$(detect_rom 2>/dev/null)
+case "$_NEWROM" in
+  ""|*[!a-z]*) ;;                       # 空值/异常值 → 保持原样
+  *) [ "$_NEWROM" = "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")" ] || {
+       printf '%s' "$_NEWROM" > "$MODDIR/current_rom" 2>/dev/null
+       beat post-fs-data "识别系统已重算：$_NEWROM"
+     } ;;
+esac
+
 P=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
 case "$P" in ""|none) exit 0 ;; esac
 # 正在关机/重启：别挂载，直接走
