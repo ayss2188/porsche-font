@@ -108,6 +108,27 @@ _pick() {   # $1=文件；echo 出值（空/none 视为无值）
 LAST=$(_pick "$LIB/last_selection")
 [ -n "$LAST" ] || LAST=$(_pick "$OLD/active_font")     # ★ 当前真正在用的
 [ -n "$LAST" ] || LAST=$(_pick "$OLD/pending_font")
+# ★ 2026-10-16（B1）兜底一：.last_good —— 最近一次**真正生效过**的字体。
+#   它刻意不被 apply none 覆盖，所以能区分"记录丢了"和"确实选了无字体"。
+#   （用户真的选了无字体时它已被删掉，这里自然拿不到 → 保持 none，符合用户意图）
+[ -n "$LAST" ] || LAST=$(_pick "$LIB/.last_good")
+# 兜底二：三个来源都没有、但库里明明有字体 → 挑"最近用过的那个"，
+#   而不是直接 apply none（旧行为会让用户的字体凭空消失，真机实测过）。
+#   判据：有 .meta 的 f*.ttf 里 mtime 最新的 —— .meta 是"导入过"的标志。
+if [ -z "$LAST" ]; then
+  _cand=$(ls -t "$LIB"/f*.ttf 2>/dev/null | head -n 20 | while IFS= read -r _f; do
+    _i=${_f##*/}; _i=${_i%.ttf}
+    [ -f "$LIB/$_i.meta" ] || continue
+    printf '%s' "$_i"; break
+  done)
+  if [ -n "$_cand" ]; then
+    LAST="$_cand"
+    ui_print "  ⚠ 没找到"
+    ui_print "     "上次用哪套" 的记录"
+    ui_print "     （可能是上一次切换失败留下的）"
+    ui_print "     已按最近用过的恢复：$_cand"
+  fi
+fi
 [ -n "$LAST" ] || LAST=none
 
 # ★★ 关键一步：如果上面已经**认出"用户上次用的是哪一套自带配色"**（BUILTIN_PREV），
