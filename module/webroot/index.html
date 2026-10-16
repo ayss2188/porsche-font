@@ -585,6 +585,12 @@ try {
       <span class="label">已替换槽位</span>
       <span class="value" id="slotLabel">-</span>
     </div>
+        <!-- ★ 2026-10-16 作者反馈：光看"172 个槽位"不知道为什么这么多。
+             拆成"系统配置里引用的 / 本模块补充的"，并说明我们不改系统配置。 -->
+        <div class="status-row" id="slotSrcRow" style="display:none">
+          <span class="label" style="font-size:12px">其中：系统配置里引用的</span>
+          <span class="value" id="slotSrcLabel" style="font-size:12px"></span>
+        </div>
     <div class="status-row">
       <span class="label">实际挂载</span>
       <span class="value" id="mountLabel">-</span>
@@ -1299,6 +1305,21 @@ function applyStatus(st) {
     const rom = g("R").trim();
     const nSlots = g("N").trim();
     setValue("slotLabel", nSlots && +nSlots > 0 ? nSlots + " 个" : "0（未替换）");
+    // ★ 槽位来源拆分（作者反馈"170 多个看着奇怪"）：SP=x=98,a=74
+    //   x = 系统字体配置里引用的；a = 本模块补充的（机型清单/厂商命名/目录扫描）
+    //   没有这个数据（旧计划、还没重新应用）就整行隐藏，不显示误导性的 0。
+    (function () {
+      const row = document.getElementById("slotSrcRow");
+      if (!row) return;
+      const sp = g("SP").trim();
+      const mx = /x=(\d+)/.exec(sp);
+      const ma = /a=(\d+)/.exec(sp);
+      if (!nSlots || !mx) { row.style.display = "none"; return; }
+      const x = +mx[1], a = ma ? +ma[1] : 0;
+      row.style.display = "";
+      setValue("slotSrcLabel",
+        x + " 个" + (a > 0 ? "（其余 " + a + " 个为本模块补充）" : ""));
+    })();
     document.getElementById("rescueBanner").classList.toggle("show", g("X") === "1");
     document.getElementById("stoppedBanner").classList.toggle("show", g("RS") === "1");
     document.getElementById("missedBanner").classList.toggle("show", g("MM") === "1");
@@ -3382,6 +3403,7 @@ function parseKV(out) {
 }
 
 async function checkUpdate(manual) {
+  ensureBootId();        // 取开机标识（判断"装完到底重启没有"）
   const btn = document.getElementById("checkBtn");
   const lbl = document.getElementById("newVerLabel");
   btn.disabled = true;
@@ -3421,7 +3443,22 @@ function updateDoneCode() { try { return localStorage.getItem(updateDoneKey()) |
 function setUpdateDone(code) {
   try { if (code) localStorage.setItem(updateDoneKey(), String(code)); else localStorage.removeItem(updateDoneKey()); } catch (e) {}
 }
+// ★ 2026-10-16：再记"装完那一刻的开机标识"。
+//   为什么需要：pendingReboot 原先只看"当前版本 == 最新版本"，
+//   而用户**本来就在最新版**时它永远成立 → 永远显示"已安装，待重启"，
+//   一直催他重启（真机实测踩到）。正确判据是比对 boot id：
+//     装完记下 bootId，刷新页面时比对 —— 不一样 = 已经重启过了 → 不再催。
+//   ⚠ 这两个函数在主项目里是 3449/3450 行，子项目之前漏了 ——
+//     会导致 renderUpdate 一跑就 ReferenceError，整个更新显示崩掉
+//     （矩阵测试 A1 抓到）。
+function updateDoneBoot() { try { return localStorage.getItem(updateDoneKey() + "_boot") || ""; } catch (e) { return ""; } }
+function setUpdateDoneBoot(b) {
+  try { if (b) localStorage.setItem(updateDoneKey() + "_boot", String(b)); else localStorage.removeItem(updateDoneKey() + "_boot"); } catch (e) {}
+}
 // 安装完成后：把「下载并安装」变成红色「立即重启生效」
+// 记下"装完那一刻"的开机标识 —— 重启后 boot_id 会变，
+// 界面据此知道"已经重启过了"，不再催重启（见 renderUpdate）。
+function noteInstallBoot() { return ensureBootId().then(b => { if (b) setUpdateDoneBoot(b); return b; }); }
 function applyRebootButton(ver) {
   const btn = document.getElementById("installBtn");
   btn.disabled = false;
@@ -3533,6 +3570,21 @@ function startUpdateProgress() {
   return () => { stop = true; };
 }
 
+// ★ 2026-10-16：取一次"开机标识"并缓存。
+//   用途：判断"装完之后到底重启过没有"（见 renderUpdate 里的 pendingReboot）。
+//   一次开机内 boot_id 恒定，所以取到就存住，不再重复调 shell。
+let __bootIdCache = "";
+async function ensureBootId() {
+  if (__bootIdCache) return __bootIdCache;
+  try {
+    const r = await ksuExec(`sh ${MODDIR}/update.sh bootid`);
+    const v = (r || "").trim().split("\n").pop().trim();
+    if (v) __bootIdCache = v;
+  } catch (e) {}
+  window.__bootId = __bootIdCache;
+  return __bootIdCache;
+}
+
 function renderUpdate(u) {
   const lbl = document.getElementById("newVerLabel");
   updateInfo = u;
@@ -3547,9 +3599,27 @@ function renderUpdate(u) {
   const curVer = (document.getElementById("curVerLabel").textContent || "").trim();
   //   （界面上只有 curVerLabel，没有单独的 versionCode 元素 —— 所以只比版本号。）
   const runningNew = !!u.NEW_VER && curVer === u.NEW_VER;
-  const pendingReboot = (has && !!done && done === String(u.NEW_CODE)) || runningNew;
+  // ★ 关键补充：runningNew 只能说明"现在跑的就是最新版"，
+  //   说明不了"还在等重启"。要区分这两种情况，只能看**开机标识变没变**。
+  //   bootId 是 update.sh bootid 拿到的当前值；doneBoot 是装完那一刻记下的值。
+  //   · 两者相同  → 从那以后没重启过 → 真的在等重启
+  //   · 两者不同  → 已经重启过了     → 就是在最新版上，不该再提示重启
+  const bootId = (window.__bootId || "").trim();
+  const doneBoot = updateDoneBoot();
+  // ★ 2026-10-16 单元测试抓到的根因：以前写的是 `runningNew && !rebootedSince`，
+  //   而"没有记录"时 rebootedSince 也是 false → !false = true → 误判成"待重启"。
+  //   等于把**"不知道"**当成了**"还没重启"**，于是永远催你重启
+  //   （真机现象：明明已经是最新版，点检查更新就弹"已安装，待重启"）。
+  //   正确做法：要**主动证明**"还没重启"才提示重启 ——
+  //     · 有记录且 boot id 一样 → 证明没重启过 → 提示（对）
+  //     · 有记录且 boot id 变了 → 证明重启过了 → 不提示（对）
+  //     · 没记录               → 无法证明      → **不提示**（宁可不催，也不让人白重启）
+  const bootUnchanged = !!(bootId && doneBoot && bootId === doneBoot);
+  const pendingReboot =
+    (has && !!done && done === String(u.NEW_CODE)) ||
+    (runningNew && bootUnchanged);
   if (pendingReboot) setUpdateDone(u.NEW_CODE);   // 补记，刷新/重启后也稳
-  else if (!has) setUpdateDone("");                // 真跑上新版且没在等重启 → 清掉
+  else if (!has) { setUpdateDone(""); setUpdateDoneBoot(""); }   // 真跑上新版且没在等重启 → 清掉
   setValue("newVerLabel", pendingReboot ? u.NEW_VER + "（已安装，待重启）"
     : has ? u.NEW_VER + "（可更新）" : u.NEW_VER + "（已是最新）");
   lbl.classList.remove("ok", "warn", "off");
@@ -3616,6 +3686,11 @@ async function installUpdate() {
       const ver = updateInfo.NEW_VER;
       updProg("安装完成：" + ver + "，点红色按钮重启生效", 1);
       setUpdateDone(updateInfo.NEW_CODE);
+      // ★ 2026-10-16 矩阵测试（B1）抓到：装完之后**没重画上面那行**，
+      //   于是它一直停在装之前的「（可更新）」—— 用户会以为没装上。
+      //   这里等 noteInstallBoot 把"装完那一刻的开机标识"记好，再重画一次；
+      //   顺序不能反：boot 记录还没写就去重画，判据会算成"无法证明没重启"。
+      noteInstallBoot().then(() => renderUpdate(updateInfo));
       applyRebootButton(ver);
       document.getElementById("updateBanner").classList.remove("show");
       showToast("已安装 " + ver + "，点红色按钮重启生效");
