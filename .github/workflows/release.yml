@@ -10,12 +10,12 @@ permissions:
 
 env:
   # ⚠️ 这里指向「字体素材」Release 的附件（三合一 zip，里面是 profiles/*.ttf）。
-  #    fonts-v2 = **修好字体身份**的那一版（v3.6 起必须用这个）：
+  #    fonts-v4 = 修好 PostScript 名的那一版（v4.3.5 起必须用这个）：
   #      旧版三份字体的 name 表是坏的（postscript 名 = "未定义"），
   #      一加 ColorOS 这类"按 postscriptName 找字体"的 ROM 会满屏方块。
   #      v1 仍然在线（老 tag 的包要能重打），但**不要再退回去**。
   #    换 fonts-v2 之前请确认该 Release 已经建好、附件已上传，否则 CI 会在取字体那步失败。
-  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v3/porsche-font-profiles-v3.zip"
+  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v4/porsche-font-profiles-v4.zip"
 
 jobs:
   build:
