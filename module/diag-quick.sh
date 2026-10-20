@@ -208,6 +208,25 @@ build() {
   for f in /data/system/theme/fonts/*.ttf /data/system/theme/fonts/*.otf; do
     [ -f "$f" ] && { printf '  ! 主题字体: %s\n' "$(ls -1 /data/system/theme/fonts 2>/dev/null | head -n 6 | tr '\n' ' ')"; any=1; break; }
   done
+  # ColorOS 主题字体桥接目录：只报"有普通文件"的情况（那些我们确实没替换）
+  if [ -d /data/format_unclear/font ]; then
+    _of=$(ls -1 /data/format_unclear/font 2>/dev/null | grep -Ei '\.(ttf|otf|ttc)$' | head -n 8)
+    if [ -n "$_of" ]; then
+      _on=$(printf '%s\n' "$_of" | grep -c . 2>/dev/null); [ -n "$_on" ] || _on=0
+      _ol=0
+      while IFS= read -r _n; do
+        [ -n "$_n" ] || continue
+        [ -L "/data/format_unclear/font/$_n" ] && _ol=$((_ol + 1))
+      done <<EOF_OQ
+$_of
+EOF_OQ
+      _of2=$((_on - _ol))
+      if [ "$_of2" -gt 0 ]; then
+        printf '  ! ColorOS 主题字体目录 /data/format_unclear/font：%s 个条目，其中 %s 个普通文件（本模块没替换）\n' "$_on" "$_of2"
+        any=1
+      fi
+    fi
+  fi
   [ -e "$MODDIR/disable" ] && { printf '  ! 模块被禁用\n'; any=1; }
   [ -e "$MODDIR/remove" ]  && { printf '  ! 模块待卸载\n'; any=1; }
   [ "$any" = 0 ] && printf '  （无）\n'
