@@ -1,41 +1,60 @@
-# 三星 One UI（Galaxy / 国行 SM-xxxx）字体槽
-# 三星命名与 AOSP 差别很大：界面主字体是 OneUISans-VF，另有 SECFallback / SECNum / SECCJK 等，
-# aosp.list 覆盖不到。依据 Galaxy S25 Ultra（SM-S9380 / Android 16 / OneUI 80500）真机报告，
-# 生成过程与逐条依据见 跨项目同步表 第 15 节。
-# ⚠️ 这里**只写单文件 .ttf/.otf**。中文在 .ttc 合集里（SECCJK-Regular.ttc index 2/3），
-#    但 .ttc 由 slots.sh 的 ttc 分支按 ttc_enabled 开关统一收，**写进清单没有任何作用**
-#    （实测见 跨项目同步表 第 16.10 节）。
-OneUISans-VF.ttf
-OneUISans-Regular.ttf
-OneUISans-Medium.ttf
-OneUISans-SemiBold.ttf
+# samsung —— 按分区组织
+#
+# ★ 2026-10-17：改成**分区**格式。分区的作用：
+#   开关（保留锁屏时钟字体 / 保留日韩 / 保留特殊槽）只需要决定"读哪个分区"，
+#   不用再去遍历字体配置、扫描目录 —— 切换开关能做到零扫描。
+#
+# 分区标记格式：单独一行的 [分区名]
+#   没有分区标记的老清单会被当成整份 [base]（向后兼容）。
+#
+# 分区列表：
+#
+# 分区（开关只决定读不读某个分区，不用扫描）：
+#   [main]    主力字体（中/英/数字）—— 永远读
+#   [clock]   时钟字体 —— 「保留锁屏时钟」开着时不读
+#   [theme]   主题字体（圆体/方体/衬线/斜体/等宽/装饰）
+#   [cjk]     中文（繁中/兰亭）
+#   [kana]    日文     [hangul] 韩文
+#   [lang]    其它文字（阿拉伯/希伯来/泰文…）
+
+[clock]
+AndroidClock.ttf
+
+[main]
 OneUISans-Bold.ttf
 OneUISans-Light.ttf
+OneUISans-Medium.ttf
+OneUISans-Regular.ttf
+OneUISans-SemiBold.ttf
 OneUISans-Thin.ttf
-OneUISansKR-VF.ttf
-OneUISansKR-Regular.ttf
-OneUISansKR-Bold.ttf
-SECCJK-Regular-Extra.ttf
-SECCJK-Regular.ttf
-SECCJK-Bold.ttf
-SECFallback.ttf
-SECFallback-Bold.ttf
-SECNum-VF.ttf
-SECNumFixed-VF.ttf
+OneUISans-VF.ttf
 Roboto-Regular.ttf
 RobotoFlex-Regular.ttf
 RobotoStatic-Regular.ttf
+SECCJK-Bold.ttf
+SECCJK-Regular-Extra.ttf
+SECCJK-Regular.ttf
+SECFallback-Bold.ttf
+SECFallback.ttf
+SECNum-VF.ttf
+SECNumFixed-VF.ttf
+SamsungOneUI-Bold.ttf
+SamsungOneUI-Regular.ttf
+SamsungSans-Bold.ttf
+SamsungSans-Regular.ttf
+SourceSansPro-Bold.ttf
 SourceSansPro-Regular.ttf
 SourceSansPro-SemiBold.ttf
-SourceSansPro-Bold.ttf
-SourceSansPro-Italic.ttf
-SourceSansPro-SemiBoldItalic.ttf
-SourceSansPro-BoldItalic.ttf
+
+[theme]
 CarroisGothicSC-Regular.ttf
 ComingSoon.ttf
 DancingScript-Regular.ttf
-# 主题字体落点 /data/overlays/font 里的常见名字（由 theme_slots() 按同名挑）
-SamsungSans-Regular.ttf
-SamsungSans-Bold.ttf
-SamsungOneUI-Regular.ttf
-SamsungOneUI-Bold.ttf
+SourceSansPro-BoldItalic.ttf
+SourceSansPro-Italic.ttf
+SourceSansPro-SemiBoldItalic.ttf
+
+[lang]
+OneUISansKR-Bold.ttf
+OneUISansKR-Regular.ttf
+OneUISansKR-VF.ttf
