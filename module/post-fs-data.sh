@@ -121,5 +121,16 @@ boot_id > "$MODDIR/.booting" 2>/dev/null
 # （Magisk / KernelSU / APatch 及各种分支都有），所以把它作为权威挂载点。
 # post-mount.sh 仍然保留，作用是「二次修补」：如果元模块的目录级挂载排在后面、
 # 把我们挂上去的文件盖住了，那一遍会靠 inode 比对发现并补回来（幂等，不会叠出两层）。
-[ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" = manager ] && exit 0
+if [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" = manager ]; then
+  # ★ 2026-10-19：元模块只覆盖 system/product/vendor/system_ext，
+  #   **/data 上的主题字体（魅族 /data/customizecenter/font、MIUI 主题字体…）它管不到**。
+  #   这些必须由我们自己做物理替换 —— 以前这里是一句 `exit 0`，
+  #   于是元模块用户的"主题商店里选的字体"永远不会变（真机反馈：魅族那台）。
+  _pf=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
+  case "$_pf" in
+    ""|none) command -v datafont_restore >/dev/null 2>&1 && datafont_restore ;;
+    *)       command -v datafont_apply >/dev/null 2>&1 && datafont_apply "$MODDIR" ;;
+  esac
+  exit 0
+fi
 payload_mount "$MODDIR" post-fs-data
