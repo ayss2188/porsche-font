@@ -17,6 +17,38 @@ rm -f "$LIB/.seen_version" 2>/dev/null   # ★ 版本标记（下次重装当首
 #   · 3 次都没成功：**保留那份记录**（重装模块后会自动重试），并在 Download 写一份"怎么手动处理"的说明
 #     —— 硬卡住卸载在这里做不到（管理器的卸载钩子无法阻止删除模块目录），所以做成"留痕 + 可自愈"。
 
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-19：**卸载前先把"被物理替换的主题字体"还原回去**
+#
+#   模块对「设置里选的字体」那几个目录（MIUI: /data/system/theme/fonts、
+#   三星: /data/overlays/font）做的是**物理替换**（不是挂载），
+#   原件备份在 $LIB/.orig/ 里，manifest.txt 记着每个原件路径。
+#
+#   而下面会 rm -rf "$LIB" —— 备份跟着一起被删，那份字体就永久变成用户的字体，
+#   而且再也自动恢复不了（真机反馈：卸载后字体改不回去、系统卡顿、只能手动救）。
+#
+#   自包含实现：卸载脚本不能引用模块内其它文件（模块目录马上就没了）。
+# ---------------------------------------------------------------------------
+_restore_theme_fonts() {
+  _man="$LIB/.orig/manifest.txt"
+  [ -s "$_man" ] || return 0
+  _n=0
+  while IFS= read -r _p; do
+    [ -n "$_p" ] || continue
+    [ -f "$_p" ] || continue
+    _k=$(printf '%s' "$_p" | tr '/' '_' | tr -d ' ')
+    _bak="$LIB/.orig/$_k"
+    [ -s "$_bak" ] || continue
+    # 大小一样 = 当前就是原件，别动；不一样 = 被我们换过 → 拷回去
+    if [ "$(wc -c < "$_p" 2>/dev/null)" = "$(wc -c < "$_bak" 2>/dev/null)" ]; then
+      continue
+    fi
+    cp -f "$_bak" "$_p" 2>/dev/null && _n=$((_n + 1))
+  done < "$_man"
+  return 0
+}
+
 LIB=/data/adb/custom_font_lib
 
 # ---------------------------------------------------------------------------
@@ -113,7 +145,25 @@ if [ -f "$JOURNAL" ] || [ -f "$LEGACY" ]; then
 else
   # 没有 gms 记录要恢复：只在"没有兄弟包活着"时才删字体库
   if ! _sibling_alive; then
+    _restore_theme_fonts
     rm -rf "$LIB"
+    # ★ 2026-10-19：删完自检一次，删不干净要明确告诉用户（主项目有、这里之前没有）
+    if [ -e "$LIB" ]; then
+      _left=$(find "$LIB" -mindepth 1 2>/dev/null | head -n 20)
+      [ -n "$_left" ] && rm -rf "$LIB" 2>/dev/null
+    fi
+    if [ -e "$LIB" ]; then
+      {
+        echo "字体库目录没能完全删除：$LIB"
+        echo "里面剩下的："
+        find "$LIB" -mindepth 1 2>/dev/null | head -n 40
+        echo
+        echo "可以手动删：rm -rf $LIB"
+        echo
+        echo "（四个配色包共用这个目录；如果还装着别的配色包，这里本来就会保留，忽略即可。）"
+      } > /data/media/0/Download/卸载未清干净.txt 2>/dev/null
+      chmod 666 /data/media/0/Download/卸载未清干净.txt 2>/dev/null
+    fi
   fi
 fi
 
