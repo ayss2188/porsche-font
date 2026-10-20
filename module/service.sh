@@ -8,6 +8,15 @@
 #   同一个坏字体每次开机都再挂一次 = 永久开不了机。所以：只有 boot_completed=1 才删。
 
 MODDIR=${0%/*}
+
+# ---------------------------------------------------------------------------
+# 自愈：扫描缓存被清过（或安装时 rescan 失败）→ 补建一次槽位清单
+#   只在这个小文件缺失时才动手，正常开机零开销。
+# ---------------------------------------------------------------------------
+_LIB="${LIB:-/data/adb/custom_font_lib}"
+if [ ! -s "$_LIB/scanned/slots.meta" ]; then
+  sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
+fi
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
 
 # 等开机完成，最多等 10 分钟（避免极端情况下这个循环永远挂着，心跳也就永远不写）
@@ -145,6 +154,14 @@ prune_dead_slots() {
     n_before=$(wc -l < "$f" 2>/dev/null | tr -d ' ')
     tmp="$f.prune.$$"
     : > "$tmp" 2>/dev/null || continue
+    # ★ 2026-10-17 提速：原来每行都 `printf | tr -d '\r'` —— 286 行的计划就是 286 个进程。
+    #   现在循环外一次清洗好（只去 CR，语义不变），循环里直接读干净的行。
+    _prc="$f.clean.$$"
+    if tr -d '\r' < "$f" > "$_prc" 2>/dev/null && [ -s "$_prc" ]; then
+      _prmap="$_prc"
+    else
+      _prmap="$f"
+    fi
     while IFS= read -r line || [ -n "$line" ]; do
       [ -n "$line" ] || continue
       if [ "$f" = "$MODDIR/slots.map" ]; then
@@ -158,10 +175,10 @@ prune_dead_slots() {
         # applied 一行就是一个目标路径
         rel="$line"
       fi
-      rel=$(printf '%s' "$rel" | tr -d '\r')
       case "$rel" in ""|/*|*..*) continue ;; esac
       [ -f "/$rel" ] && printf '%s\n' "$line" >> "$tmp"
-    done < "$f"
+    done < "$_prmap"
+    rm -f "${_prc:-}" 2>/dev/null
     n_after=$(wc -l < "$tmp" 2>/dev/null | tr -d ' ')
     if [ "$n_after" != "$n_before" ]; then
       mv -f "$tmp" "$f" 2>/dev/null
