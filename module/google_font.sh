@@ -128,11 +128,16 @@ is_disabled() {
   local d
   d=$(tmo 12 "$DUMP" package "$GMS" 2>/dev/null)
   [ -n "$d" ] || return 1
+  # ★ 2026-10-18：只认 disabledComponents 段内的匹配。
+  #   原来还有一条 `{ if (index($0, want) > 0) seen = 1 }` 的退路 ——
+  #   那会在**整份 dumpsys 输出**里找组件名，而它必然出现在 enabledComponents 段
+  #   （组件是启用的）→ 被判成"已停用" → status 把没开的显示成"已开启"。
+  #   这正是"开关会自己开"的第二半原因。
   printf '%s\n' "$d" | awk -v want="$PROVIDER" '
     /^[[:space:]]*disabledComponents[[:space:]]*:/ { hdr = 1; next }
+    /^[[:space:]]*[a-zA-Z]+Components[[:space:]]*:/ { hdr = 0 }
     hdr && index($0, want) > 0 { found = 1 }
-    { if (index($0, want) > 0) seen = 1 }
-    END { exit((found || (hdr && seen)) ? 0 : 1) }
+    END { exit(found ? 0 : 1) }
   '
 }
 
@@ -158,7 +163,13 @@ write_journal() {   # $1=用户  $2=原状态(0/1/unknown)
   } > "$JOURNAL" 2>/dev/null
   chmod 600 "$JOURNAL" 2>/dev/null
 }
-owned() { [ -f "$JOURNAL" ]; }
+# ★ 2026-10-18：**必须 -s 而不是 -f**。
+#   `owned` 的含义是"这个组件现在是我们停用的"。而 -f 只看文件存不存在：
+#   空文件、过期内容、旧版本残留 —— 都会让 owned 返回真，界面于是显示"已开启"，
+#   用户就说"我没开啊，怎么自己开了"。要求文件非空能挡掉其中大部分。
+#   （更严格的做法是比对账本内容与当前实际状态，但那要跑 dumpsys，
+#     而 status 明确要求"不跑 dumpsys"，所以先用 -s 这道防线。）
+owned() { [ -s "$JOURNAL" ]; }
 
 # 原状态怎么读：只有 dumpsys 能看到"启用/默认"的区别，读不到就记 unknown（关闭时按「启用」还原）
 original_state() {
@@ -249,13 +260,12 @@ do_status() {
   if is_disabled; then
     if owned; then put_status on; printf 'on\n'
     else put_status foreign; printf 'foreign\n'; fi
-    # ★ 2026-10-16：用户点了「开启兼容」→ 记下"缓存桥接要开着"。
-    #   原来这里直接 return 0，**既没写标志也没调 bridge on** ——
-    #   于是"用户点了开启、桥接却没被标记"；而如果库目录里还留过老账本，
-    #   开机脚本就会照挂，用户看到"我没开啊，怎么还有挂载"（真机反馈过）。
-    #   组件是谁停的不影响"用户要桥接"这个意图，所以两条路都写。
-    mkdir -p "$LIB" 2>/dev/null
-    : > "$CACHE_ON_FLAG" 2>/dev/null
+    # ★ 2026-10-18（修「会自己开 / 漏环境」）：
+    #   **这里不写 CACHE_ON_FLAG**。
+    #   这段代码在"status 查询"路径上（is_disabled 判定为真时走到），
+    #   也就是说：光打开界面看一眼状态，就可能把"桥接要开着"的标志写下去，
+    #   开机脚本随后照挂 → 用户看到"我没开却有挂载"（漏环境）。
+    #   桥接标志只在**用户明确点「开启兼容」**（do_enable）时写。
     return 0
   fi
   if owned; then put_status on; printf 'on\n'; return 0; fi   # pm 说过成功 = 就是我们开的
@@ -274,8 +284,17 @@ do_enable() {
   [ -n "$u" ] || { printf 'ERROR:读不到当前用户（am get-current-user 失败），为安全起见没有动手\n'; return 1; }
   if is_disabled; then
     if owned; then printf 'OK：谷歌字体兼容本来就是开启状态\n'
-    else printf '这个组件已经被停用了（不是本模块操作的）—— 本模块不会接管别人的设置。\n'; fi
+    else printf '这个组件已经被停用了（不是本模块操作的）—— 已按你的要求接管为开启\n'; fi
     put_status on
+    # ★ 2026-10-18（修「漏环境」）：用户**明确点了开启**，桥接就必须打开。
+    #
+    #   原来这里直接 return 0，没有 bridge on。于是：如果组件早已被停用
+    #   （别的模块或系统干的），用户点「开启兼容」只会得到一个 on 的状态，
+    #   而缓存桥接是关的 → Chrome / Gmail 这类"自己从 GMS 取字体"的 App
+    #   字体还是没换 → 用户说的"漏环境"。
+    #   再点一次关闭再开就好 —— 因为那次走的是下面的正常分支，bridge on 被调到了。
+    #   现在两条路都开，点一次就到位。
+    bridge on
     return 0
   fi
   st=$(original_state)
