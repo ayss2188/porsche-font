@@ -287,6 +287,13 @@ do_off() {
 # 不重启也想立刻生效：把挂载做进 zygote 的命名空间（之后 fork 的应用都继承）
 bridge_into_zygote() {
   local src t pid zpid
+  # ★ 2026-10-17 提速：**没挂过东西就别桥接**。
+  #   这个函数在 post-fs-data（阻塞开机）里跑，做的是"把已挂好的字体
+  #   在 zygote 的 mount namespace 里再挂一遍"，每个目标 10 秒超时。
+  #   而它原来无条件执行 —— 没开兼容、没下载过字体、没有可用字体时，
+  #   一样会 pidof zygote 再对每个目标跑 nsenter，白白拖慢开机。
+  #   JOURNAL 是 do_on 挂成功后逐条写的账本：空的就说明这次没挂过。
+  [ -s "$JOURNAL" ] || return 0
   src=$(source_font) || return 0
   command -v nsenter >/dev/null 2>&1 || return 1
   zpid=$(pidof zygote64 2>/dev/null || pidof zygote 2>/dev/null)
