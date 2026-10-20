@@ -1,42 +1,24 @@
 #!/system/bin/sh
-# 保时捷字体（内置配色版）- 公共函数库
+# 自定义字体切换模块 - 公共函数库
 # 提供：系统识别 / 系统名称 / Root 管理器识别 / 持久化设置 / 挂载路径映射
 # 槽位发现见 slots.sh，自带挂载见 mount.sh；脚本中通过 source 引入
-#
-# ===========================================================================
-# ⚠️ 本项目对主项目（custom_font_switcher）源码的固定改动 —— 同步主项目时必须逐条重放
-# ===========================================================================
-#   换皮的做法是"用主项目的干净底 + 这些固定改动"，所以每次把主项目新版的脚本
-#   搬过来，下面每一条都要重新做一遍。**漏掉任何一条都会出真问题**：
-#
-#   1. 本文件：lib_font_ids / lib_font_files —— 同时认 `f<数字>` 和 `builtin_*`
-#      只认一种会出大事：报告里写"字体库 0 个"，用户以为模块装坏了。
-#   2. 模块 id 不要写死主项目的 custom_font_switcher。本项目 4 个包 id 是
-#      porsche_font_multi / _718 / _911 / _gt3；写死的话那些目录根本不存在
-#      → 诊断报告打不开、槽位候选为空、静默少换。涉及：
-#      diag.sh / fontctl.sh / slots.sh（各自的 id 兜底处）
-#   3. module.prop：id / name / version / versionCode / description / updateJson
-#   4. builtin.sh + builtin/：内置配色注入（硬链接，不额外占空间）
-#      + 刷入时音量键选配色 + **注入前必须 valid_font 校验**（坏字体挂上去会卡开机）
-#   5. customize.sh：接 builtin_* 的调用（导入 → 认出上次配色 → 恢复 → 菜单 → 自检）
-#      注意顺序：**认出上次配色必须在 builtin_import / builtin_clean_legacy 之前**
-#      （它要读旧字体文件的大小；先导入会覆盖同名文件 → 认错）
-#   6. mount.sh：真正挂载前再校验一次字体（最外层防线，坏文件绝不盖到系统槽上）
-#   7. webroot/index.html：
-#      · 去掉导入 / 改名 / 多选删除（内置配色版只在本模块自带配色间切换）
-#      · 模块目录**运行时探测**（4 个包 id 不同，写死会导致界面一条命令都调不到）
-#      · localStorage 按模块 id 隔离（4 个包同源，不隔离会读到别的包的更新缓存）
-#      · 主色调改保时捷红；卡片不显示字重/同族标签；模块名从 module.prop 读
-#   8. uninstall.sh：字体库共用判断扫 porsche_font_*（写死主项目 id 的话，
-#      卸任意一个配色包会把共用字体库删掉，另外三个连带坏掉）
-#   9. update.sh：**换掉主项目的更新地址相关文字**，并保留 `head -c 60000`
-#      （主项目早期是 30000；本项目更新日志含历史版本，30000 会静默截断）
-#
-#   注意：LIB 路径两边**完全一样**（/data/adb/custom_font_lib）——
-#   4 个包共用同一个字体库，所以"删字体"这类操作一定要先判有没有别的包还活着。
-# ===========================================================================
 
 LIB=${LIB:-/data/adb/custom_font_lib}
+
+# 字体库里所有"可用的字体 id"（不含扩展名）。
+# ★ 2026-10-18：抽出来是为了让 grp_load 这类"遍历字库"的地方不乱 glob ——
+#   子项目还要认内置配色 builtin_*，各项目在这里各写各的规则，
+#   上层代码统一用 $(lib_font_ids)，就不会在同步时被互相覆盖。
+lib_font_ids() {
+  # ★ 2026-10-19 保时捷版改动：同时认用户导入的 f<数字>.ttf 和内置配色 builtin_*.ttf
+  #   （只认一种的话字体库会显示 0 个，用户以为模块装坏了）
+  local f
+  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
+    [ -f "$f" ] || continue
+    basename "$f" .ttf
+  done
+}
+
 SETTINGS="$LIB/settings.conf"
 
 getp() { getprop "$1" 2>/dev/null | tr -d '\r\n'; }
@@ -61,6 +43,18 @@ getp() { getprop "$1" 2>/dev/null | tr -d '\r\n'; }
 #     ④ 都不满足 → aosp（类原生）。
 #   本函数每个属性只取一次（PROP_CACHE 缓存整个 getprop 输出），
 #     比原来十几次 getprop 进程快，也不会同一台机器上两次读不一致。
+# ---------------------------------------------------------------------------
+# ★ 2026-10-15：**小米专有字体**是否存在 —— 用来证明"这确实是小米的 ROM"
+#
+#   为什么需要：`ro.product.brand` 是硬件品牌（小米机器刷类原生也报 xiaomi），
+#   而 `ro.miui.*` 属性在移植/类原生包上会残留 → 光靠属性会把类原生认成 HyperOS。
+#   实测对照：
+#     真 HyperOS（小米 23116PN5BC / 红米 25102RKBEC）→ 小米专有字体 60 / 51 个
+#     类原生  （小米 2210132C，AOSP 构建号 BP4A.*）  → **0 个**
+#
+#   ⚠ 不能改用 MiuiSystemUI / miui-framework 目录当判据：
+#     查过真 HyperOS 的报告，那两个目录**根本没被列出来**，用它当门会误伤真小米用户。
+# ---------------------------------------------------------------------------
 _xm_exclusive_font() {
   local d f b dirs
   # ★ 2026-10-16 加保险（真机 v1.2.6 误判成"原生/类原生"）：
@@ -91,6 +85,7 @@ _xm_exclusive_font() {
   done
   return 1
 }
+
 
 # ---------------------------------------------------------------------------
 _rom_props() {
@@ -171,16 +166,16 @@ detect_rom() {
     fi
   fi
   if [ -n "$weak" ]; then
-    # ★ 2026-10-15 真机修正（从主项目同步）：**小米这一家也要求实证**，
-    #   不再"品牌是小米 + 有强属性"就认。
+    # ★ 2026-10-15 真机修正：**小米这一家也要求实证**，不再"品牌是小米 + 有强属性"就认。
     #   证据（三份真机报告对照）：
     #     · 类原生：小米 2210132C / AOSP 构建号 BP4A.* → 小米专有字体 **0 个**，
-    #       但 `ro.miui.ui.version.name=V816` 之类的属性**残留着** → 曾被误判成 HyperOS。
+    #       字体目录全是 AOSP 字体包（ACFilmstrip/Aclonica/AlphaClouds…），
+    #       但 `ro.miui.ui.version.name=V816` 之类的属性**残留着** → 被误判成 HyperOS。
     #     · 真 HyperOS：小米 23116PN5BC / 红米 25102RKBEC → 小米专有字体 60 / 51 个。
     #   关键认识：`ro.product.brand` 是**硬件品牌**（小米机器刷什么 ROM 都是 xiaomi），
     #   它证明不了 ROM；而 `ro.miui.*` 属性在移植包上会残留。
-    #   ⚠ 实证不能用 MiuiSystemUI / miui-framework —— 真 HyperOS 的报告里
-    #     那两个目录**根本没被列出来**，用它当门会把真小米用户误判成 aosp。
+    #   ⚠ 实证不能用 MiuiSystemUI / miui-framework —— 查过真 HyperOS 的报告，
+    #     那两个目录在报告里**根本没被列出来**，用它当门会把真小米用户误判成 aosp。
     #     用"小米专有字体存不存在"：真机 51~60 个、类原生 0 个，干净。
     if _xm_exclusive_font; then
       echo "hyperos"; return 0
@@ -363,34 +358,6 @@ find_busybox() {
 #   （真机报告中表现为"App 侧抽样一个都没采到"）。
 #   这类"函数只定义在某个脚本里、却被别的脚本依赖"的坑，放共享文件里最稳妥。
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# 字体库清单：**同时认两种命名**（内置配色版专属）
-#
-# ⚠️ 只认一种会出大事：
-#     f<时间戳>     用户导入的（fontctl.sh 的 new_id 生成）—— 主项目只有这一种
-#     builtin_xxx   本模块自带的配色（builtin.sh 的 builtin_import 注入）
-#   如果哪里只 glob f*.ttf，界面就列不出任何配色、诊断报告也会写"字体库 0 个"，
-#   用户会以为模块装坏了。所以统一走这两个函数，别再各处手写 glob。
-#
-# 放在 common.sh 的原因：fontctl.sh 和 diag.sh 都要用，而 diag.sh 只 source
-# common.sh / slots.sh / mount.sh，**不 source fontctl.sh**。
-# ---------------------------------------------------------------------------
-lib_font_ids() {
-  local f
-  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
-    [ -f "$f" ] || continue
-    basename "$f" .ttf
-  done
-}
-
-lib_font_files() {
-  local f
-  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
-    [ -f "$f" ] || continue
-    echo "$f"
-  done
-}
-
 isnum() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
 now_s() { _NS_D=$(date +%s 2>/dev/null); isnum "$_NS_D" && printf '%s' "$_NS_D" || printf '0'; }
 
