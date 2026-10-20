@@ -83,15 +83,28 @@ setup_ns() {
 # ★ 用绝对路径 /system/bin/mount：`timeout` 起子进程时用的是**受限 PATH**，
 #   只写 `mount` 在部分环境（busybox-w32 / 精简 PATH）里会 "can't execute 'mount'"。
 #   真机上 /system/bin 一定在，沙箱里没有这个路径就退回直接用命令名。
-_MOUNT_BIN=/system/bin/mount
-[ -x "$_MOUNT_BIN" ] || _MOUNT_BIN=$(command -v mount 2>/dev/null || echo mount)
-_UMOUNT_BIN=/system/bin/umount
-[ -x "$_UMOUNT_BIN" ] || _UMOUNT_BIN=$(command -v umount 2>/dev/null || echo umount)
+# ★ 2026-10-17：允许用环境变量指定 mount/umount 路径（只为测试/调试方便）。
+   #   真机上没人设这两个变量 → 行为跟原来完全一样（还是优先 /system/bin/mount）。
+   _MOUNT_BIN=${CFS_MOUNT_BIN:-/system/bin/mount}
+   [ -x "$_MOUNT_BIN" ] || _MOUNT_BIN=$(command -v mount 2>/dev/null || echo mount)
+   _UMOUNT_BIN=${CFS_UMOUNT_BIN:-/system/bin/umount}
+   [ -x "$_UMOUNT_BIN" ] || _UMOUNT_BIN=$(command -v umount 2>/dev/null || echo umount)
 
 _to() {
   if command -v timeout >/dev/null 2>&1; then timeout 8 "$@"; else "$@"; fi
 }
-_mount()  { $NS _to "$_MOUNT_BIN" -o bind "$1" "$2"; }
+_mount()  {
+  # ★ 2026-10-19 提速：一次调用完成「bind + 只读」。
+  #   原来是 mount -o bind 之后再单独跑一次 mount -o remount,bind,ro，
+  #   每个槽位多一次进程调用（一份计划 100+ 槽位就是 100+ 次）。
+  #   新内核支持 mount -o bind,ro 一步到位；老内核不支持时自动回退两步走。
+  if $NS _to "$_MOUNT_BIN" -o bind,ro "$1" "$2" 2>/dev/null; then
+    return 0
+  fi
+  $NS _to "$_MOUNT_BIN" -o bind "$1" "$2" 2>/dev/null || return 1
+  $NS _to "$_MOUNT_BIN" -o remount,bind,ro "$2" 2>/dev/null
+  return 0
+}
 _umount() { $NS _to "$_UMOUNT_BIN" "$1" 2>/dev/null || $NS _to "$_UMOUNT_BIN" -l "$1" 2>/dev/null; }
 
 # ---------------------------------------------------------------------------
@@ -186,10 +199,89 @@ do_mount() {
   MAP_CLEAN="$LIB/.slots.map.clean.$$"
   : > "$MAP_CLEAN"
 
+  # ★ 2026-10-17 提速（点「免重启应用」的主开销）：
+  #   ① 原来每个槽位都要 `printf | tr -d '\r'` 去行尾 CR —— 286 个槽位 = 286 个进程。
+  #      现在循环外一次清洗好整份计划。
+  #   ② chcon 原来每个槽位都对 src 跑一次，而 src 其实只有几个不同的文件
+  #      （同一个字体顶几百个槽位）。现在只对没设过的 src 跑，286 次 → 几个。
+  _mapc2="${TMPDIR:-/data/local/tmp}/.live.clean.$$"
+  if tr -d '\r' < "$MAP" > "$_mapc2" 2>/dev/null && [ -s "$_mapc2" ]; then
+    _usemap2="$_mapc2"
+  else
+    _usemap2="$MAP"
+  fi
+
+  # ★ 2026-10-17 提速（「免重启应用」的另一个主开销）：
+  #   循环里每个槽位都要 readlink -f 一次、_ino 两次 ——
+  #   420 个槽位就是 1260 个进程，全都是白花的：
+  #   · readlink -f 支持一次传多个路径，一批就能全解析完
+  #   · stat -c '%i %n' 一次就能把所有 inode 拿到
+  #   所以这里**预先批量算好**存成两个文件，循环里只做字符串查表。
+  _rl_map="${TMPDIR:-/data/local/tmp}/.live.real.$$"
+  _ino_map="${TMPDIR:-/data/local/tmp}/.live.ino.$$"
+  : > "$_rl_map"; : > "$_ino_map"
+  _alldst=""
+  while read -r _i _r _s; do
+    case "$_r" in ""|/*|*..*) continue ;; esac
+    _alldst="$_alldst /$_r"
+  done < "$_usemap2"
+  [ -n "${_RL_FD:-}" ] && exec 5<&-
+  if [ -n "$_alldst" ]; then
+    # 一次 readlink 拿全部真实路径（readlink 输出的顺序跟参数一致）
+    readlink -f $_alldst 2>/dev/null > "$_rl_map"
+    # 一次 stat 拿全部 inode（只统计字体库里那几个源文件，通常只有一两个）
+    _allsrc=$(awk 'NF >= 3 && $3 != "" { print $3 }' "$_usemap2" 2>/dev/null | sort -u | tr '\n' ' ')
+    [ -n "$_allsrc" ] && stat -c '%i %n' $_allsrc 2>/dev/null > "$_ino_map"
+  fi
+  # 把 "inode 路径" 列表压成一个 |...| 串，循环里用 case 匹配（比 awk 快得多）
+  _INO_PAIRS="|"
+  if [ -s "$_ino_map" ]; then
+    while read -r _ii _ip; do
+      [ -n "$_ii" ] && [ -n "$_ip" ] && _INO_PAIRS="$_INO_PAIRS$_ii $_ip|"
+    done < "$_ino_map"
+  fi
+  # ★ 2026-10-19 提速（「免重启」第 1 步）：
+  #   原来循环里每个槽位都要 `_ino "$real"` fork 一次 stat，用来判断
+  #   "这个槽位当前挂的是不是我们要的字体"。而切开关只影响少数槽位，
+  #   绝大多数槽位其实早就挂好了 —— 这 100 多次 stat 全是白花的。
+  #   这里一次性把所有目标的 inode 拿下来压成串，循环里只做 case 匹配。
+  _dst_ino_map="${TMPDIR:-/data/local/tmp}/.live.dstino.$$"
+  _DST_INO_PAIRS=""
+  if [ -n "$_alldst" ]; then
+    stat -c '%i %n' $_alldst 2>/dev/null > "$_dst_ino_map"
+    if [ -s "$_dst_ino_map" ]; then
+      while read -r _di _dp; do
+        [ -n "$_di" ] && [ -n "$_dp" ] && _DST_INO_PAIRS="$_DST_INO_PAIRS|$_di $_dp"
+      done < "$_dst_ino_map"
+      [ -n "$_DST_INO_PAIRS" ] && _DST_INO_PAIRS="$_DST_INO_PAIRS|"
+    fi
+    rm -f "$_dst_ino_map" 2>/dev/null
+  fi
+
+  # 当前哪些路径是挂载点（用于跳过白跑的 umount）
+  _MNT_OK=""
+  _MNT_POINTS=""
+  if [ -r /proc/self/mountinfo ]; then
+    _mnf="${TMPDIR:-/data/local/tmp}/.live.mnt.$$"
+    awk '{ print $5 }' /proc/self/mountinfo 2>/dev/null > "$_mnf"
+    if [ -s "$_mnf" ]; then
+      while read -r _mp_; do
+        [ -n "$_mp_" ] && _MNT_POINTS="$_MNT_POINTS|$_mp_"
+      done < "$_mnf"
+      [ -n "$_MNT_POINTS" ] && { _MNT_POINTS="$_MNT_POINTS|"; _MNT_OK=1; }
+    fi
+    rm -f "$_mnf" 2>/dev/null
+  fi
+
+  # 真实路径改成 fd 顺序读
+  _RL_FD=""
+  if [ -s "$_rl_map" ]; then
+    exec 5< "$_rl_map" && _RL_FD=1
+  fi
+  _chcon_done=" "
   while read -r id rel src; do
     case "$rel" in ""|/*|*..*) continue ;; esac
     [ -n "$src" ] || src="$LIB/$id.ttf"
-    src=$(printf '%s' "$src" | tr -d '\r')
     dst="/$rel"
     if [ ! -f "$src" ]; then
       # 源文件没了 —— 这跟"挂载失败"是两回事，单独计数并说明
@@ -200,8 +292,13 @@ do_mount() {
     [ -e "$dst" ] || { skip=$((skip + 1)); continue; }
     printf '%s %s %s\n' "$id" "$rel" "$src" >> "$MAP_CLEAN"
     # 解析符号链接（槽位常常是链接）；拿不到真实路径就用原路径
-    real=$(readlink -f "$dst" 2>/dev/null)
-    [ -n "$real" ] && [ -e "$real" ] || real="$dst"
+    # ★ 从 fd 5 顺序读预批量算好的真实路径（跟主循环逐行对位，零子 shell）
+    real=""
+    [ -n "${_RL_FD:-}" ] && read -r real <&5
+    if [ -z "$real" ] || [ ! -e "$real" ]; then
+      real=$(readlink -f "$dst" 2>/dev/null)
+      [ -n "$real" ] && [ -e "$real" ] || real="$dst"
+    fi
     # 去重：同一个真实路径只挂一次（链接 + 实体是同一个文件）
     case "
 $seen
@@ -211,22 +308,70 @@ $real
     seen="$seen
 $real"
     # 幂等：已经指向我们的文件了就别再叠一层
-    if [ "$(_ino "$src")" = "$(_ino "$real")" ]; then
-      printf '%s\n' "$real" >> "$MNT_LIST"
-      same=$((same + 1))
-      continue
+    # ★ 用预先算好的 "inode 路径 " 串做 case 匹配（源文件通常只有一两个，零子 shell）
+    # ★ 先取本槽位的「源文件 inode」——从已有的小表里读（源通常只有 1~2 个，零 fork）
+    _si=""
+    if [ -s "$_ino_map" ]; then
+      while read -r _ii _ip; do
+        if [ "$_ip" = "$src" ]; then _si="$_ii"; break; fi
+      done < "$_ino_map"
+    fi
+    # ★ 目标当前 inode 是否已经等于源 inode（= 早就挂好了）——查表，零 fork
+    if [ -n "$_si" ] && [ -n "$_DST_INO_PAIRS" ]; then
+      case "$_DST_INO_PAIRS" in
+        *"|$_si $real|"*)
+          printf '%s\n' "$real" >> "$MNT_LIST"
+          same=$((same + 1))
+          continue ;;
+      esac
+    else
+      # 拿不到批量数据 → 回到原来的逐槽 stat（行为不变）
+      _ri=$(_ino "$real")
+      _si2=""
+      case "$_INO_PAIRS" in
+        *"|$_ri $src|"*) _si2="$_ri" ;;
+      esac
+      [ -n "$_si2" ] || _si2=$(_ino "$src")
+      if [ "$_si2" = "$_ri" ]; then
+        printf '%s\n' "$real" >> "$MNT_LIST"
+        same=$((same + 1))
+        continue
+      fi
     fi
     # SELinux：不改上下文的话 system_server 在 Enforcing 下读不到
-    chcon u:object_r:system_file:s0 "$src" 2>/dev/null
+    # ★ 同一个 src 只设一次（几百个槽位通常只对应几个字体文件）
+    case "$_chcon_done" in
+      *" $src "*) ;;
+      *) chcon u:object_r:system_file:s0 "$src" 2>/dev/null
+         _chcon_done="$_chcon_done$src " ;;
+    esac
+    # ★ 2026-10-18（真机反馈「软重启切字体只能成功一次」）：
+    #   **挂载前先撤掉这个点上已有的挂载**，保证永远只有一层。
+    #
+    #   原来直接 `mount -o bind src real` —— 如果 real 已经挂过一次
+    #   （比如刚切过另一个字体），Linux 会在挂载点上**再叠一层**。
+    #   叠了之后：
+    #     · "现在挂的是谁"越来越难判 → 用户看到"显示成功但不生效"
+    #     · 「变回原字体」只能撤最上面一层 → 撤不干净、回不到系统默认
+    #   先 umount 再 mount，就只有一层，语义干净。
+    # ★ 目标当前根本不是挂载点 → 没什么可撤的，省掉这次（和它的 -l 兜底）
+    if [ "$_MNT_OK" = "1" ]; then
+      case "$_MNT_POINTS" in
+        *"|$real|"*) _umount "$real" >/dev/null 2>&1 ;;
+      esac
+    else
+      _umount "$real" >/dev/null 2>&1
+    fi
     if _mount "$src" "$real"; then
-      _to mount -o remount,bind,ro "$real" 2>/dev/null
+      # remount,ro 已合并进 _mount 里，不再重复调用
       printf '%s\n' "$real" >> "$MNT_LIST"
       n=$((n + 1))
     else
       fail=$((fail + 1))
       [ -n "$first_fail" ] || first_fail="$src -> $real"
     fi
-  done < "$MAP"
+  done < "$_usemap2"
+  rm -f "${_mapc2:-}" 2>/dev/null
 
   echo "   新挂上 $n 个，本来就在位 $same 个，跳过 $skip 个，失败 $fail 个"
   if [ "$gone" -gt 0 ]; then
@@ -326,18 +471,25 @@ do_unmount() {
 do_recount_mount_state() {
   local map="$MODDIR/slots.map"
   [ -s "$map" ] || return 0
-  local id rel src a b hit=0 skip=0
+  local id rel src a b hit=0 skip=0 total=0 _rcc _rcmap
+  # ★ 2026-10-17 提速：每个槽位两次 `printf | tr -d '\r'` → 循环外一次。
+  _rcc="${TMPDIR:-/data/local/tmp}/.rc.clean.$$"
+  if tr -d '\r' < "$map" > "$_rcc" 2>/dev/null && [ -s "$_rcc" ]; then
+    _rcmap="$_rcc"
+  else
+    _rcmap="$map"
+  fi
   while read -r id rel src || [ -n "$rel" ]; do
-    rel=$(printf '%s' "$rel" | tr -d '\r')
     case "$rel" in ""|/*|*..*) continue ;; esac
     [ -n "$src" ] || src="$LIB/$id.ttf"
-    src=$(printf '%s' "$src" | tr -d '\r')
     [ -f "$src" ] || { skip=$((skip + 1)); continue; }
     [ -f "/$rel" ] || { skip=$((skip + 1)); continue; }
+    total=$((total + 1))          # 目标存在的槽位数（= payload_verify 的 n）
     a=$(stat -L -c '%d:%i' "$src" 2>/dev/null)
     b=$(stat -L -c '%d:%i' "/$rel" 2>/dev/null)
     [ -n "$a" ] && [ "$a" = "$b" ] && hit=$((hit + 1))
-  done < "$map"
+  done < "$_rcmap"
+  rm -f "${_rcc:-}" 2>/dev/null
 
   {
     echo "boot=$(boot_id 2>/dev/null)"
@@ -347,7 +499,17 @@ do_recount_mount_state() {
     echo "same=$hit"
     echo "skip=$skip"
   } > "$MODDIR/mount.state" 2>/dev/null
-  rm -f "$LIB/.verify.cache" 2>/dev/null
+  # ★ 2026-10-17 提速：原来是 `rm -f .verify.cache`（把缓存删掉）——
+  #   于是界面下次查「生效 N/总数 M」又得从头重算 286 个槽位（上千个进程）。
+  #   但 mount.state 刚被改写、它的 mtime 就是 payload_verify 缓存 key 的一部分，
+  #   key 本来就会变、旧缓存自然失效 —— 删掉是多余的。
+  #   这里改成**把刚算好的结果直接写进缓存**（用新 mount.state 的 mtime 算 key），
+  #   界面下次查状态就直接命中，零开销。
+  {
+    printf '%s\n' "$(boot_id 2>/dev/null)_$(stat -c '%Y-%s' "$map" 2>/dev/null)_$(stat -c '%Y' "$MODDIR/mount.state" 2>/dev/null)"
+    printf '%s %s\n' "$hit" "$total"
+  } > "$LIB/.verify.cache.tmp.$$" 2>/dev/null && \
+    mv -f "$LIB/.verify.cache.tmp.$$" "$LIB/.verify.cache" 2>/dev/null
   echo "   现在真实生效：$hit 个（跳过 $skip 个）"
 }
 
@@ -410,11 +572,123 @@ do_status() {
   echo "   命名空间：$( [ -n "$NS" ] && echo '需要 nsenter（su ≠ init）' || echo '与 init 相同' )"
 }
 
+# ===========================================================================
+# ★ 2026-10-19 _relive()：清理旧挂载 → 按新计划重新挂载
+#
+# 为什么要有它：界面上的「软重启」发的是 `live.sh reboot`，
+#   而 reboot) 原来只调 do_softreboot() —— **只重启框架，不重新挂载**。
+#   所以切了开关（计划从 151 变 119）之后，字体还是按旧挂载显示 → 「没生效」。
+#
+# 为什么不再全量卸载 151 个：每个 umount 都要 fork + 切 namespace，
+#   151 次会明显拖慢软重启。切开关时新计划是旧计划的子集，
+#   真正要撤的只有「旧计划有、新计划没有」的那几十个。
+# ===========================================================================
+_relive() {
+  setup_ns 2>/dev/null
+  _pn=0
+
+  # ① 撤现场挂载（do_mount 挂过、记在 MNT_LIST 里的）
+  if [ -s "$MNT_LIST" ]; then
+    while IFS= read -r _mp || [ -n "$_mp" ]; do
+      [ -n "$_mp" ] || continue
+      if _umount "$_mp" 2>/dev/null; then _pn=$((_pn + 1)); fi
+    done < "$MNT_LIST"
+    rm -f "$MNT_LIST" 2>/dev/null
+  fi
+
+  # ② 撤「上一份计划里有、当前计划里没有」的槽位
+  #    —— 这正是切「保留锁屏时钟」开关时少掉的那些（32 个时钟槽位）
+  _prev="$MODDIR/slots.map.prev"
+  _cur="$MODDIR/slots.map"
+  if [ -s "$_prev" ] && [ -s "$_cur" ]; then
+    # awk 一次算完差集，只输出要撤的路径
+    awk '
+      NR == FNR { keep[$2] = 1; next }
+      {
+        p = $2
+        if (p == "" || (p in keep)) next
+        if (p !~ /^\//) p = "/" p
+        print p
+      }' "$_cur" "$_prev" 2>/dev/null > "$LIB/.relive.$$"
+    while IFS= read -r _dst || [ -n "$_dst" ]; do
+      [ -n "$_dst" ] || continue
+      if _umount "$_dst" 2>/dev/null; then _pn=$((_pn + 1)); fi
+    done < "$LIB/.relive.$$"
+    rm -f "$LIB/.relive.$$" 2>/dev/null
+  fi
+  rm -f "$_prev" 2>/dev/null
+  [ "$_pn" -gt 0 ] && echo "   已清理旧挂载（$_pn 个）"
+
+  # ③ 按当前计划重新挂载
+  do_mount || { echo "❌ 挂载失败，已终止（没有软重启）"; return 1; }
+  return 0
+}
+
+
 case "$CMD" in
   mount)     do_mount ;;
   unmount)   do_unmount ;;
-  reboot)    do_softreboot ;;
+  reboot)    _relive && do_softreboot ;;
+  # ★ 2026-10-19 新增：只软重启，不碰挂载。
+  #   给「免重启」流程的第 2 步用 —— 那一步之前已经跑过 mount 了，
+  #   再走 _relive 等于把刚挂好的卸了重挂一遍，白白慢一倍。
+  softreboot) do_softreboot ;;
+  # ★ 2026-10-19 新增：只做「清理旧挂载 + 按新计划重挂」，不重启。
+  #   给「免重启」流程的第 1 步用：
+  #   原来那一步只调 do_mount，而 do_mount 只挂"新计划里的槽位" ——
+  #   切开关后新计划变少（151→119），少掉的 32 个时钟挂载不会被撤，
+  #   所以点了「免重启」时钟还是被替换。
+  relive)    _relive ;;
   free)
+    # ★ 2026-10-18（真机反馈「切开关后软重启不生效」）：
+    #   原来只有 do_mount —— 它只处理"新计划里有的槽位"。
+    #   而切开关后计划变少（151 → 119），少掉的那 32 个（时钟/主题字体）
+    #   **不在新计划里，所以永远不会被撤掉**，它们的挂载一直留着，
+    #   用户看到的还是被替换的时钟 → "开关没用"。
+    #
+    #   现在先 do_unmount 撤干净，再重新挂。
+    #   （撤销只动我们自己挂过的路径，不会误伤开机挂载或别的模块）
+    if [ -s "$MNT_LIST" ]; then
+      do_unmount >/dev/null 2>&1
+    fi
+    # ★ 2026-10-19 修复「切保留时钟开关，多切几次就不生效」：
+    #
+    #   每次软重启都从**干净状态**开始：按 slots.list 全量卸载所有可能挂过的槽位。
+    #   为什么不能只卸"上一份计划里的"：切换开关会改变计划（151 ⇄ 119），
+    #   一旦某次挂载部分失败或开机挂载覆盖过占位，该卸的和实际挂着的就越差越多。
+    #
+    #   ⚠️ 两种清单格式不同，路径拼法必须区分：
+    #     scanned/slots.list = "role 目录 文件名"     → 目录 + "/" + 文件名
+    #     slots.map          = "role 完整路径 文件名" → 第 2 列已经是完整路径
+    setup_ns 2>/dev/null
+    _pn=0
+    _all="$LIB/scanned/slots.list"
+    if [ -s "$_all" ]; then
+      while IFS=' ' read -r _r _d _n || [ -n "$_r" ]; do
+        [ -n "$_n" ] || continue
+        case "$_d" in
+          */"$_n") _dst="$_d" ;;                 # 第 2 列已含文件名
+          *) _dst="${_d%/}/$_n" ;;                # 第 2 列是目录
+        esac
+        case "$_dst" in /*) ;; *) _dst="/$_dst" ;; esac
+        if _umount "$_dst" 2>/dev/null; then _pn=$((_pn + 1)); fi
+      done < "$_all"
+    else
+      for _f in "$MODDIR/slots.map.prev" "$MODDIR/slots.map"; do
+        [ -s "$_f" ] || continue
+        while IFS=' ' read -r _r _d _n || [ -n "$_r" ]; do
+          [ -n "$_n" ] || continue
+          case "$_d" in
+            */"$_n") _dst="$_d" ;;
+            *) _dst="${_d%/}/$_n" ;;
+          esac
+          case "$_dst" in /*) ;; *) _dst="/$_dst" ;; esac
+          if _umount "$_dst" 2>/dev/null; then _pn=$((_pn + 1)); fi
+        done < "$_f"
+      done
+    fi
+    rm -f "$MODDIR/slots.map.prev" 2>/dev/null
+    [ "$_pn" -gt 0 ] && echo "   已清理旧挂载（$_pn 个）"
     do_mount || { echo "❌ 挂载失败，已终止（没有软重启）"; exit 1; }
     do_softreboot
     ;;
