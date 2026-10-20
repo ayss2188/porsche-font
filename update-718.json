@@ -2,6 +2,6 @@
   "version": "v4.4.5",
   "versionCode": 4405,
   "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v4.4.5/porsche-font-718-v4.4.5.zip",
-  "changelog": "https://raw.githubusercontent.com/ayss2188/porsche-font/main/CHANGELOG-latest.md",
+  "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/CHANGELOG.md",
   "sha256": "c5d16451174f375d71c790b45a84c217b6e98bfbcfe0304517b214a524f96fa0"
 }
