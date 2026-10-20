@@ -116,7 +116,12 @@ builtin_import() {
     if [ -f "$dst" ] && [ "$(stat -c %i "$dst" 2>/dev/null)" = "$(stat -c %i "$f" 2>/dev/null)" ]; then
       # 硬链接已经在位，但 meta 可能还是旧格式（比如少了 vf=）→ 重写一遍
       printf '%s' "$nm" > "$LIB/$id.name" 2>/dev/null
-      printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\n' "$vf" > "$LIB/$id.meta" 2>/dev/null
+      # ★ 2026-10-19：把真实文件大小写进 meta（size=）。
+      #   界面显示字体大小读的就是它；不写的话内置配色会显示成「—」，
+      #   只有被应用过的那一套才会因为轮廓分析补上大小。
+      _bsz=$(wc -c < "$dst" 2>/dev/null | tr -d ' \t\r\n')
+      case "${_bsz:-}" in ''|*[!0-9]*) _bsz=0 ;; esac
+      printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\nsize=%s\n' "$vf" "$_bsz" > "$LIB/$id.meta" 2>/dev/null
       ok=$((ok + 1)); continue
     fi
 
@@ -129,7 +134,9 @@ builtin_import() {
     chmod 644 "$dst" 2>/dev/null
     chcon u:object_r:system_file:s0 "$dst" 2>/dev/null
     printf '%s' "$nm" > "$LIB/$id.name" 2>/dev/null
-    printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\n' "$vf" > "$LIB/$id.meta" 2>/dev/null
+    _bsz=$(wc -c < "$dst" 2>/dev/null | tr -d ' \t\r\n')
+    case "${_bsz:-}" in ''|*[!0-9]*) _bsz=0 ;; esac
+    printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\nsize=%s\n' "$vf" "$_bsz" > "$LIB/$id.meta" 2>/dev/null
     ok=$((ok + 1))
   done
   return 0
@@ -244,6 +251,75 @@ builtin_clean_legacy() {
     ui_print "- 已清理没人使用的旧字体 $removed 个（约 $((kb / 1024)) MB）"
   fi
   [ "$kept" -gt 0 ] && ui_print "- 保留正在使用的字体 $kept 个"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-19：把字体库**归位**到只剩本模块的内置配色
+#
+#   背景：老版本界面里还带着主项目那套「导入第三方字体 / 删除」功能，
+#   于是用户会往这个"配色字体包"里塞自己的字体（真机截图里就有
+#   「犬神志-超级保时捷Pro公开版 21.6MB」），也有把内置配色删掉的。
+#   新版本把导入入口去掉了，所以升级时顺便归位：
+#     · 非内置的（f<数字> 这类导入字体）→ 删掉（连 .name/.meta/合集一起）
+#     · 内置的被用户删了 → builtin_import 已经按包里的原件重新链回来
+#     · 选中的正好是被删掉的那个 → 清掉记录，自动回落内置配色
+#
+#   ⚠️ 字体库是**和姊妹项目 custom_font_switcher 共用**的。
+#      那个模块在装（且没被标记删除）时，库里的 f<数字> 一个都不能动 ——
+#      否则它下次开机会挂载失败、字体静默变回默认。
+# ---------------------------------------------------------------------------
+builtin_prune_imported() {
+  local d sib=0 f f2 n id v wl="" ids kb=0 removed=0
+  for d in /data/adb/modules/custom_font_switcher \
+           /data/adb/modules_update/custom_font_switcher; do
+    [ -d "$d" ] && [ ! -f "$d/remove" ] && sib=1
+  done
+  if [ "$sib" = "1" ]; then
+    ui_print "- 检测到姊妹项目「自定义字体切换模块」也在用字体库 → 已导入的字体保留不动"
+    return 0
+  fi
+  [ -d "$LIB" ] || return 0
+
+  # 内置白名单
+  for f in "$MODDIR"/builtin/*.ttf "$MODDIR"/builtin/*.TTF "$MODDIR"/builtin/*.otf "$MODDIR"/builtin/*.OTF; do
+    [ -f "$f" ] || continue
+    n=${f##*/}; n=${n%.*}
+    id=$(builtin_id_of "$n"); id=${id%%|*}
+    [ -n "$id" ] && wl="$wl $id"
+  done
+
+  # 待清理的 id（去重）
+  ids=$(for f in "$LIB"/f[0-9]*.ttf "$LIB"/f[0-9]*.TTF "$LIB"/f[0-9]*.otf "$LIB"/f[0-9]*.OTF; do
+          [ -f "$f" ] || continue
+          n=${f##*/}
+          printf '%s\n' "${n%%.*}"
+        done | sort -u)
+
+  for id in $ids; do
+    [ -n "$id" ] || continue
+    case " $wl " in *" $id "*) continue ;; esac
+    n=$(wc -c < "$LIB/$id.ttf" 2>/dev/null | tr -d ' \t\r\n')
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    kb=$((kb + n / 1024))
+    rm -f "$LIB/$id".ttf "$LIB/$id".TTF "$LIB/$id".otf "$LIB/$id".OTF \
+          "$LIB/$id".name "$LIB/$id".meta "$LIB/$id".ttc* 2>/dev/null
+    removed=$((removed + 1))
+  done
+  if [ "$removed" -gt 0 ]; then
+    ui_print "- 已移除 $removed 个非内置字体（约 $((kb / 1024)) MB）—— 本模块只用内置配色"
+  fi
+
+  # 选中项如果指向已经不存在的字体 → 清掉，回落内置配色
+  for f2 in "$LIB/last_selection" "$LIB/.last_good" "$OLD/active_font" "$OLD/pending_font"; do
+    [ -f "$f2" ] || continue
+    v=$(tr -d '[:space:]' 2>/dev/null < "$f2")
+    case "$v" in ""|none) continue ;; esac
+    if [ ! -f "$LIB/$v.ttf" ] && [ ! -f "$LIB/$v.TTF" ] && [ ! -f "$LIB/$v.otf" ] && [ ! -f "$LIB/$v.OTF" ]; then
+      printf 'none' > "$f2" 2>/dev/null
+      ui_print "- 你上次选的那个字体已不在库里，已改为内置配色"
+    fi
+  done
   return 0
 }
 
