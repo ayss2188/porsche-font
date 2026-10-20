@@ -1,7 +1,5 @@
 #!/system/bin/sh
 # diag.sh - 一键体检
-
-# ⚠️ 本文件对主项目（custom_font_switcher）有固定改动 —— 同步主项目时见 common.sh 顶部的重放清单。
 #
 # 目的：把「重启了也不生效 / 字体没变化」的可能原因一次跑完，并给出大白话结论。
 # 特点：
@@ -37,18 +35,13 @@
 # 本脚本永远返回 0，避免影响安装流程。
 
 MODDIR=${0%/*}
-# ★ 内置配色版差异（重放项）：**不要写死主项目的 custom_font_switcher** ——
-#   本项目 4 个包 id 是 porsche_font_multi / _718 / _911 / _gt3，
-#   写死主项目 id 的话，那个目录根本不存在 → 诊断报告直接打不开。
-#   兜底：$0 没有目录部分时，找本机实际装着的那个配色包。
-if [ -z "$MODDIR" ] || [ ! -f "$MODDIR/module.prop" ]; then
-  for _d in /data/adb/modules/porsche_font_*; do
-    [ -f "$_d/module.prop" ] || continue
-    MODDIR=$_d
-    break
-  done
-fi
-[ -n "$MODDIR" ] || MODDIR=/data/adb/modules/porsche_font_multi
+[ -n "$MODDIR" ] || MODDIR=/data/adb/modules/custom_font_switcher
+# ★ 2026-10-15：`sh diag.sh`（相对路径、不带目录）时 `${0%/*}` 会得到字面量 `.`，
+#   报告里那行"运行位置: ."看着莫名其妙，而且后面拼 "$MODDIR/common.sh" 也是 "./common.sh"。
+#   这里把 `.` / 空 都归一化成真正的绝对路径。
+case "$MODDIR" in
+  .|"") MODDIR=$(pwd 2>/dev/null || echo /data/adb/modules/custom_font_switcher) ;;
+esac
 # ⚠ 别写成 `. "$MODDIR/x.sh" 2>/dev/null`：`.` 是特殊内建，**打不开文件会直接结束整个脚本**
 #   （`2>/dev/null` 只藏报错信息，挡不住它退出；实测退出码 2）。缺一个必需文件时，
 #   宁可给一句能看懂的话，也不要"报告打不开、用户不知道为什么"。
@@ -64,15 +57,7 @@ LIB=${LIB:-/data/adb/custom_font_lib}
 SETTINGS=${SETTINGS:-$LIB/settings.conf}
 
 ID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
-# ★ 内置配色版差异：读不到 id 时扫本机实际装着的配色包（4 个 id 是 porsche_font_*）
-if [ -z "$ID" ]; then
-  for _d in /data/adb/modules/porsche_font_*; do
-    [ -f "$_d/module.prop" ] || continue
-    ID=${_d##*/}
-    break
-  done
-fi
-[ -n "$ID" ] || ID=porsche_font_multi
+[ -n "$ID" ] || ID=custom_font_switcher
 M="/data/adb/modules/$ID"
 [ -d "$M" ] || M="$MODDIR"
 UPD="/data/adb/modules_update/$ID"
@@ -217,7 +202,10 @@ tmo() {
 }
 tag() { sed -n 's/^version=//p' "$1/module.prop" 2>/dev/null | head -n1 | tr -d '\r'; }
 # XML 规范化：把标签拆成一行一个，方便 grep 上下文
-xmlnorm() { tr '\n\r\t' ' ' < "$1" 2>/dev/null | sed 's/></>\n</g'; }
+# ★ 2026-10-18（诊断提速）：原来是 `tr | sed` 两个子进程，改成单个 awk。
+#   输出已用真机形态的 fonts.xml 逐字节验证过完全一致（换行/制表/相邻标签都对）。
+#   这个函数在完整报告里要被调几十次，省一半进程。
+xmlnorm() { awk 'BEGIN { RS = "" } { gsub(/[\r\n\t]/, " "); gsub(/></, ">\n<"); print }' "$1" 2>/dev/null; }
 # XML 拆成 <family / <font / </font 各一行，便于提取 family -> 文件 的对应关系
 xmlfam() {
   tr '\n\r\t' '   ' < "$1" 2>/dev/null \
@@ -468,11 +456,13 @@ fp_of() {
   sz=$(sz_lookup "$f"); mt=$(mt_lookup "$f")
   if [ -z "$sz" ]; then printf '%s' "-"; return 0; fi
   # tail -c 可能因 busybox 版本差异不支持，兜底只取头部（一样能判变化）
+  # ★ 2026-10-18（提速）：取哈希首字段不再多起一个 cut 进程，改用 read 拆字段。
+  #   这个函数每个字体都会跑一次（真机 300 个左右），省下来就是 300 个进程。
   {
     printf 'sz=%s mt=%s\n' "$sz" "$mt"
     head -c 65536 "$f" 2>/dev/null
     tail -c 65536 "$f" 2>/dev/null
-  } | sha256sum 2>/dev/null | cut -c1-64
+  } | sha256sum 2>/dev/null | { read -r _h _rest; printf '%s' "${_h}"; }
 }
 
 hash_flush() {
@@ -671,17 +661,27 @@ TTCNUM=$(printf '%s\n' "$TTC_LIST" | grep -c . )
 TTCFIRST=$(printf '%s\n' "$TTC_LIST" | head -n1)
 # 合集替换当前是否生效（auto 时三星会自动开，见 common.sh 的 ttc_enabled）
 TTC_ON=$(ttc_effective 2>/dev/null); [ -n "$TTC_ON" ] || TTC_ON=0
+# ★ 2026-10-18（诊断提速）：判断"配置里有没有中文 TTC 合集"时
+#   **不再逐个读 XML 全文** —— 那要为十几 MB 的 fonts.xml 跑一遍 xmlnorm。
+#   刷入时已经把结论算好了：scanned/ttc.list 就是中文 TTC 的 (目录, 文件名) 清单。
+#   有缓存就用缓存；没有（老版本装的、或清单缺失）才退回读 XML。
 ZH_TTC=0
-for x in $XMLFOUND; do
-  xmlnorm "$x" | grep -i 'zh-Hans' | grep -qi '\.ttc' && ZH_TTC=1
-done
+_TTL="${LIB:-/data/adb/custom_font_lib}/scanned/ttc.list"
+if [ -f "$_TTL" ]; then
+  # 文件存在就够了：ttc.list 只装"中文 TTC"，空文件表示这台设备没有
+  [ -s "$_TTL" ] && ZH_TTC=1
+else
+  for x in $XMLFOUND; do
+    xmlnorm "$x" | grep -i 'zh-Hans' | grep -qi '\.ttc' && { ZH_TTC=1; break; }
+  done
+fi
 
 # 三星：字体包 / flipfont / 字体设置 / /data/fonts
 # 性能：pm list packages -f 和 settings list 各要 1~3 秒，以前**加载时就跑**（连只看结论的
 #       轻量模式也要付这个钱）。现在只做"便宜初判"给结论用，完整清单留到需要它的那一节再算。
 PKG_FONT=""; PKG_DONE=0
 S_FONT=""; SFONT_DONE=0
-DFONT_LIST=""; DFONT_CFG=""; DFONT_DONE=0
+DFONT_LIST=""; DFONT_CFG=""; DFONT_DONE=0; G_DFONT_NAMES=""
 G_FLIP=0
 # 字体包（flipfont）住的目录：注意现在应用装成 /data/app/~~<hash>==/<包名>-<hash>==/，
 # 只扫 /data/app/*font* 会漏掉（三星装字体包时全是这种路径）—— 所以多扫一层
@@ -693,7 +693,7 @@ G_DFONT=0
 if [ -d /data/fonts ]; then
   for _df in /data/fonts/*.ttf /data/fonts/*.otf /data/fonts/*.ttc \
              /data/fonts/*/*.ttf /data/fonts/*/*.otf /data/fonts/*/*.ttc; do
-    [ -f "$_df" ] && { G_DFONT=1; break; }
+    [ -f "$_df" ] && { G_DFONT=1; _bn=${_df##*/}; G_DFONT_NAMES="$G_DFONT_NAMES $_bn"; }
   done
 fi
 
@@ -701,14 +701,14 @@ fi
 ensure_pkgs() {
   [ "$PKG_DONE" = 1 ] && return 0
   PKG_DONE=1
-  PKG_FONT=$(tmo 15 "$PM" list packages -f 2>/dev/null | grep -iE 'monotype|flipfont|font' | head -n 20)
+  PKG_FONT=$(tmo 8 "$PM" list packages -f 2>/dev/null | grep -iE 'monotype|flipfont|font' | head -n 20)
   [ -n "$PKG_FONT" ] && printf '%s\n' "$PKG_FONT" | grep -q '/data/app' && G_FLIP=1
   return 0
 }
 ensure_settings_font() {
   [ "$SFONT_DONE" = 1 ] && return 0
   SFONT_DONE=1
-  S_FONT=$( { tmo 10 "$SETBIN" list secure 2>/dev/null; tmo 10 "$SETBIN" list system 2>/dev/null; tmo 10 "$SETBIN" list global 2>/dev/null; } \
+  S_FONT=$( { tmo 6 "$SETBIN" list secure 2>/dev/null; tmo 6 "$SETBIN" list system 2>/dev/null; tmo 6 "$SETBIN" list global 2>/dev/null; } \
     | grep -iE 'font|typeface' | grep -viE 'scale|size' | head -n 10 )
   [ -n "$S_FONT" ] && G_FLIP=1
   return 0
@@ -737,6 +737,256 @@ done
 DATAFONT_N=0
 [ -n "$DATAFONT_LIST" ] && DATAFONT_N=$(printf '%s\n' $DATAFONT_LIST | grep -c . )
 [ -n "$DATAFONT_N" ] || DATAFONT_N=0
+
+# ---------------------------------------------------------------------------
+KL=$(cfg_get keep_lang 0); KS=$(cfg_get keep_special 0)
+# 1.0.9：这两个开关已从界面删除（默认全替换）。这里仍读一次，只为兼容老配置文件。
+# 极端保护必须与实际挂载用同一套判定：字体完全没有中文字形时中文槽位不动
+# （否则整个界面会变方块，用户连 WebUI 都看不清）。正常字体不会命中。
+CJK_GUARD=0
+if [ -f "$LIB/$PEND.meta" ] && \
+   [ "$(sed -n 's/^cjk=//p' "$LIB/$PEND.meta" 2>/dev/null | tail -n1 | tr -d '\r\n')" = 0 ]; then
+  CJK_GUARD=1
+fi
+SEL_FONT="$PEND"; export CJK_GUARD SEL_FONT
+_ct0=$(now_s)    # 分段计时：C4 算槽位计划
+subnote "计算槽位计划"
+# ★ 2026-10-18（诊断报告提速，作者要求「既要详细又要快」）：
+#   原来这里是 300 项 × 2 次的纯 shell 循环去调 _role_wanted，实测被调 **606 次**，
+#   完整报告 19964 条命令里光这一项就占 600 条。
+#   而且它甚至没看 keep_lockscreen（参数顺序把 kl 当 keep_lang 传了），
+#   报告里的「计划槽位数」可能跟界面/实际挂载不一致。
+#
+#   现在直接走 `slot_plan`：它已经是「按开关选一份预生成清单 + 一次 awk 过滤 scope」，
+#   实测 145ms，内部已包含「保留锁屏时钟」和「主题字体」的判定
+#   —— 跟实际挂载完全同源，报告数据不会自相矛盾。
+#   数据一点没少：该列的槽位清单、计划数全都还在。
+plan_of() { # $1=scope   （后两个参数已是死参数，保留签名兼容调用点）
+  local scope="$1" role d name base
+  if command -v slot_plan >/dev/null 2>&1; then
+    slot_plan "$M" "$scope" 0 "$(cfg_get keep_lockscreen 0)" 0 1 2>/dev/null
+    timing_add 'C4 算槽位计划' "$_ct0"
+    return 0
+  fi
+  # 兜底：slot_plan 不可用时退回逐条判定（会慢，但保证报告能出）
+  base=$(printf '%s\n' "$CANDS" | while read -r role d name; do
+    [ -n "$role" ] || continue
+    _role_wanted "$role" "$scope" 0 0 "$name" "$(cfg_get keep_lockscreen 0)" || continue
+    printf '%s %s/%s\n' "$role" "${d#/}" "$name"
+  done | sort -u -k2,2)
+  [ -n "$base" ] || return 0
+  printf '%s\n' "$base"
+  theme_slots "$base"
+  timing_add 'C4 算槽位计划' "$_ct0"
+}
+PLAN_NOW=$(plan_of "$SCOPE" "$KL" "$KS")
+
+# ---------------------------------------------------------------------------
+# 锁屏 / 时钟字体专项（只读）
+#
+#   锁屏时钟换不掉时，原因只有三种，这一节就是用来区分它们的：
+#     ① 字体被打包在 overlay APK 里（RRO 换字体）→ 改 /system/fonts 也读不到
+#     ② 时钟是图形/矢量样式，根本不是文字 → 与字体无关
+#     ③ 该换的文件没进替换计划 → 还能修
+# ---------------------------------------------------------------------------
+CLOCK_FONTS=""
+for _cd in /system/fonts /product/fonts /system_ext/fonts /my_product/fonts /vendor/fonts; do
+  [ -d "$_cd" ] || continue
+  for _cf in "$_cd"/*.ttf "$_cd"/*.otf "$_cd"/*.ttc "$_cd"/*.TTF "$_cd"/*.OTF; do
+    [ -f "$_cf" ] || continue
+    _cb=${_cf##*/}
+    _cl=$(printf '%s' "$_cb" | tr 'A-Z' 'a-z')
+    case "$_cl" in
+      *clock*|*time*|*digit*|*keyguard*) ;;
+      *) continue ;;
+    esac
+    _in=否
+    printf '%s\n' "$PLAN_NOW" 2>/dev/null | grep -qF "/$_cb" && _in=是
+    _sz=$(stat -c '%s' "$_cf" 2>/dev/null | tr -dc '0-9'); [ -n "$_sz" ] || _sz=0
+    CLOCK_FONTS="$CLOCK_FONTS
+    $_cf  （$((_sz / 1024)) KB）  本次替换：$_in"
+  done
+done
+
+# overlay / 主题 APK 里打包的字体（zip 的中央目录里文件名是明文，直接扫字符串即可）
+CLOCK_APK=""
+for _od in /product/overlay /system_ext/overlay /vendor/overlay /odm/overlay \
+           /product/app /system_ext/app /system/app /data/app; do
+  [ -d "$_od" ] || continue
+  _apks=$(find "$_od" -maxdepth 2 -iname '*.apk' 2>/dev/null | grep -iE 'font|typeface|clock|theme' | head -n 6)
+  [ -n "$_apks" ] || continue
+  for _apk in $_apks; do
+    _hit=$(grep -a -o -E '[A-Za-z0-9_./-]{3,40}\.(ttf|otf|ttc)' "$_apk" 2>/dev/null \
+             | sort -u | head -n 5 | tr '\n' ' ')
+    [ -n "$_hit" ] && CLOCK_APK="$CLOCK_APK
+    $_apk
+      → $_hit"
+  done
+done
+
+# 时钟/字体相关的系统设置
+CLOCK_SET=$(for _ns in system secure global; do
+              settings list "$_ns" 2>/dev/null \
+                | grep -iE 'clock|keyguard|typeface|font' \
+                | sed "s/^/    [$_ns] /"
+            done 2>/dev/null | head -n 20)
+
+# 相关系统包（谁在画锁屏时钟）
+CLOCK_PKG=$(pm list packages 2>/dev/null | sed 's/^package://' \
+              | grep -iE 'systemui|keyguard|oplus.*theme|theme.*font|\.font' \
+              | head -n 12 | tr '\n' ' ')
+
+# ColorOS / OPPO 系的"主题字体桥接目录"：/data/format_unclear/font
+#   里面是 oplusosui-* / colorosui-* 开头的字体条目。**两种形态意义完全不同**：
+#     · 符号链接 → /system/fonts/X   ：主题只是引用系统字体，我们换系统字体就已覆盖
+#     · 普通文件（真内容）           ：主题字体自成一份，盖在系统字体上 → 我们没碰过
+#   所以这里只做**只读探测**，把形态和链接目标记进报告，供判断"要不要替换"。
+#   绝不写这个目录（在没证据前动它可能弄坏厂商字体服务）。
+# ---------------------------------------------------------------------------
+OPS_BRIDGE="/data/format_unclear/font"
+OPS_ENTRIES=0
+OPS_LINKS=0
+OPS_FILES=0
+OPS_DETAIL=""
+if [ -d "$OPS_BRIDGE" ]; then
+  _oe="$(ls -1 "$OPS_BRIDGE" 2>/dev/null | head -n 64)"
+  if [ -n "$_oe" ]; then
+    while IFS= read -r _n; do
+      [ -n "$_n" ] || continue
+      _p="$OPS_BRIDGE/$_n"
+      case "$_n" in
+        *.ttf|*.TTF|*.otf|*.OTF|*.ttc|*.TTC) ;;
+        *) continue ;;
+      esac
+      OPS_ENTRIES=$((OPS_ENTRIES + 1))
+      if [ -L "$_p" ]; then
+        OPS_LINKS=$((OPS_LINKS + 1))
+        _t=$(readlink "$_p" 2>/dev/null)
+        OPS_DETAIL="$OPS_DETAIL
+    [链接] $_n → ${_t:-?}"
+      elif [ -f "$_p" ]; then
+        OPS_FILES=$((OPS_FILES + 1))
+        _sz=$(wc -c < "$_p" 2>/dev/null | tr -d ' \t\r\n')
+        case "${_sz:-}" in ''|*[!0-9]*) _sz=0 ;; esac
+        OPS_DETAIL="$OPS_DETAIL
+    [文件] $_n  $((_sz / 1024)) KB"
+      fi
+    done <<EOF_OPS
+$_oe
+EOF_OPS
+  fi
+fi
+G_OPS=0
+[ "$OPS_FILES" -gt 0 ] && G_OPS=1
+
+# ---------------------------------------------------------------------------
+# 厂商 / 主题字体目录统一探测（**只读**）
+#
+# 除了我们已经支持的那几个（MIUI、三星、vivo vfonts、魅族），各家还把
+# "设置里选的字体"放在各自的目录里。列在这里的目录**只探测、不替换** ——
+# 目的是让报告能回答"这台机器上到底有没有别的地方存着主题字体"。
+#   · 符号链接 → /system/fonts ：我们换系统字体时已覆盖，不用额外做事
+#   · 普通文件               ：独立副本，本模块没碰过（可能就是"部分界面没变"的原因）
+# ---------------------------------------------------------------------------
+VDIR_TABLE="
+荣耀主题|/data/system/theme_magic/fonts
+荣耀主题根|/data/system/theme_magic
+ColorOS-uxres|/data/oplus/uxres/theme
+ColorOS-桥接|/data/format_unclear/font
+vivo-bbkcore|/data/bbkcore/theme
+vivo-皮肤|/data/skin/fonts
+通用主题字体|/data/theme/fonts
+通用主题根|/data/themes
+MIUI主题|/data/system/theme/fonts
+MIUI-webview|/data/system/fonts/theme_webview
+MIUI-其他|/data/miui/theme/fonts
+三星字体包|/data/overlays/font
+vivo-vfonts|/data/vfonts
+魅族主题|/data/customizecenter/font
+可更新字体|/data/fonts
+可更新字体配置|/data/fonts/config
+可更新字体文件|/data/fonts/files
+"
+# 已经在我们替换范围内的目录（这些不算"未覆盖"）
+VDIR_HANDLED=" /data/system/theme/fonts /data/system/fonts/theme_webview /data/miui/theme/fonts /data/system/theme_font /data/overlays/font /data/vfonts /data/customizecenter/font "
+# ---------------------------------------------------------------------------
+# ★ 2026-10-20：**自动发现"未收录"的字体目录 / 字体名字**（只读）
+#
+#   云端报告样本少、靠人工猜目录永远有遗漏。这里用一次**限深 find + 超时**
+#   把"机器上有字体、但不在我们已知清单里"的目录挖出来，跟 targets 名单比对
+#   再列出"设备上有、名单里没有"的字体名 —— 以后不用再靠猜。
+#   只读、限深、限超时；不读内容、不算哈希，只数文件名。
+# ---------------------------------------------------------------------------
+_DISC_KNOWN=" /system/fonts /system_ext/fonts /product/fonts /vendor/fonts /odm/fonts /oem/fonts \
+ /my_product/fonts /my_region/fonts /my_company/fonts /my_carrier/fonts /my_stock/fonts \
+ /my_heytap/fonts /my_manifest/fonts /my_bigball/fonts /mi_ext/fonts /hw_product/fonts \
+ /prism/fonts /optics/fonts /product/vivo/fonts /system_ext/vivo/fonts /vendor/vivo/fonts \
+ /oplus_product/fonts /oplus_engineering/fonts /oplus_version/fonts /oplus_region/fonts \
+ /data/system/theme/fonts /data/system/theme_font /data/system/fonts/theme_webview \
+ /data/miui/theme/fonts /data/overlays/font /data/vfonts /data/customizecenter/font \
+ /data/format_unclear/font /data/oplus/uxres/theme /data/bbkcore/theme /data/skin/fonts \
+ /data/theme/fonts /data/themes /data/fonts /data/fonts/config /data/fonts/files "
+DISCOVERED=""
+DISC_NEW_DIRS=0
+if command -v timeout >/dev/null 2>&1; then
+  _disc_dirs=$(timeout 8 find /data /product /system_ext /vendor /odm -maxdepth 4 \
+                 \( -name fonts -o -name font -o -name typefaces \) -type d 2>/dev/null)
+else
+  _disc_dirs=$(find /data /product /system_ext /vendor /odm -maxdepth 4 \
+                 \( -name fonts -o -name font -o -name typefaces \) -type d 2>/dev/null)
+fi
+_disc_dirs=$(printf '%s\n' "$_disc_dirs" 2>/dev/null \
+  | grep -v -e '/data/data/' -e '/data/app/' -e '/data/media/' -e '/data/dalvik-cache/' \
+             -e '/custom_font_lib' -e '/modules/' -e '/data/local/' -e '/data/misc/' \
+  | grep -v '^$' | head -n 40)
+for _dd in $_disc_dirs; do
+  [ -d "$_dd" ] || continue
+  case "$_DISC_KNOWN" in *" $_dd "*) continue ;; esac
+  _fc=$(ls -1 "$_dd" 2>/dev/null | grep -Eic '\.(ttf|otf|ttc)$' 2>/dev/null)
+  [ -n "$_fc" ] || _fc=0
+  [ "$_fc" -gt 0 ] 2>/dev/null || continue
+  _fn=$(ls -1 "$_dd" 2>/dev/null | grep -Ei '\.(ttf|otf|ttc)$' | head -n 6 | tr '\n' ' ')
+  DISC_NEW_DIRS=$((DISC_NEW_DIRS + 1))
+  DISCOVERED="$DISCOVERED
+    $_dd  —— $_fc 个字体：$_fn"
+done
+# 名字维度：设备上有、但 targets 名单里没有
+DISC_NEW_NAMES=""
+if [ -d "$M/targets" ]; then
+  _known=$(cat "$M"/targets/*.list 2>/dev/null | sed 's|.*/||' | sort -u)
+  _dev=$(for _d3 in /system/fonts /product/fonts /system_ext/fonts; do
+           ls -1 "$_d3" 2>/dev/null
+         done | grep -Ei '\.(ttf|otf)$' | sort -u)
+  DISC_NEW_NAMES=$(printf '%s\n' "$_dev" | while IFS= read -r _n; do
+                     [ -n "$_n" ] || continue
+                     printf '%s\n' "$_known" | grep -qxF "$_n" || printf '%s\n' "$_n"
+                   done 2>/dev/null | head -n 20 | tr '\n' ' ')
+fi
+
+VDIR_REPORT=""
+VDIR_UNCOVERED=0
+printf '%s\n' "$VDIR_TABLE" | while IFS='|' read -r _lbl _dir; do
+  [ -n "$_dir" ] || continue
+  [ -d "$_dir" ] || continue
+  _n=0; _ln=0; _rg=0
+  for _f in "$_dir"/*.ttf "$_dir"/*.TTF "$_dir"/*.otf "$_dir"/*.OTF "$_dir"/*.ttc "$_dir"/*.TTC; do
+    [ -e "$_f" ] || continue
+    _n=$((_n + 1))
+    if [ -L "$_f" ]; then _ln=$((_ln + 1)); else _rg=$((_rg + 1)); fi
+  done
+  [ "$_n" -gt 0 ] || continue
+  case "$VDIR_HANDLED" in
+    *"$_dir "*) _tag="已覆盖" ;;
+    *)          _tag="未覆盖" ;;
+  esac
+  printf '%s\n' "    [$_tag] $_lbl  $_dir  —— $_n 个字体（普通文件 $_rg / 链接 $_ln）"
+done > "$LIB/.vdir.tmp.$$" 2>/dev/null
+if [ -s "$LIB/.vdir.tmp.$$" ]; then
+  VDIR_REPORT=$(cat "$LIB/.vdir.tmp.$$" 2>/dev/null)
+  VDIR_UNCOVERED=$(printf '%s\n' "$VDIR_REPORT" | grep -c '\[未覆盖\]' 2>/dev/null)
+  [ -n "$VDIR_UNCOVERED" ] || VDIR_UNCOVERED=0
+fi
+rm -f "$LIB/.vdir.tmp.$$" 2>/dev/null
 
 # MIUI / HyperOS 个性字体（主题字体）：由主题机制接管，优先级高于 /system/fonts，
 # 同名文件会顶替系统字体 —— 这就是"旧版必须手动切一次字体才生效"的根源。
@@ -769,6 +1019,18 @@ fi
 G_MIUI=0
 [ "$MIUI_FONT_N" -gt 0 ] && G_MIUI=1
 
+# ColorOS 主题字体桥接目录的结论（只读探测，见上面那段说明）
+OPS_VERDICT=""
+if [ -d "$OPS_BRIDGE" ]; then
+  if [ "$OPS_FILES" -gt 0 ]; then
+    OPS_VERDICT="⚠ 检测到 ColorOS 主题字体目录（$OPS_BRIDGE）：$OPS_ENTRIES 个条目，其中 $OPS_FILES 个是**普通文件**、$OPS_LINKS 个是符号链接。普通文件那部分本模块没有替换（设置里选的字体优先），这可能是「部分界面/锁屏时钟没变」的原因。"
+  elif [ "$OPS_LINKS" -gt 0 ]; then
+    OPS_VERDICT="ℹ 检测到 ColorOS 主题字体目录（$OPS_BRIDGE）：$OPS_LINKS 个条目全是符号链接 → 指向系统字体，本模块替换 /system/fonts 时已一并覆盖。"
+  elif [ "$OPS_ENTRIES" -gt 0 ]; then
+    OPS_VERDICT="ℹ 检测到 ColorOS 主题字体目录（$OPS_BRIDGE）：$OPS_ENTRIES 个条目，形态未识别。"
+  fi
+fi
+
 # 槽位候选（一次算完，后面复用）
 # 1.0.9：加上"自适应扫描"补的部分（设备自己配置引用到、模板没覆盖的角色）——
 #   这样报告里看到的候选与实际挂载用的计划是同一套，不会一个多一个少。
@@ -798,33 +1060,6 @@ eff_scope() {
   timing_add 'C3 扫主题字体' "$_ct0"
 }
 SCOPE=$(eff_scope "$PEND")
-KL=$(cfg_get keep_lang 0); KS=$(cfg_get keep_special 0)
-# 1.0.9：这两个开关已从界面删除（默认全替换）。这里仍读一次，只为兼容老配置文件。
-# 极端保护必须与实际挂载用同一套判定：字体完全没有中文字形时中文槽位不动
-# （否则整个界面会变方块，用户连 WebUI 都看不清）。正常字体不会命中。
-CJK_GUARD=0
-if [ -f "$LIB/$PEND.meta" ] && \
-   [ "$(sed -n 's/^cjk=//p' "$LIB/$PEND.meta" 2>/dev/null | tail -n1 | tr -d '\r\n')" = 0 ]; then
-  CJK_GUARD=1
-fi
-SEL_FONT="$PEND"; export CJK_GUARD SEL_FONT
-_ct0=$(now_s)    # 分段计时：C4 算槽位计划
-subnote "计算槽位计划"
-plan_of() { # $1=scope $2=keep_lang $3=keep_special
-  local scope="$1" kl="$2" ks="$3" role d name base
-  base=$(printf '%s\n' "$CANDS" | while read -r role d name; do
-    [ -n "$role" ] || continue
-    _role_wanted "$role" "$scope" "$kl" "$ks" || continue
-    printf '%s %s/%s\n' "$role" "${d#/}" "$name"
-  done | sort -u -k2,2)
-  [ -n "$base" ] || return 0
-  printf '%s\n' "$base"
-  # 主题字体槽（/data/system/theme/fonts 里与上面同名的）——必须和 slot_plan 保持一致，
-  # 否则报告里的"计划槽位数"会比实际少几个。
-  theme_slots "$base"
-timing_add 'C4 算槽位计划' "$_ct0"
-}
-PLAN_NOW=$(plan_of "$SCOPE" "$KL" "$KS")
 PLAN_MAX=$(plan_of all 0 0)
 # 计划里有几个主题字体槽（/data/system/theme/fonts 里与已选槽位同名的那些）
 MIUI_INPLAN=$(printf '%s\n' "$PLAN_NOW" | grep -c '^theme ' 2>/dev/null)
@@ -841,7 +1076,7 @@ fi
 [ -n "$APPLIED_TTC" ] || APPLIED_TTC=0
 
 # 字体库清单
-LIB_FONTS=$(lib_font_files 2>/dev/null)
+LIB_FONTS=$(ls -1 "$LIB"/f*.ttf 2>/dev/null)
 LIB_N=$(printf '%s\n' "$LIB_FONTS" | grep -c . )
 
 # ---------------------------------------------------------------------------
@@ -850,12 +1085,16 @@ LIB_N=$(printf '%s\n' "$LIB_FONTS" | grep -c . )
 # ---------------------------------------------------------------------------
 
 # 配置里引用到的所有字体文件名（一处提取，多处复用）
-XMLNAMES=""
-for x in $XMLFOUND; do
-  XMLNAMES="$XMLNAMES$(xmlnorm "$x" 2>/dev/null | grep -o '>[^<>]*\.[tT][tT][cCfF]<' | sed 's/^>//; s/<$//; s/ *$//')
+# ★ 2026-10-18（诊断提速）：上面 pack_core/槽位校验那一段**已经算过同一个东西**，
+#   这里再算一遍等于把十几 MB 的 fonts.xml 又读一遍。
+#   有值就复用；没有（那段没走到）再自己算，行为不变。
+if [ -z "${XMLNAMES:-}" ]; then
+  for x in $XMLFOUND; do
+    XMLNAMES="$XMLNAMES$(xmlnorm "$x" 2>/dev/null | grep -o '>[^<>]*\.[tT][tT][cCfF]<' | sed 's/^>//; s/<$//; s/ *$//')
 "
-done
-XMLNAMES=$(printf '%s\n' "$XMLNAMES" | grep -v '^[[:space:]]*$' | sort -u)
+  done
+  XMLNAMES=$(printf '%s\n' "$XMLNAMES" | grep -v '^[[:space:]]*$' | sort -u)
+fi
 
 # 名字 -> 框架实际读取的路径 | 存在 | 独立副本
 # 性能：目录的真实路径与 dev:ino 已经在 FONTDIR_MAP 里算过了，
@@ -961,7 +1200,7 @@ dir_conclusion() {
 #                                   授予过 root 的 App（allow_su）不卸
 # ---------------------------------------------------------------------------
 AS_MINE=""; AS_LIST=""; AS_READ=0; AS_RISK=0; AS_HIDDEN=0
-AS_KREL=""; AS_FEATURE=""; AS_DOTUM=""; AS_METAUM=""
+AS_KREL=""; AS_FEATURE=""; AS_FEATURE_HINT=""; AS_DOTUM=""; AS_METAUM=""
 
 # 关键文件完整性：缺哪个就列出来。
 #   缺 common/slots/mount = 整个模块不可用（fontctl.sh 会明确报错退出）；
@@ -1032,8 +1271,9 @@ app_side_probe() {
     AS_DOTUM="（没有 /data/adb/ksu/.umount）"
   fi
   # 元模块（Hybrid Mount 这类）自己也有"卸载/隐藏"开关，配置里叫 disable_umount
-  for _asf in /data/adb/hybrid-mount/config.toml /data/adb/hybrid_mount/config.toml /data/adb/magic_mount/config.toml \
-                 /data/adb/modules/mountify/config.toml /data/adb/mountify/config.toml; do
+  for _asf in /data/adb/hybrid-mount/config.toml /data/adb/hybrid_mount/config.toml \
+               /data/adb/magic_mount/config.toml /data/adb/modules/mountify/config.toml \
+               /data/adb/mountify/config.toml; do
     [ -f "$_asf" ] || continue
     _asdu=$(sed -n 's/^[[:space:]]*disable_umount[[:space:]]*=[[:space:]]*//p' "$_asf" 2>/dev/null | head -n1)
     _asiu=$(sed -n 's/^[[:space:]]*vfs_isolate_uids[[:space:]]*=[[:space:]]*//p' "$_asf" 2>/dev/null | head -n1)
@@ -1190,15 +1430,15 @@ if [ -f "$MODDIR/google_font.sh" ]; then
   GF_DIAG=""; GF_SEC=0; GF_STATUS_SEC=0; GF_SLOW=0
   _gf_t0=$(now_s)
   # ① 状态：先试实时（限 8 秒），超时就用缓存值并在报告里注明
-  GF_STATE=$(tmo 8 sh "$MODDIR/google_font.sh" status fresh 2>/dev/null | tr -d '[:space:]')
+  GF_STATE=$(tmo 6 sh "$MODDIR/google_font.sh" status fresh 2>/dev/null | tr -d '[:space:]')
   case "$GF_STATE" in
     on|off|foreign|unknown|nogms) ;;
-    *)  GF_STATE=$(tmo 5 sh "$MODDIR/google_font.sh" status 2>/dev/null | tr -d '[:space:]')
+    *)  GF_STATE=$(tmo 4 sh "$MODDIR/google_font.sh" status 2>/dev/null | tr -d '[:space:]')
         GF_CACHED=1 ;;
   esac
   _gf_mid=$(now_s)
   # ② 现场明细：和 1.0.9.1 一样照收（限 20 秒，超时就留空并注明）
-  GF_DIAG=$(tmo 20 sh "$MODDIR/google_font.sh" diag 2>/dev/null)
+  GF_DIAG=$(tmo 10 sh "$MODDIR/google_font.sh" diag 2>/dev/null)
   GF_SEC=$(( $(now_s) - _gf_t0 ))
   GF_STATUS_SEC=$(( _gf_mid - _gf_t0 ))
   [ "${GF_CACHED:-0}" = 1 ] && skip_note "谷歌字体兼容状态" "实时检测超时（8 秒），显示的是缓存值" "在界面点「重新检测」看最新状态"
@@ -1511,7 +1751,6 @@ sec_unadapted() {
           _should=0 ;;
       esac
     fi
-
     # ★ 2026-10-15 真机补：**再问一次 `_xml_family_ok`** ——
     #   它是"哪些族本来就被排除"的唯一权威（EMOJI/SYMBOL/MONO/CURSIVE/CASUAL/
     #   MATH/MUSIC/CLOCK，以及 SERIF）。
@@ -1553,6 +1792,50 @@ sec_unadapted() {
     echo "  （另有 $_nx 个是其它文字体系/符号字体，被排除是正确的，未列出）"
   fi
   hr
+d2_suggest_targets() {
+  local n=0 nm role
+  [ -n "${D2_EXIST_NAMES:-}" ] || return 0
+  [ -n "${D2_PLAN_NAMES:-}" ] || return 0
+  echo
+  echo "  【建议补进清单的字体】"
+  echo "    判据：目录里有 + 角色放行 + 不在当前计划 → 被文件名过滤挡住的"
+  echo "    怎么用：这些补进 targets/<rom>.list 后就会参与替换。"
+  echo "            「是不是机型级」由你判断 —— 别的同 ROM 机器也有 → 补；只这台有 → 不用补。"
+  echo
+  printf '    %-42s %-10s %s\n' "字体文件" "角色" "说明"
+  printf '    %-42s %-10s %s\n' "------------------------------------------" "----------" "----------------------"
+  for nm in $D2_EXIST_NAMES; do
+    [ -n "$nm" ] || continue
+    # ① 在计划里 → 已经会换，跳过
+    d2_in "$D2_PLAN_NAMES" "$nm" && continue
+    # ② 角色判定放行吗（放行 = 换了是安全的）
+    _role_set "$(_lc "$nm")" 2>/dev/null
+    role="$ROLE"
+    _role_wanted "$role" all 0 0 "$nm" 0 2>/dev/null || continue
+    # ③ 排除"本来就是符号类、且永远不换"的（sym 会被 _role_wanted 挡掉，这里兜一层）
+    case "$role" in sym) continue ;; esac
+    n=$((n + 1))
+    _why="被文件名过滤挡住"
+    _l=$(printf '%s' "$nm" | tr 'A-Z' 'a-z')
+    # ⚠️ 顺序有讲究：MiClockMono 同时含 clock 和 mono，
+    #   先判 clock 才不会被说成"等宽"（真机上这类名字很多）
+    case "$_l" in
+      *clock*)  _why="时钟（扫描按名字跳过）" ;;
+      *serif*)  _why="衬线（扫描按名字跳过）" ;;
+      *mono*)   _why="等宽（扫描按名字跳过）" ;;
+      *emoji*|*symbol*) _why="符号（扫描按名字跳过）" ;;
+    esac
+    printf '    %-42s %-10s %s\n' "$nm" "$role" "$_why"
+  done
+  if [ "$n" = 0 ]; then
+    echo "    （没有 —— 目录里的候选都已在计划里，或都被角色规则正确排除）"
+  else
+    echo
+    echo "    共 $n 个候选。"
+  fi
+  echo
+}
+
   d2_suggest_targets   # ★ 2026-10-16：建议补进清单的字体（作者看）
 }
 
@@ -1632,6 +1915,21 @@ conclusion() {
     echo "⏳ 结论：字体已经选好了，但「本次开机的时候还没选」，所以这次开机什么都没做。"
     echo "   → 重启一次就生效（重启后什么都不用点，字体就该变了）。"
     echo "   → 如果重启后还是没变，再看第 3 节（挂载是否成功）和第 6 节（中文是不是 .ttc）。"
+  elif [ "$MODE_FILE" = manager ] && [ -n "$PEND" ] && [ "$PEND" != none ]; then
+    # ★ 2026-10-19：**管理器挂载模式要单独判**。
+    #   这个模式下本模块不自己挂（把文件放进模块目录就交出去），所以
+    #   mount.state 没有本次开机记录是**正常的**，不该判成"挂载阶段没记录"。
+    #   真机实测（Xiaomi + hybrid_mount）：元模块一条都没挂上，而报告只会说
+    #   "有挂载记录但不是本次开机的"，用户完全看不出该改什么。
+    if [ "${VTOT:-0}" -gt 0 ] 2>/dev/null && [ "$VHIT" = "$VTOT" ]; then
+      echo "✅ 结论：管理器 / 元模块已经把字体挂上了（$VHIT/$VTOT 逐个核对通过）。"
+      echo "   「交给管理器挂载」模式下本模块不自己挂，mount.state 没有本次开机记录是正常的。"
+    else
+      echo "❌ 结论：选择的是「交给管理器挂载」，但管理器 / 元模块这一轮没把字体挂上去（${VHIT:-0}/${VTOT:-0}）。"
+      echo "   这个模式下本模块只负责把文件放进模块目录，真正挂载由管理器 / 元模块负责 ——"
+      echo "   它没挂，本模块替代不了（第 3 节能看到 /system/fonts 里没有任何本模块的挂载）。"
+      echo "   → 到 WebUI 把挂载方式改回「自带挂载」，重启一次即可（实测这条能生效）。"
+    fi
   elif [ "$PFD_THIS" != 0 ] && [ -z "$MS_BOOT" ]; then
     echo "❌ 结论：开机脚本跑了，但「挂载阶段」没有留下任何记录。"
     echo "   结合第 3 节的实测结果一起看（实测${MT_RESULT}）。"
@@ -1705,7 +2003,35 @@ conclusion() {
     echo "   这种情况下替换 /system/fonts 是无效的，需要先选回「默认」（或系统自带字体）再重启。"
   fi
   if [ "$G_DFONT" = 1 ]; then
-    echo "⚠ 另外：存在 /data/fonts（Android 可更新字体），它会盖过 /system/fonts（见第 7 节）。"
+    # ★ 2026-10-15 真机订正：以前这里写"**会**盖过 /system/fonts"（确定语气），
+  #   但第 7 节和脚注都写"各机型不一样，本报告不替你下结论" —— 自相矛盾。
+  #   而 realme RMX5010 的报告证明那句说满了：/data/fonts 里有 SysSans-En-Regular.ttf，
+  #   框架读的却是 /system/fonts/SysSans-En-Regular.ttf，这次并没有被盖过。
+  #   现在改成**用我们自己的计划对照**：列出"名字重叠、有被盖风险"的那几个，
+  #   具体、可核对；不再下绝对结论。
+  # 对照对象用 $M/slots.map（本次实际会替换的槽位清单）。
+  # ⚠ 不是 ${APPLIED}：报告里那个变量叫 APPLIED_LIST（读的是 slots.applied）。
+  #   比对用 shell 内建 case，不起 grep（报告里这种小循环很多，省进程）。
+  _df_hit=""
+  if [ -n "${G_DFONT_NAMES:-}" ] && [ -s "${M:-/nonexistent}/slots.map" ]; then
+    _df_all=$(cat "${M}/slots.map" 2>/dev/null)
+    for _dn in $G_DFONT_NAMES; do
+      case "$_df_all" in
+        *"/$_dn "*) _df_hit="$_df_hit $_dn" ;;
+      esac
+    done
+  fi
+  if [ -n "$_df_hit" ]; then
+    echo "⚠ 另外：存在 /data/fonts（Android 可更新字体），其中有 ${_df_hit# }"
+    echo "     这几个名字**也在本次替换计划里** —— 若系统优先读 /data/fonts，"
+    echo "     这几处就轮不到我们（见第 7 节；是否真优先，各机型不同）。"
+  else
+    echo "ℹ 另外：存在 /data/fonts（Android 可更新字体），但与本次替换计划**没有同名文件**，"
+    echo "     不影响我们（详见第 7 节）。"
+  fi
+  fi
+  if [ -n "${OPS_VERDICT:-}" ]; then
+    printf '%s\n' "$OPS_VERDICT"
   fi
   if [ "$G_MIUI" = 1 ]; then
     echo "⚠ 另外：检测到 MIUI / HyperOS 个性字体（主题字体）：$MIUI_DIRS"
@@ -1755,7 +2081,7 @@ conclusion() {
   fi
   if [ "$DATAFONT_N" -gt 0 ]; then
     echo "⚠ 另外：检测到「个性化字体」（厂商放在 /data 上、优先级可能高于 /system/fonts）："
-    printf '%s\n' $DATAFONT_LIST | while IFS= read -r _df; do
+printf '%s\n' $DATAFONT_LIST | while IFS= read -r _df; do
       [ -n "$_df" ] || continue
       _dfrel=${_df#"$FSROOT"}; _dfrel=${_dfrel#/}
       _dfin=否; printf '%s\n' "$PLAN_NOW" | grep -qF "$_dfrel" && _dfin=是
@@ -1791,6 +2117,70 @@ conclusion() {
       echo "      想让它接管：界面里把「设置里选的字体没被换掉？」打开，重启一次。"
     fi
   fi
+
+  # ---- 以下是只读探测结果（不依赖上面是否检测到个性化字体）----
+    if [ "${DISC_NEW_DIRS:-0}" -gt 0 ] 2>/dev/null; then
+  echo "  ★ 自动发现：${DISC_NEW_DIRS} 个目录有字体、但不在已知清单里"
+  printf '%s\n' "$DISCOVERED"
+  echo "    （请把这段连同报告一起发作者 —— 这就是"该补哪些目录"的直接依据）"
+fi
+if [ -n "${DISC_NEW_NAMES:-}" ]; then
+  echo "  ★ 设备上有、targets 名单里没有的字体名："
+  echo "    $DISC_NEW_NAMES"
+fi
+    # PID 1 视角（只在自挂载模式下有意义：元模块接管时挂载不是我们做的）
+  if [ "$(mount_mode 2>/dev/null)" != manager ]; then
+    _p1=$(pid1_visible "$M" 2>/dev/null)
+    case "$_p1" in
+      PID1*)
+        _p1v=$(printf '%s\n' "$_p1" | sed 's/^PID1 \([0-9]*\) \([0-9]*\).*/\1/')
+        _p1m=$(printf '%s\n' "$_p1" | sed 's/^PID1 \([0-9]*\) \([0-9]*\).*/\2/')
+        _p1s=$(printf '%s\n' "$_p1" | sed 's/^PID1 [0-9]* [0-9]*//')
+        echo "  PID 1 视角校验：计划里 $((_p1v + _p1m)) 个槽位中，$((_p1v)) 个在 PID 1 的挂载表里可见，$((_p1m)) 个看不到"
+        if [ "${_p1m:-0}" -gt 0 ] 2>/dev/null; then
+          echo "    看不到的（框架可能读不到我们的字体）：$_p1s"
+          echo "    → 若同时有条目显示「生效」，就说明挂载对当前 shell 可见、对框架不可见。"
+        fi
+        ;;
+    esac
+  fi
+
+if [ -n "${VDIR_REPORT:-}" ]; then
+echo "  厂商/主题字体目录实况（只读探测）："
+  printf '%s\n' "$VDIR_REPORT"
+  if [ "${VDIR_UNCOVERED:-0}" -gt 0 ] 2>/dev/null; then
+    echo "  ⚠ 上面标「未覆盖」的目录里有字体，而本模块**没有**替换它们 ——"
+    echo "    如果现象是「部分界面 / 锁屏时钟没变」，很可能就是这些目录在起作用（详见 changelog 说明）。"
+  fi
+fi
+if [ -d "${OPS_BRIDGE:-}" ]; then
+  echo "  ── 锁屏 / 时钟字体专项 ──"
+  if [ -n "${CLOCK_FONTS:-}" ]; then
+    echo "   ① 名字带 clock/time/digit/keyguard 的字体（在不在计划里）："
+    printf '%s\n' "$CLOCK_FONTS"
+  else
+    echo "   ① 没找到名字带 clock/time/digit 的字体（可能时钟并非用文字渲染）"
+  fi
+  if [ -n "${CLOCK_APK:-}" ]; then
+    echo "   ② overlay / 主题 APK 里打包了字体（这类字体改 /system/fonts 无效）："
+    printf '%s\n' "$CLOCK_APK"
+  else
+    echo "   ② 没发现 overlay / 主题 APK 里打包字体"
+  fi
+  if [ -n "${CLOCK_SET:-}" ]; then
+    echo "   ③ 时钟/字体相关设置："
+    printf '%s\n' "$CLOCK_SET"
+  fi
+  if [ -n "${CLOCK_PKG:-}" ]; then
+    echo "   ④ 相关系统包：$CLOCK_PKG"
+  fi
+  echo "  ColorOS 主题字体桥接目录: $OPS_BRIDGE（$OPS_ENTRIES 个字体条目：普通文件 $OPS_FILES / 符号链接 $OPS_LINKS）"
+  if [ -n "${OPS_DETAIL:-}" ]; then
+    printf '%s\n' "$OPS_DETAIL"
+  fi
+  echo "  说明: 符号链接指向 /system/fonts 的，本模块替换系统字体时已覆盖；"
+  echo "        普通文件是独立副本，本模块**没有**替换（设置里选的字体优先）。"
+fi
   echo "===== 结论结束，下面是原始数据（给作者看）====="
 }
 
@@ -2157,9 +2547,9 @@ sec6() {
     fi
   done
         echo "  运行时字体列表（部分机型支持 cmd font dump）:"
-        tmo 8 "$CMD" font dump sans-serif 2>/dev/null | head -n 30 | while IFS= read -r L; do echo "      $L"; done
-        tmo 8 "$CMD" font dump 2>/dev/null | head -n 15 | while IFS= read -r L; do echo "      [dump] $L"; done
-        tmo 8 dumpsys font 2>/dev/null | head -n 15 | while IFS= read -r L; do echo "      [dumpsys] $L"; done
+        tmo 6 "$CMD" font dump sans-serif 2>/dev/null | head -n 30 | while IFS= read -r L; do echo "      $L"; done
+        tmo 6 "$CMD" font dump 2>/dev/null | head -n 15 | while IFS= read -r L; do echo "      [dump] $L"; done
+        tmo 6 dumpsys font 2>/dev/null | head -n 15 | while IFS= read -r L; do echo "      [dumpsys] $L"; done
 }
 
 # ---------------------------------------------------------------------------
@@ -2271,7 +2661,7 @@ sec8() {
   ls -lZ /system/fonts 2>/dev/null | head -n 250 | while IFS= read -r L; do echo "      $L"; done
   echo "  /system/fonts 总占用: $(du -sk /system/fonts 2>/dev/null | cut -f1) KB"
   echo "  字体库文件（$(printf '%s\n' "$LIB_FONTS" | grep -c . ) 个）:"
-  printf '%s\n' "$LIB_FONTS" | while IFS= read -r _lf; do [ -f "$_lf" ] && ls -lZ "$_lf" 2>/dev/null; done | head -n 30 | while IFS= read -r L; do echo "      $L"; done
+  ls -lZ "$LIB"/f*.ttf 2>/dev/null | head -n 30 | while IFS= read -r L; do echo "      $L"; done
   echo "  字体库名称/元数据:"
   for f in $LIB_FONTS; do
     i=${f##*/}; i=${i%.ttf}
@@ -2333,7 +2723,7 @@ sec10() {
   echo "  关键行（skip / safe mode / Magisk / post-fs-data / post-mount / exec）:"
   grep -a -E 'skip|safe mode|Magisk detected|post-fs-data|post-mount|exec /data/adb/modules' /data/adb/ksu/log/*.log 2>/dev/null | tail -n 30 | while IFS= read -r L; do echo "      $L"; done
   echo "  dmesg 中的 KernelSU 信息:"
-  tmo 10 dmesg 2>/dev/null | grep -i -E 'kernelsu|ksud|ksu_' | tail -n 10 | while IFS= read -r L; do echo "      $L"; done
+  tmo 6 dmesg 2>/dev/null | grep -i -E 'kernelsu|ksud|ksu_' | tail -n 10 | while IFS= read -r L; do echo "      $L"; done
   echo "  电池/内存/存储:"
   echo "      MemTotal=$(sed -n 's/^MemTotal: *//p' /proc/meminfo 2>/dev/null)  MemAvailable=$(sed -n 's/^MemAvailable: *//p' /proc/meminfo 2>/dev/null)"
   df -k /data /cache /metadata 2>/dev/null | while IFS= read -r L; do echo "      $L"; done
@@ -2397,12 +2787,16 @@ sec11() {
   echo
   echo "  3) 管理器侧的现场（原样列出，不做格式猜测）"
   echo "     kernel_umount（.feature_config）: $AS_FEATURE"
+  echo "        ${AS_FEATURE_HINT:-}"
   echo "     /data/adb/ksu/.umount           : $AS_DOTUM"
   echo "     元模块配置                       : ${AS_METAUM:-（没找到 config.toml）}"
   echo "     （找不到这些文件不代表没这个机制：名单也可能只在管理器内部或内核里）"
   echo
   echo "  4) 怎么办（按顺序试，一次只改一个，改完重启再看同一个 App）"
-  echo "     ① 管理器 → 设置 → 关掉「默认卸载模块」"
+  echo "     ⓪ 最省事：给 KernelSU 加一个全局开关（一次对所有 App 生效，不用逐个点）"
+  echo "        /data/adb/ksu/.feature_config  里加一行：kernel_umount=0"
+  echo "        （文件不存在就新建，只写这一行也行；改完重启。）"
+  echo "     ① 或者：管理器 → 设置 → 关掉「默认卸载模块」"
   echo "        （= 黑名单模式：以后只有你手动开的 App 才卸）"
   echo "     ② 或者只给那一个 App 关：管理器的「应用配置 / App Profile」里把它的「卸载模块」关掉"
   echo "     ③ 装了元模块（Hybrid Mount 等）的：把它的「禁用卸载 / disable_umount」改成 true"
@@ -2457,7 +2851,8 @@ pack_extra() {
   echo "# 名字|框架解析路径|真实路径|是否存在|同名副本"
   printf '%s\n' "$NAMEMAP"
   echo "@@SECTION:FONTS_SHA256"
-      echo "# hash_mode=sparse（大小 + 修改时间 + 头尾各 64KB 的 sha256；同一份内容只算一次、重复路径复用同一指纹）"
+      echo "# hash_mode=sparse（大小 + 修改时间 + 头尾各 64KB 的 sha256；同一份内容只算一次、重复路径复用同一指纹）
+# ★ 2026-10-18：取哈希值时不再多起一个 cut 进程，改用 `read` 拆字段（300 个字体省 300 个进程）。"
   echo "# note=同一个字体目录被多个路径指到时只算一次（以前会重复哈希好几遍，这是最后一步特别慢的主因）"
   XMLNAMES_STR=" $(printf '%s' "$XMLNAMES" | tr '\n' ' ')"
   HDIRS=$(uniq_fontdirs)
@@ -2517,6 +2912,8 @@ pack_extra() {
   HN=0
   for d in $HDIRS; do
     [ -d "$d" ] || continue
+    # ★ load_meta（不是 load_sizes）：它一次 stat 同时建好"大小"和"mtime"两张表。
+    #   下一遍算指纹时 fp_of() 要用 mtime，没有这张表就得每个文件再起一次 stat。
     load_meta "$d"
     for f in "$d"/*; do
       [ -f "$f" ] || continue
@@ -2536,6 +2933,8 @@ pack_extra() {
   n=0
   for d in $HDIRS; do
     [ -d "$d" ] || continue
+    # ★ 同样换成 load_meta：这一遍后面要用 size_of() 判"文件够不够 4 字节取魔数"，
+    #   用 load_meta 建的表即可（它顺手把 SIZE_MAP 也填了），不必再单独 stat 一遍。
     load_meta "$d"
     # 前 4 字节（魔数）：一次 head 读出整目录（每文件 4 字节）+ 一次 od 转十六进制，
     # 纯 shell 按 8 个字符一段切开 —— 以前是每个文件起 head+od+tr 三个进程
@@ -2574,10 +2973,11 @@ pack_extra() {
   echo "@@SECTION:PROCS"
   # 当前和本模块相关的进程（让"有没有偷偷跑东西"一目了然）
   ps -A -o pid,ppid,args 2>/dev/null | grep -E 'diag\.sh|fontctl\.sh|update\.sh|custom_font' | grep -v grep | head -n 20
-  # ★ 2026-10-14 修**测量 bug**（与主项目同步）：原来这条
-  #   `timing_add 'PZ1 TTC头信息'` 写在 TTC 那段**之前** ——
-  #   所以 PZ1 记的是「表信息 + PROCS」的耗时，TTC 那段根本没被测到。
-  #   真机报告里“PZ1 TTC头信息 223 秒”其实是表信息那一段，会把人带偏。
+  # ★ 2026-10-14 修**测量 bug**：原来 timing_add 'PZ1 TTC头信息' 写在这里，
+  #   而 TTC 那段在它**后面**（下一个 subnote 之后）—— 所以 PZ1 记的是
+  #   「FONT_META 表信息 + PROCS」的耗时，**TTC 头信息压根没被测到**。
+  #   真机报告里"PZ1 TTC头信息 223 秒"其实是表信息那一段，找错方向会白费功夫。
+  #   现在把这条改名为它真正测的东西，TTC 那段另起一条 PZ1b。
   timing_add 'PZ0 表信息(魔数+sfnt标签)' "$_PZ_T"; _PZ_T=$(now_s)
   subnote "TTC 合集头信息"
   echo "@@SECTION:TTCHEAD"
@@ -2674,7 +3074,19 @@ pack_extra() {
   subnote "导出个性化字体"
   echo "@@SECTION:PERSONALFONT"
   echo "# 厂商个性化字体（/data 上的固定路径，优先级高于 /system/fonts）"
-  echo "# 检测到的: ${DATAFONT_LIST:-无}"
+  echo "# 时钟字体专项："
+printf '%s\n' "  时钟类字体：${CLOCK_FONTS:-（无）}"
+printf '%s\n' "  APK 内字体：${CLOCK_APK:-（无）}"
+printf '%s\n' "  相关设置：${CLOCK_SET:-（无）}"
+printf '%s\n' "  相关包：${CLOCK_PKG:-（无）}"
+echo "# 自动发现的新目录（$DISC_NEW_DIRS 个）："
+printf '%s\n' "${DISCOVERED:-（无）}"
+echo "# 设备上有、targets 没有的字体名：${DISC_NEW_NAMES:-（无）}"
+echo "# 厂商/主题字体目录（未覆盖 $VDIR_UNCOVERED 个）："
+printf '%s\n' "${VDIR_REPORT:-（无）}"
+echo "# ColorOS 桥接目录: ${OPS_BRIDGE:-无} 条目=$OPS_ENTRIES 普通文件=$OPS_FILES 链接=$OPS_LINKS"
+[ -n "${OPS_DETAIL:-}" ] && printf '%s\n' "$OPS_DETAIL"
+echo "# 检测到的: ${DATAFONT_LIST:-无}"
   if [ "$DATAFONT_N" -gt 0 ]; then
     printf '%s\n' $DATAFONT_LIST | while IFS= read -r L; do
       [ -n "$L" ] || continue
@@ -2709,6 +3121,109 @@ pack_extra() {
 }
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+sec12() {
+  echo
+  echo "【12】字体结构 / 合成字体（排查方框、同族用）"
+  hr
+  mget() {
+    sed -n "s/^$2=//p" "$LIB/$1.meta" 2>/dev/null | tail -n 1 | tr -d '\r'
+  }
+  mname() {
+    n_=$(cat "$LIB/$1.name" 2>/dev/null | tr -d '\r\n')
+    [ -n "$n_" ] || n_="$1"
+    printf '%s' "$n_"
+  }
+
+  echo "  ---- 字体库总览 ----"
+  echo "  id      名称                     体积KB   轮廓   字形数   合成"
+  echo "  ------  -----------------------  -------  -----  -------  ----"
+  cnt=0
+  for f in "$LIB"/f*.ttf; do
+    [ -e "$f" ] || continue
+    cnt=$((cnt + 1))
+    fid=${f##*/}
+    fid=${fid%.ttf}
+    fkb=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+    [ -n "$fkb" ] || fkb=0
+    fkb=$((fkb / 1024))
+    fol=$(mget "$fid" outline); [ -n "$fol" ] || fol="?"
+    fng=$(mget "$fid" glyphs);  [ -n "$fng" ] || fng="?"
+    fmg=$(mget "$fid" merge);   [ -n "$fmg" ] || fmg="-"
+    fname=$(mname "$fid")
+    printf '  %-6s  %-23s  %7s  %-5s  %-7s  %s\n' \
+      "$fid" "$(printf '%s' "$fname" | cut -c1-23)" "$fkb" "$fol" "$fng" "$fmg"
+  done
+  [ "$cnt" = 0 ] && echo "      （字体库为空）"
+
+  echo
+  echo "  ---- 合成字体明细 ----"
+  found=0
+  for f in "$LIB"/f*.ttf; do
+    [ -e "$f" ] || continue
+    sid=${f##*/}
+    sid=${sid%.ttf}
+    smg=$(mget "$sid" merge)
+    [ "$smg" = 1 ] || continue
+    found=$((found + 1))
+    sname=$(mname "$sid")
+    echo "    $sid  $sname"
+    echo "        基座      : $(mget "$sid" base)"
+    echo "        分区素材  : $(mget "$sid" zones)"
+    echo "        内部族名  : $(mget "$sid" family)"
+    echo "        说明：族的判据是字体内部 name 表，合成字体应带「合成」后缀"
+    echo "        轮廓/字形 : $(mget "$sid" outline) / $(mget "$sid" glyphs)"
+    echo "        危险表    : hdmx=$(mget "$sid" t_hdmx) LTSH=$(mget "$sid" t_ltsh) VDMX=$(mget "$sid" t_vdmx) gvar=$(mget "$sid" t_gvar)"
+    echo "        说明：hdmx/LTSH/VDMX 必须为 0（按字形索引，合并后没扩展会越界）"
+  done
+  [ "$found" = 0 ] && echo "      （没有合成字体）"
+
+  echo
+  echo "  ---- 当前生效字体 ----"
+  aid=$(cur_active 2>/dev/null | tr -d '\r\n')
+  if [ -z "$aid" ] || [ "$aid" = "none" ]; then
+    echo "      当前无字体（系统默认）"
+  else
+    aname=$(mname "$aid")
+    echo "      生效 id   : $aid  $aname"
+    echo "      轮廓/字形 : $(mget "$aid" outline) / $(mget "$aid" glyphs)"
+    echo "      内部族名  : $(mget "$aid" family)"
+    echo "      覆盖      : 中文汉字=$(mget "$aid" rate_hanzi)%  拉丁=$(mget "$aid" rate_latin)%"
+  fi
+
+  echo
+  echo "  ---- 字体结构清单（.fdata，导入/合成时自动生成）----"
+  if [ -n "$aid" ] && [ "$aid" != "none" ] && [ -f "$LIB/$aid.fdata" ]; then
+    echo "      当前生效 $aid 的完整结构："
+    sed 's/^/        /' "$LIB/$aid.fdata" 2>/dev/null | head -n 32
+  else
+    echo "      （当前字体没有 .fdata：1.4.5 之前导入的字体没有这份记录）"
+  fi
+
+  echo
+  echo "  ---- 库内字体结构摘要（横向对比谁缺东西）----"
+  for f in "$LIB"/f*.ttf; do
+    [ -e "$f" ] || continue
+    qid=${f##*/}
+    qid=${qid%.ttf}
+    qname=$(mname "$qid")
+    if [ -f "$LIB/$qid.fdata" ]; then
+      qol=$(sed -n 's/^outline=//p' "$LIB/$qid.fdata" | head -n 1)
+      qng=$(sed -n 's/^numGlyphs=//p' "$LIB/$qid.fdata" | head -n 1)
+      qly=$(sed -n 's/^layout=//p' "$LIB/$qid.fdata" | head -n 1)
+      qvr=$(sed -n 's/^variable=//p' "$LIB/$qid.fdata" | head -n 1)
+      qcm=$(sed -n 's/^cmap_subtables=//p' "$LIB/$qid.fdata" | head -n 1)
+      echo "      $qid $qname"
+      echo "          轮廓=$qol 字形=$qng 可变=[$qvr] 排版=[$qly]"
+      echo "          cmap: $qcm"
+    else
+      echo "      $qid $qname （无 .fdata）"
+    fi
+  done
+  hr
+  echo "  说明：本节只读 .meta / .fdata 小文件，不读字体本体、不解析 cmap，几乎不耗时。"
+}
+
 report_full() {
   echo "== 自定义字体切换模块 · 一键体检报告 =="
   collect_once
@@ -2725,6 +3240,7 @@ report_full() {
   sec9
   sec10
   sec11
+  sec12
   echo
   echo "== 报告结束 =="
 }
@@ -3698,46 +4214,3 @@ exit 0
 #     → 只可能是被文件名过滤挡住的 → 补进清单就能换
 #   然后由作者判断"是不是机型级"（别的同 ROM 机器也有 → 补；只这台有 → 不补）。
 # ---------------------------------------------------------------------------
-d2_suggest_targets() {
-  local n=0 nm role
-  [ -n "${D2_EXIST_NAMES:-}" ] || return 0
-  [ -n "${D2_PLAN_NAMES:-}" ] || return 0
-  echo
-  echo "  【建议补进清单的字体】"
-  echo "    判据：目录里有 + 角色放行 + 不在当前计划 → 被文件名过滤挡住的"
-  echo "    怎么用：这些补进 targets/<rom>.list 后就会参与替换。"
-  echo "            「是不是机型级」由你判断 —— 别的同 ROM 机器也有 → 补；只这台有 → 不用补。"
-  echo
-  printf '    %-42s %-10s %s\n' "字体文件" "角色" "说明"
-  printf '    %-42s %-10s %s\n' "------------------------------------------" "----------" "----------------------"
-  for nm in $D2_EXIST_NAMES; do
-    [ -n "$nm" ] || continue
-    # ① 在计划里 → 已经会换，跳过
-    d2_in "$D2_PLAN_NAMES" "$nm" && continue
-    # ② 角色判定放行吗（放行 = 换了是安全的）
-    _role_set "$(_lc "$nm")" 2>/dev/null
-    role="$ROLE"
-    _role_wanted "$role" all 0 0 "$nm" 0 2>/dev/null || continue
-    # ③ 排除"本来就是符号类、且永远不换"的（sym 会被 _role_wanted 挡掉，这里兜一层）
-    case "$role" in sym) continue ;; esac
-    n=$((n + 1))
-    _why="被文件名过滤挡住"
-    _l=$(printf '%s' "$nm" | tr 'A-Z' 'a-z')
-    # ⚠️ 顺序有讲究：MiClockMono 同时含 clock 和 mono，
-    #   先判 clock 才不会被说成"等宽"（真机上这类名字很多）
-    case "$_l" in
-      *clock*)  _why="时钟（扫描按名字跳过）" ;;
-      *serif*)  _why="衬线（扫描按名字跳过）" ;;
-      *mono*)   _why="等宽（扫描按名字跳过）" ;;
-      *emoji*|*symbol*) _why="符号（扫描按名字跳过）" ;;
-    esac
-    printf '    %-42s %-10s %s\n' "$nm" "$role" "$_why"
-  done
-  if [ "$n" = 0 ]; then
-    echo "    （没有 —— 目录里的候选都已在计划里，或都被角色规则正确排除）"
-  else
-    echo
-    echo "    共 $n 个候选。"
-  fi
-  echo
-}
