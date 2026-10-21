@@ -11,6 +11,22 @@ MODDIR=${0%/*}
 
 # ---------------------------------------------------------------------------
 # 自愈：扫描缓存被清过（或安装时 rescan 失败）→ 补建一次槽位清单
+
+# 自愈：字体结构字段（轮廓类型 / 是否可变 / 轴范围）缺失 → 开机补一次。
+#   刷入时本该写好；万一没写成（老版本装的字体），在这里补，比等界面探测早得多。
+if [ -f "$MODDIR/metaprobe.sh" ]; then
+  _miss=0
+  for _f in "$_LIB"/f*.ttf "$_LIB"/builtin_*.ttf; do
+    [ -e "$_f" ] || continue
+    _i=${_f##*/}; _i=${_i%.ttf}
+    if [ -f "$_LIB/$_i.meta" ]; then
+      grep -q '^outline_type=' "$_LIB/$_i.meta" 2>/dev/null || { _miss=1; break; }
+    else
+      _miss=1; break
+    fi
+  done
+  [ "$_miss" = 1 ] && LIB="$_LIB" sh "$MODDIR/metaprobe.sh" >/dev/null 2>&1
+fi
 #   只在这个小文件缺失时才动手，正常开机零开销。
 # ---------------------------------------------------------------------------
 _LIB="${LIB:-/data/adb/custom_font_lib}"
@@ -108,7 +124,7 @@ if [ -f "$LIB/.gms_journal.conf" ] && [ -f "$MODDIR/google_font.sh" ]; then
   [ -x /system/bin/ionice ] && /system/bin/ionice -c2 -n7 $$ >/dev/null 2>&1
   if command -v timeout >/dev/null 2>&1; then
     timeout 90 sh "$MODDIR/google_font.sh" reconcile
-    [ -f "$MODDIR/gms_cache.sh" ] && timeout 90 sh "$MODDIR/gms_cache.sh" on >/dev/null 2>&1
+# 2026-10-21：桥接功能已摘除（对 Play 商店无效，且会让部分 Google 应用异常）
      >/dev/null 2>&1
   else
     sh "$MODDIR/google_font.sh" reconcile >/dev/null 2>&1
