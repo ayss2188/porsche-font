@@ -191,7 +191,7 @@ fi
 WANTED="$LAST"
 
 for f in common.sh slots.sh mount.sh fontctl.sh update.sh google_font.sh gms_cache.sh nameclone.sh action.sh \
-         diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh; do
+         diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh metaprobe.sh fdata.sh ; do
   chmod 755 "$MODPATH/$f" 2>/dev/null
 done
 rm -f "$MODPATH/customize.sh.bak" 2>/dev/null
@@ -417,36 +417,87 @@ ui_print "- 完成"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# 扫描缓存：1.4.5 强制重扫一次（之后不再随版本重扫）
-#
-#   为什么：老版本扫出来的 device.list 缺了后来新增的目录和规则。
-#   为什么只做一次：扫描是安装/开机链路上最慢的一步，永久目录就是为了省它。
-#   以后只有"改了扫描逻辑"的版本才需要重扫 —— 那时把下面的 ID 改一下即可。
+# 扫描印记：只在"需要重扫"时才扫
+#   scanmarks.conf 声明要求版本（slot / font 分开），设备上 .scanmarks 记已扫到哪版
+#   设备记录 <= 要求版本 → 扫（含同版本覆盖安装，方便开发自测）
+#   设备记录 >  要求版本 → 跳过
 # ---------------------------------------------------------------------------
-# 兜底：确保 LIB 有值（没定义时绝不能对空路径做 rm）
 LIB="${LIB:-/data/adb/custom_font_lib}"
-FORCE_SCAN_ID="2026-10-21-first-refresh"
-if [ -d "$LIB/scanned" ] && [ ! -f "$LIB/scanned/.force_$FORCE_SCAN_ID" ]; then
+MARKS="$LIB/.scanmarks"
+MCUR=$(sed -n 's/^versionCode=//p' "$MODPATH/module.prop" 2>/dev/null | head -1 | tr -d '\r')
+case "$MCUR" in ''|*[!0-9]*) MCUR=0 ;; esac
+
+mk_req() {
+  [ -f "$MODPATH/scanmarks.conf" ] || return 1
+  sed -n "s/^$1=//p" "$MODPATH/scanmarks.conf" 2>/dev/null | head -1 | tr -d '\r'
+}
+mk_cur() {
+  [ -f "$MARKS" ] || return 1
+  sed -n "s/^$1=//p" "$MARKS" 2>/dev/null | head -1 | tr -d '\r'
+}
+mk_need() {
+  _req=$(mk_req "$1")
+  case "$_req" in ''|*[!0-9]*) return 1 ;; esac
+  _cur=$(mk_cur "$1")
+  case "$_cur" in '') return 0 ;; esac
+  case "$_cur" in *[!0-9]*) return 0 ;; esac
+  [ "$_cur" -le "$_req" ] && return 0
+  return 1
+}
+mk_set() {
+  mkdir -p "$LIB" 2>/dev/null
+  [ -f "$MARKS" ] || : > "$MARKS" 2>/dev/null
+  grep -v "^$1=" "$MARKS" > "$MARKS.tmp" 2>/dev/null
+  echo "$1=$2" >> "$MARKS.tmp"
+  mv -f "$MARKS.tmp" "$MARKS" 2>/dev/null
+}
+
+if [ -f "$LIB/.force_rescan" ]; then
+  rm -f "$MARKS" "$LIB/.force_rescan" 2>/dev/null
+  ui_print "- 检测到强制重扫标记，本次全部重扫"
+fi
+
+if mk_need slot; then
   rm -f "$LIB/scanned/device.list" "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" \
         "$LIB/scanned/skip.list" "$LIB/scanned/ttc.list" "$LIB/scanned/env.list" \
         "$LIB/scanned/.schema" 2>/dev/null
-  : > "$LIB/scanned/.force_$FORCE_SCAN_ID" 2>/dev/null
-  ui_print "- 已清空旧的字体扫描缓存（本版强制重扫一次）"
+  if [ -f "$MODPATH/fontctl.sh" ]; then
+    sh "$MODPATH/fontctl.sh" rescan >/dev/null 2>&1 && {
+      mk_set slot "$MCUR"
+      ui_print "- 已重建字体槽位清单（版本印记 slot=$MCUR）"
+    }
+  fi
+else
+  ui_print "- 槽位清单已是最新（无需重扫）"
 fi
-
 
 # ---------------------------------------------------------------------------
 # 清空缓存后立刻重建（否则界面「槽位总数 / 机型清单 / 本机扫描」会显示为空）
 #   这一次扫描就发生在安装时，开机和应用路径上仍然是读缓存，速度不受影响。
 # ---------------------------------------------------------------------------
-if [ -f "$MODPATH/fontctl.sh" ]; then
-  sh "$MODPATH/fontctl.sh" rescan >/dev/null 2>&1 && \
-    ui_print "- 已重建字体槽位清单"
-fi
 
-if [ -f "$MODPATH/fdata.sh" ]; then
-  sh "$MODPATH/fdata.sh" 2>/dev/null | sed 's/^/  /' >/dev/null 2>&1
-  ui_print "- 已为已有字体补充结构档案"
+
+if mk_need font; then
+  if [ -f "$MODPATH/fdata.sh" ]; then
+    sh "$MODPATH/fdata.sh" 2>/dev/null | sed 's/^/  /' >/dev/null 2>&1
+    ui_print "- 已为已有字体补充结构档案"
+  fi
+  
+# ---------------------------------------------------------------------------
+# 清理旧版"GMS 缓存桥接"的残留（本版已移除该功能）
+# ---------------------------------------------------------------------------
+if [ -f "$LIB/gms_cache.sh" ]; then
+  LIB="$LIB" sh "$LIB/gms_cache.sh" off >/dev/null 2>&1 || true
+fi
+rm -f "$LIB"/.clone.*.ttf "$LIB/.gms_cache_on" "$LIB"/.gms_bridge.list "$LIB"/.gms_bridge.log 2>/dev/null
+
+if [ -f "$MODPATH/metaprobe.sh" ]; then
+    LIB="$LIB" sh "$MODPATH/metaprobe.sh" 2>/dev/null | sed 's/^/  /' >/dev/null 2>&1
+    ui_print "- 已写入字体合成所需信息（轮廓类型 / 可变轴）"
+  fi
+  mk_set font "$MCUR"
+else
+  ui_print "- 字体档案已是最新（无需重扫）"
 fi
 
 set_perm_recursive "$MODPATH" 0 0 0755 0644
