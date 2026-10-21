@@ -182,14 +182,9 @@ original_state() {
   fi
 }
 
-bridge() {   # 商店缓存桥接（让商店也生效）；测试环境不跑
-  [ -z "$CFS_ALLOW_NONROOT" ] || return 0
-  [ -f "$MODDIR/gms_cache.sh" ] || return 0
-  # ★ 2026-10-16：这里传 force —— 因为调用方是**界面上的按钮**（用户显式开启/关闭）。
-  #   而 gms_cache.sh 的 do_on 现在有一道门槛：账本不在就拒绝自动挂载
-  #   （修"关掉了还被开机脚本挂回去"那个 bug）。
-  #   用户点「开启兼容」时账本还没建立，不传 force 就会被那道门槛挡掉。
-  tmo 60 sh "$MODDIR/gms_cache.sh" "$1" force >/dev/null 2>&1
+bridge() {
+  # 2026-10-21 停用：GMS 缓存桥接整体摘除（对 Play 商店无效，且会让部分 Google 应用异常）
+  return 0
 }
 cur_user() {
   local u=""
@@ -223,6 +218,14 @@ kill_consumers() {
   printf 'count=%s\ntime=%s\nboot=%s\n' "$n" "$(date +%s 2>/dev/null)" "$(cat "$BOOTID_FILE" 2>/dev/null)" > "$stamp" 2>/dev/null
   tmo 10 "$AM" kill --user "$u" "$GMS"     >/dev/null 2>&1
   tmo 10 "$AM" kill --user "$u" "$VENDING" >/dev/null 2>&1
+  # 2026-10-21：am kill 只清后台；Chrome/Gemini 这类会把"用系统字体"缓存住，
+  # 组件恢复后也不会重新取字体 → 必须 force-stop 才能立刻生效。
+  for _pkg in com.android.chrome com.google.android.apps.bard \
+              com.google.android.googlequicksearchbox com.google.android.gm \
+              com.android.vending; do
+    [ -d "/data/data/$_pkg" ] || continue
+    tmo 10 "$AM" force-stop --user "$u" "$_pkg" >/dev/null 2>&1 || true
+  done
   return 0
 }
 
