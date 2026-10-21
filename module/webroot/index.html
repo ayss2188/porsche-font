@@ -241,7 +241,7 @@ body { min-height: 100%; }
     background: var(--toast-bg); color: #fff; padding: 10px 16px; border-radius: 14px;
     font-size: 13px; line-height: 1.45; text-align: center; opacity: 0;
     transition: opacity .25s ease, transform .25s cubic-bezier(.22,.8,.34,1);
-    pointer-events: none; max-width: 88vw; box-shadow: 0 10px 30px -12px rgba(0,0,0,.5); z-index: 30;
+    pointer-events: none; max-width: 88vw; box-shadow: 0 10px 30px -12px rgba(0,0,0,.5); 
   }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
@@ -324,7 +324,8 @@ body { min-height: 100%; }
 
   /* 弹窗 */
   .modal-mask {
-    position: fixed; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 20; background: rgba(0,0,0,.55);
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 95;   /* ★ 必须高于 po-mask(80)/合成面板，
+                     否则面板里弹出的确认框被盖住，await 不返回 = 界面卡死 */; background: rgba(0,0,0,.55);
     display: flex; align-items: center; justify-content: center;
     /* ★ 2026-10-14：留出手势条 / 导航栏。只写 padding:24px 的话，
        在"手势条悬浮"的机器上弹窗底部会贴到手势条下面，底部按钮被挡住 ——
@@ -812,7 +813,8 @@ body { min-height: 100%; }
   .po-panel{animation:uiLift .3s cubic-bezier(.2,.9,.25,1) both}
 
   /* 提示条：仅在显示时播动画（否则会常驻成黑条） */
-  .toast.show{animation:uiToast .24s cubic-bezier(.2,.9,.25,1) both}
+  /* ★ 2026-10-21：原动画关键帧只写 translateY/scale，会覆盖 .toast 的
+     translate(-50%) 居中 → 提示条右偏半个身位；.toast 本身有 transition，删掉。 */
 
   .lib-box{transition:grid-template-rows .26s cubic-bezier(.3,.9,.3,1)}
 }
@@ -973,7 +975,7 @@ try {
   <div class="divider"></div>
 
 
-  <div class="section-title fade"><span>谷歌字体兼容</span></div>
+  <div class="section-title fade"><span>Google 应用改用系统字体</span></div>
   <div class="status-box fade">
     <div class="status-row">
       <span class="label">当前状态</span>
@@ -985,7 +987,9 @@ try {
     <button class="g-btn" id="enableBtn" onclick="googleAction('enable')">开启兼容</button>
     <button class="g-btn" id="restoreBtn" onclick="googleAction('restore')">关闭兼容</button>
   </div>
-  <div class="g-hint fade">开启/关闭立即生效（用于 Chrome / Gmail 等被 GMS 下载字体覆盖的情况）。只会恢复本模块停用过的组件，卸载模块时自动恢复。</div>
+  <div class="g-hint fade"><b>作用</b>：停用 GMS 的字体提供器，让 Chrome 这类应用改用系统字体（= 你的字体）。<br>
+      <b>副作用</b>：个别 Google 应用（如 Gemini）可能拿不到字体而闪退或排版异常 —— 遇到就把这里关掉、重启。<br>
+      <b>Play 商店改不了</b>：它的字体打包在自己的 APK 里（ProductSans），这是机制限制。</div>
 
   <div class="divider"></div>
 
@@ -1205,185 +1209,9 @@ try {
       <div class="rep-view" id="reportView"></div>
       <div class="g-hint" id="reportFileHint">生成完会<b>自动存到 Download → 完整体检报告.txt</b>（只有这一个文件，不用手动存）；生成过程中会不断覆盖它，中途打开也能看到已写好的部分。</div>
       <div class="btn-row" id="reportChoice" style="display:none">
-        <button class="g-btn primary-blue" id="reportChoiceFast" onclick="repStart('full','full')">全速生成</button>
-        <button class="g-btn" id="reportChoiceSlow" onclick="repStart('full','gentle')">慢慢生成</button>
-      </div>
-      <div class="g-hint" id="reportChoiceHint" style="display:none"></div>
-      <!-- ★ 2026-10-16（作者要求）：上传前提醒挂梯子。
-           为什么需要：上传走设备上的 curl，而服务器在境外 ——
-           梯子没覆盖到那个域名时，现象就是"点了没反应 / 上传失败"，
-           用户会以为是模块坏了（作者真机反馈过好几次）。 -->
-      <div class="btn-row">
-        <button class="g-btn urgent" id="reportCancelBtn" onclick="cancelReport()" style="display:none">中止生成</button>
-        <button class="g-btn" id="reportMoreBtn" onclick="reportMore()" style="display:none">更多</button>
-        <button class="g-btn" id="reportViewBtn" onclick="repShowView(repViewMode === 'raw' ? 'pretty' : 'raw')" style="display:none">文本</button>
-        <button class="g-btn" id="reportRegenBtn" onclick="regenReport()" style="display:none">重生成</button>
-        <!-- ★ 2026-10-16：生成完成后就地提供"上传给作者"（传作者自己的服务器）。
-             作者的意见：它属于完整报告的一部分，放在外面的区块里"感觉很奇怪" ——
-             而且它依赖这次刚生成的文件，就地放才说得通。
-             所以只在**生成完成**（repPaintDone）后才出现。 -->
-        <button class="g-btn primary-blue" id="reportServerBtn" onclick="repSendServer()" title="需要先连 VPN（服务器在境外）" style="display:none">上传</button>
-        <button class="g-btn primary-blue" onclick="closeReport()">关闭</button>
-      </div>
-    </div>
-  </div>
-  
-
-
-  <div class="modal-mask" id="logMask">
-    <div class="modal">
-      <h3>更新日志</h3>
-      <div class="loading-box small" id="logLoading" style="display:none"><span class="spin"></span><span>读取中…</span></div>
-      <div class="changelog" id="logText"></div>
-      <div class="btn-row">
-        <button class="g-btn" id="logOnlineBtn" onclick="loadOnlineChangelog()">看线上最新</button>
-        <button class="g-btn primary-blue" onclick="closeChangelog()">关闭</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="toast" id="toast"></div>
-
-  <!-- 重启遮罩：独立于提示条，不会被后台进度提示覆盖 -->
-  <div class="modal-mask" id="rebootMask">
-    <div class="modal">
-      <h3 id="rebootTitle">正在重启…</h3>
-      <div class="loading-box" id="rebootLoading"><span class="spin"></span><span id="rebootText">正在发送重启命令，请稍候…</span></div>
-      <div class="g-hint" id="rebootFallback" style="display:none">
-        重启命令没有生效（可能被系统拦住了）。请到 Root 管理器的模块页点「重启」，
-        或长按电源键选择重启；重启后新版本才会生效。
-      </div>
-      <div class="btn-row" id="rebootBtns" style="display:none">
-        <button class="g-btn primary-blue" onclick="document.getElementById('rebootMask').classList.remove('show');rebooting=false;">知道了</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-mask" id="modalMask">
-    <div class="modal">
-      <h3 id="modalTitle"></h3>
-      <p id="modalMsg"></p>
-      <input class="txt" id="modalInput" type="text" maxlength="40" style="display:none">
-      <textarea class="txt" id="modalArea" rows="4" maxlength="300" style="display:none;resize:vertical;line-height:1.5;font-family:inherit"></textarea>
-      <div class="lbl" id="modalSelLbl" style="display:none"></div>
-      <select class="txt" id="modalSelect" style="display:none"></select>
-      <div class="btn-row">
-        <button class="g-btn" id="modalAlt" style="display:none"></button>
-        <button class="g-btn" id="modalCancel">取消</button>
-        <button class="g-btn primary" id="modalOk">确定</button>
-      </div>
-    </div>
-  </div>
-
-<script>
-/* ★ 2026-10-19 保时捷版改动：模块路径按打包时注入的 id 直接算。
-   这份界面是 4 个配色包（三合一 / 718 / 911 / GT3）共用的同一份模板，
-   各包 id 不同（porsche_font_multi / _718 / _911 / _gt3），
-   写死主项目的 custom_font_switcher 会让界面一条命令都调不到。
-   注意：**不要用运行时探测**——那需要 await 一条 shell，
-   在某些环境下回调不返回，整个界面就会永远卡在「正在读取」。 */
-const MODULE_HINT = "porsche_font_multi";   // 打包脚本会按变体改写
-const MODDIR = "/data/adb/modules/" + MODULE_HINT;
-const LIB = "/data/adb/custom_font_lib";
-const DIAGWEB = MODDIR + "/webroot/diag";   // 诊断状态/正文的镜像目录（fetch 直接读，不起 shell）
-/* ===========================================================================
-   ★ 2026-10-16 上报通道：**只有一条 —— 作者自己的服务器**
-   ===========================================================================
-   服务器：Cloudflare Worker（cfs-report）+ R2 存储桶 cfs-reports
-     收报告  POST /report               带 x-cfs-key 口令
-     看报告  GET  /list?k=VIEW_KEY      网页表格，能下载、能删
-     为什么用它：报告整份存 R2（单份上限 8MB），**不占邮件正文长度**。
-
-   为什么去掉另外两条路（都不是坏东西，只是别扭）：
-     · Web3Forms 邮箱 —— 报告当邮件正文发，正文有 4000 字符上限，
-                         真机上被截断过，而截掉的恰好是最该看的几段
-     · GitHub Issue  —— 手机上 github.com 没梯子打不开，还要手动拖文件
-
-   ⚠️ 所以：**上传失败基本就是没挂梯子**（服务器在国外）。
-      界面上的提示也这么写了 —— 不用怀疑别的。
-
-   WORKER_URL : 服务地址
-   WORKER_KEY : 上传口令（UPLOAD_KEY）。它只能【写】不能【读】，
-                拿到它顶多往桶里塞垃圾报告，看不到已有的。
-                所以内置在界面里是安全的。换口令：改 Worker 的 secret + 改这里。
-   =========================================================================== */
-/* ★ 2026-10-16 作者要求：**只留自己的服务器这一条通道**。
-   去掉的两条：
-     · Web3Forms 邮箱 —— 报告当邮件正文发，正文有 4000 字符上限，真机被截断过
-     · GitHub Issue  —— 手机上 github.com 在没梯子时打不开，还要手动拖文件
-   两条都是"能用但别扭"，而自己的服务器（Cloudflare R2，单份上限 8MB）没有这些问题。
-   所以现在只有一条路：传不上去就挂个梯子，没有第二条退路。（报告还会留在
-   Download/快捷报告.txt，实在不行可以手动发。） */
-
-/* ---------- ★ 2026-10-16：自己的上报服务器（优先走这条）----------
-   背景：Web3Forms 的问题是**报告要当邮件正文发**，正文有 4000 字符上限，
-        真机上就被截断过 —— 而截掉的恰好是最该看的几段。
-        作者原本就部署了一个 Cloudflare Worker（报告存 R2），
-        那条路**不占长度**（单份上限 8MB），也没有 250 封/月 的额度焦虑。
-
-   通道顺序：
-     ① Worker（自己的服务器）—— 完整报告，不截断
-     ② Web3Forms —— 兜底。Worker 不通时自动回退（比如没挂梯子）
-
-   ⚠️ WORKER_KEY 必须跟 Worker 里 `wrangler secret put UPLOAD_KEY` 设的**完全一致**。
-      这个口令不是"密码级"的机密（它只是防止外人拿你的 R2 当网盘刷），
-      所以内置在界面里是可接受的 —— 跟 Web3Forms 的 access_key 同理。
-      真要换口令：改 Worker 的 secret + 改这里，两处一致即可。
-*/
-const WORKER_URL = "https://cfs-report.2188366745q.workers.dev";
-const WORKER_KEY = "up_AIWDsNGqSacruDo4wLnJmEiMvgEMpGtt";
-
-/* 自检：在控制台里跑一下就知道服务器通不通、口令对不对。
-   手机上看不到控制台的话，直接在浏览器打开这个地址也行：
-     https://cfs-report.2188366745q.workers.dev/health   → 正常会返回 ok
-   用法：ksu 界面里没法开控制台，所以这个函数主要是给"以后排查"留的。 */
-/* 连接自检（2026-10-16 加）
-   为什么加：作者反馈"挂了梯子也上传不了"，而错误信息只有一个
-   "Failed to fetch"，看不出是【网络到不了】还是【口令不对】还是【别的】。
-   这个函数把三段分别测一遍，结果直接显示在界面上 —— 一眼定位。
-
-   它做的三件事：
-     ① 看两个常量填了没（没填就根本不会走这条路）
-     ② GET /health        —— 纯连通性（不需要口令）
-     ③ POST /report       —— 口令对不对 + R2 桶通不通（传一小段测试文本）
-*/
-const NONE_LABEL = "无字体（系统默认）";
-const ROM_NAMES = {hyperos:"澎湃OS/HyperOS/MIUI", coloros:"ColorOS/OPPO/一加/realme", originos:"OriginOS/vivo/iQOO", flyme:"Flyme/魅族", samsung:"三星 One UI", honor:"荣耀 MagicOS（自动发现）", huawei:"华为 EMUI/鸿蒙（自动发现）", nothing:"Nothing OS（自动发现）", aosp:"原生/类原生/谷歌Pixel"};
-const HUGE_FONT = Infinity;   // 保时捷版：不做体积警告（内置配色本身就 42MB）
-const SCOPE_TEXT = {all: "中英文", latin: "仅英文/数字", cjk: "仅中文"};
-const THEME_LABELS = {auto:"🌓 自动", light:"☀️ 浅色", dark:"🌙 深色"};
-
-let cbCounter = 0, busy = false, themePref = "auto", toastTimer = null, rebooting = false;
-let fonts = [];            // [{id,name,size}]
-let activeId = "none", pendingId = "none";
-let manageMode = false;
-const selected = new Set();   // 字体库多选
-
-/* ---------- 基础工具 ---------- */
-function ksuExec(cmd) {
-  return new Promise((resolve, reject) => {
-    if (typeof ksu === "undefined" || typeof ksu.exec !== "function") { reject(new Error("NO_BRIDGE")); return; }
-    const cbName = "__ksu_cb_" + (cbCounter++);
-    window[cbName] = (errno, stdout, stderr) => {
-      delete window[cbName];
-      if (errno === 0) resolve(stdout);
-      else reject(new Error(((stdout || "") + (stderr || "")).trim() || ("errno=" + errno)));
-    };
-    try { ksu.exec(cmd, "{}", cbName); } catch (e) { delete window[cbName]; reject(e); }
-  });
-}
-const shq = s => "'" + String(s).replace(/'/g, "'\\''") + "'";
-const errText = e => String(e && e.message || e).replace(/^ERROR:/, "");
-// 大小显示：拿不到真实大小就显示——，不要用 Math.max(1,..) 编一个"1 KB"出来
-const fmtSize = n => (n > 0)
-  ? (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB")
-  : "—";
-const nextPaint = () => new Promise(r => setTimeout(r, 50));
-const baseName = p => p.split("/").pop();
-const stripExt = n => n.replace(/\.[^.]+$/, "");
-
-function showToast(msg, sticky) {
-  if (rebooting && !msg.startsWith("正在重启")) return;   // 重启中不让后台进度提示抢提示条
+    let _copied = false;
+    try { await navigator.clipboard.writeText(String(out && out.length > 20 ? out : "")); _copied = false; } catch (e) {}
+    showToast("自动上传没成功。报告已在 Download/" + name + "，直接发给作者就行（不需要装 curl、不需要梯子）");
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.classList.add("show");
@@ -5894,6 +5722,30 @@ async function probeFont(path) {
     tables[String.fromCharCode(dir[o], dir[o + 1], dir[o + 2], dir[o + 3])] = {off: u32(dir, o + 8), len: u32(dir, o + 12)};
   }
   const meta = {vf: tables["fvar"] ? 1 : 0};
+  // ★ 2026-10-21：记下轮廓类型 / 可变轴范围 / 轴标签
+  //   （与主项目一致；诊断和合成面板都靠这些字段判断"能不能用"）
+  meta.outline_type = tables["glyf"] ? "glyf"
+    : (tables["CFF2"] ? "cff2" : (tables["CFF "] ? "cff" : "?"));
+  meta.t_gvar = tables["gvar"] ? 1 : 0;
+  if (tables["fvar"]) {
+    try {
+      const fv = await readHex(path, tables["fvar"].off, Math.min(tables["fvar"].len, 4096));
+      const axesOff = u16(fv, 4), axisCount = u16(fv, 8), axisSize = u16(fv, 10);
+      const tags = [];
+      for (let i = 0; i < axisCount; i++) {
+        const p = axesOff + i * axisSize;
+        if (p + 16 > fv.length) break;
+        const tag = String.fromCharCode(fv[p], fv[p + 1], fv[p + 2], fv[p + 3]);
+        tags.push(tag);
+        if (tag !== "wght") continue;
+        const fx = v => Math.round((((v[0] << 24) >>> 0) + (v[1] << 16) + (v[2] << 8) + v[3]) / 65536);
+        meta.wgmin = fx([fv[p + 4], fv[p + 5], fv[p + 6], fv[p + 7]]);
+        meta.wgdef = fx([fv[p + 8], fv[p + 9], fv[p + 10], fv[p + 11]]);
+        meta.wgmax = fx([fv[p + 12], fv[p + 13], fv[p + 14], fv[p + 15]]);
+      }
+      if (tags.length) meta.axistags = tags.join(" ");
+    } catch (e) { /* 读不到就不写 */ }
+  }
   if (tables["CFF "] || tables["CFF2"]) meta.cff = 1;
   if (tables["COLR"] || tables["CBDT"] || tables["sbix"]) meta.color = 1;
   if (tables["maxp"]) meta.glyphs = u16(await readHex(path, tables["maxp"].off + 4, 2), 0);
@@ -7275,6 +7127,33 @@ async function shWriteB64(text, path) {
      · 小于 1.5MB：用 fetch 直接发（简单，走 WebView 的网络栈）
      · 更大：用设备上的 curl 发（避免把几十万字符塞过 shell 桥）
    两者都带上 x-cfs-* 头，作者后台列表里能直接看出是谁的问题。 */
+
+/* ★ 2026-10-21：上传优先走界面自己的 fetch
+   原因：安卓默认没有 curl、KernelSU 也不带 busybox，走 shell 的路在多数机器上必然失败。
+   顺序：fetch 直连 → shell(curl/busybox/toybox) → 给用户文件。 */
+async function fbkSendViaFetch(txt, hdr) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 25000);
+  try {
+    const resp = await fetch(WORKER_URL + "/report", {
+      method: "POST",
+      headers: Object.assign({ "Content-Type": "text/plain; charset=utf-8" }, hdr),
+      body: txt,
+      signal: ctl.signal,
+      cache: "no-store",
+    });
+    const out = String(await resp.text() || "");
+    if (/bad key/i.test(out)) throw new Error("服务器说口令不对（bad key）");
+    if (/too big/i.test(out)) throw new Error("报告太大（上限 8MB）");
+    if (/daily limit/i.test(out)) throw new Error("今天这台机器的上传次数用完了");
+    if (!resp.ok) throw new Error("HTTP " + resp.status + " " + out.slice(0, 80));
+    if (!/ok|"id"/i.test(out)) throw new Error("服务器没给成功回应：" + out.slice(0, 80));
+    return { raw: out, via: "fetch" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function repSendServer() {
   const btn = repEl("reportServerBtn");
   if (btn && btn.disabled) return;
@@ -7362,9 +7241,42 @@ async function repSendServer() {
       'if command -v curl >/dev/null 2>&1; then ' +
         'curl -sS --connect-timeout 8 -m 35 --retry 1 --retry-connrefused ' +
         '-X POST' + hdr + ' --data-binary @$F $U; ' +
+      'elif command -v busybox >/dev/null 2>&1 && busybox wget --help >/dev/null 2>&1; then ' +
+        'busybox wget -q -O - --header "x-cfs-key: ' + WORKER_KEY + '" --post-file $F $U 2>&1; ' +
+      'elif toybox wget >/dev/null 2>&1; then ' +
+        'toybox wget -q -O - --header "x-cfs-key: ' + WORKER_KEY + '" --post-file $F $U 2>&1; ' +
       'else echo NOHTTPTOOL; fi';
     let out = "";
     let _lastErr = "";                     // ★ 必须定义：下面失败提示要用
+
+    // ★ 2026-10-21：先试界面直连（不需要 curl / busybox）。文件超过 3MB 就不读进内存。
+    let _sent = false;
+    if (sz <= 3 * 1024 * 1024) {
+      try {
+        showToast("正在上传（直连）…");
+        const _txt = String(await ksuExec(`cat ${shq(path)} 2>/dev/null`) || "");
+        if (_txt.length > 100) {
+          const _r = await fbkSendViaFetch(_txt, {
+            "x-cfs-key": WORKER_KEY,
+            "x-cfs-device": fbkHdr(fbkDevTagFromKv(_kv2), 80),
+            "x-cfs-ver": fbkHdr((_kv2 && _kv2.ver) || "", 24),
+            "x-cfs-rom": fbkHdr((_kv2 && _kv2.rom) || "", 40),
+            "x-cfs-note": fbkHdr("完整报告 " + name, 120),
+            "x-cfs-desc": fbkHdr(repDesc, 700),
+          });
+          out = String(_r.raw || "ok");
+          _sent = true;
+        }
+      } catch (eF) {
+        _lastErr = "直连失败：" + errText(eF).slice(0, 80);
+      }
+    }
+    if (_sent) {
+      showToast("已上传，谢谢！");
+      if (btn) btn.disabled = false;
+      return;
+    }
+
     for (let _try = 1; _try <= 3; _try++) {
       if (_try > 1) showToast("网络不稳，重试第 " + _try + "/3 次…");
       try {
