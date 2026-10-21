@@ -3224,6 +3224,116 @@ sec12() {
   echo "  说明：本节只读 .meta / .fdata 小文件，不读字体本体、不解析 cmap，几乎不耗时。"
 }
 
+sec13() {
+  echo
+  echo "【13】TTC/OTC 合集与产物校验（排查三星类闪退）"
+  hr
+  echo "  ---- 系统里的合集文件 ----"
+  _n=0
+  for _d in /system/fonts /product/fonts /system_ext/fonts /my_product/fonts \
+            /my_stock/fonts /vendor/fonts /odm/fonts; do
+    [ -d "$_d" ] || continue
+    for _f in "$_d"/*.ttc "$_d"/*.otc; do
+      [ -e "$_f" ] || continue
+      _n=$(( _n + 1 ))
+      _sz=$(wc -c < "$_f" 2>/dev/null | tr -d ' ')
+      _nf=$(od -An -tu1 -j 8 -N 4 "$_f" 2>/dev/null | awk 'NF>=4{printf "%.0f",(($1*256+$2)*256+$3)*256+$4}')
+      echo "    $_f  ${_sz}字节  faces=${_nf:-?}"
+    done
+  done
+  [ "$_n" = 0 ] && echo "    （没有合集文件）"
+
+  echo "  ---- 我们生成的合集产物 ----"
+  _m=0
+  for _f in "$LIB"/*.ttc[0-9]*; do
+    [ -e "$_f" ] || continue
+    _m=$(( _m + 1 ))
+    _sz=$(wc -c < "$_f" 2>/dev/null | tr -d ' ')
+    _nf=$(od -An -tu1 -j 8 -N 4 "$_f" 2>/dev/null | awk 'NF>=4{printf "%.0f",(($1*256+$2)*256+$3)*256+$4}')
+    if command -v ttc_verify >/dev/null 2>&1; then
+      _vv=$(ttc_verify "$_f" "" 2>&1) && _ok=通过 || _ok="不合格：$_vv"
+    else
+      _ok="（没有校验函数）"
+    fi
+    echo "    ${_f##*/}  ${_sz}字节  faces=${_nf:-?}  结构校验=${_ok}"
+  done
+  [ "$_m" = 0 ] && echo "    （本机没有生成过合集产物）"
+
+  echo "  ---- ttc.log 最近记录 ----"
+  if [ -s "$LIB/ttc.log" ]; then
+    tail -n 12 "$LIB/ttc.log" 2>/dev/null | sed 's/^/    /'
+  else
+    echo "    （没有 ttc.log）"
+  fi
+  hr
+  echo "  说明：三星的系统字体多为合集（一个文件装多字重）。若产物 faces 数与原厂不一致，"
+  echo "        或结构校验不合格，应用按 face 取字形时就会崩溃 —— 模块会跳过该槽位保留原厂。"
+}
+
+sec14() {
+  echo
+  echo "【14】中文字形覆盖率与跳过原因（排查方块）"
+  hr
+  _sel=$(tr -d '[:space:]' < "$LIB/last_selection" 2>/dev/null)
+  echo "  当前选择：${_sel:-none}"
+  if [ -n "$_sel" ] && [ -f "$LIB/$_sel.meta" ]; then
+    for _k in rate_latin rate_cjk rate_hant rate_kana rate_hangul rate_punct rate_symbols; do
+      _v=$(sed -n "s/^$_k=//p" "$LIB/$_sel.meta" 2>/dev/null | tail -n1 | tr -d '\r')
+      printf '    %-14s %s\n' "$_k" "${_v:-未记录}"
+    done
+    _cjk=$(sed -n 's/^rate_cjk=//p' "$LIB/$_sel.meta" 2>/dev/null | tail -n1 | tr -d '\r')
+    case "$_cjk" in
+      ''|*[!0-9]*) echo "    门槛判断：无覆盖率数据，按旧逻辑（cjk 标记）" ;;
+      *) if [ "$_cjk" -lt 98 ]; then
+           echo "    门槛判断：★ 覆盖率 ${_cjk}% < 98% → 中文槽位保持原厂（避免方块）"
+         else
+           echo "    门槛判断：覆盖率 ${_cjk}% ≥ 98% → 中文槽位正常替换"
+         fi ;;
+    esac
+  else
+    echo "    （没有当前字体的档案）"
+  fi
+
+  echo "  ---- 计划里的槽位统计 ----"
+  _plan="$LIB/.plan.latest"
+  if [ -s "$_plan" ]; then
+    _tot=$(grep -c . "$_plan" 2>/dev/null)
+    _cjk=$(awk '$1=="cjk"' "$_plan" 2>/dev/null | grep -c .)
+    echo "    计划槽位总数 $_tot（其中中文类 $_cjk）"
+  else
+    echo "    （没有留存的计划文件）"
+  fi
+  if [ -s "$LIB/scanned/skip.list" ]; then
+    echo "    跳过清单条数：$(grep -c . "$LIB/scanned/skip.list" 2>/dev/null)"
+  fi
+  hr
+  echo "  说明：方块 = 被替换的字体里缺这些字。覆盖率不足 98% 时模块不再替换中文槽位，"
+  echo "        所以「换了但某处仍显示原字体」是保护生效，不是失败。"
+}
+
+sec15() {
+  echo
+  echo "【15】崩溃日志摘要（字体相关，排查闪退）"
+  hr
+  _lg=""
+  if command -v logcat >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+      _lg=$(timeout 12 logcat -b crash -d 2>/dev/null | grep -i -E 'font|typeface|ttc|otf' | tail -n 12)
+    else
+      _lg=$(logcat -b crash -d 2>/dev/null | head -n 400 | grep -i -E 'font|typeface|ttc|otf' | tail -n 12)
+    fi
+  fi
+  if [ -n "$_lg" ]; then
+    printf '%s\n' "$_lg" | sed 's/^/    /'
+  else
+    echo "    （崩溃缓存里没有字体相关记录；也可能是刚重启过、缓存已清）"
+  fi
+  hr
+  echo "  说明：若某应用「打开就闪退」而别的应用正常，多半是它读的某个字体文件结构有问题。"
+  echo "        把这份报告发给作者，配合【13】的合集校验结果即可定位。"
+  echo
+}
+
 report_full() {
   echo "== 自定义字体切换模块 · 一键体检报告 =="
   collect_once
@@ -3241,6 +3351,9 @@ report_full() {
   sec10
   sec11
   sec12
+  sec13
+  sec14
+  sec15
   echo
   echo "== 报告结束 =="
 }
