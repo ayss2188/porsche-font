@@ -12,7 +12,7 @@
 
 MODDIR=${0%/*}
 # 商店缓存桥接：必须在 zygote 起来之前挂，应用（含商店）才看得到
-[ -f "$MODDIR/gms_cache.sh" ] && timeout 60 sh "$MODDIR/gms_cache.sh" on >/dev/null 2>&1
+# 2026-10-21：桥接功能已摘除（对 Play 商店无效，且会让部分 Google 应用异常）
 
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
 [ -f "$MODDIR/mount.sh" ] && . "$MODDIR/mount.sh"
