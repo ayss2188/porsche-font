@@ -1,15 +1,15 @@
 #!/system/bin/sh
-# 自定义字体切换模块 - 安装脚本（Magisk / KernelSU / APatch 通用）
+# 保时捷字体（三合一） - 安装脚本（Magisk / KernelSU / APatch 通用）
 # 刷机包里的文件已由管理器解压到 $MODPATH
 
 LIB=/data/adb/custom_font_lib
 MODID=$(sed -n 's/^id=//p' "$MODPATH/module.prop" | head -n1 | tr -d '\r')
 OLD="/data/adb/modules/$MODID"
 
-ui_print "*********************************"
-ui_print "  保时捷字体（内置配色版） $(sed -n 's/^version=//p' "$MODPATH/module.prop")"
-ui_print "  内置配色：素装(无色) / 一点红 / 烈焰"
-ui_print "*****************************"
+ui_print "========================================================"
+ui_print " 保时捷字体（三合一）  $(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')"
+ui_print " 内置配色：素装(无色) / 一点红 / 烈焰"
+ui_print "========================================================"
 
 . "$MODPATH/common.sh"
 # ★ 字体校验工具必须**在 builtin.sh 之前**载入 —— builtin_import 要用它挡住坏字体。
@@ -353,62 +353,99 @@ ui_print "- 正在检查有没有其它字体模块…"
 ui_print "  （也会扫一遍字体配置，稍等）"
 CONFLICTS=$(sh "$MODPATH/fontctl.sh" conflicts 2>/dev/null | cut -d'|' -f2 | tr '\n' ' ')
 
-ui_print " "
-ui_print "===================================="
-ui_print "自带配色：$LIB_COUNT 套"
-ui_print "位置：$LIB"
-ui_print "更新模块不会丢失选择"
-ui_print "卸载全部配色包才会删除"
-ui_print "===================================="
-ui_print "使用方法：在模块管理器打开 WebUI"
-ui_print "  1. 点选配色卡片切换"
-ui_print "     （内置三套配色，不用导入）"
-ui_print "  2. 重启生效"
-ui_print "     选「无字体」即恢复默认"
-if [ "$RM" = magisk ]; then
-  ui_print " "
-  ui_print "Magisk 没有 WebUI 入口"
-  ui_print "请先安装 KsuWebUI，"
-  ui_print "后点模块卡片上的「操作」按钮打开。"
-fi
-if [ -n "$CONFLICTS" ]; then
-  ui_print " "
-  ui_print "⚠ 检测到其他字体模块：$CONFLICTS"
-  ui_print "  建议先停用它们，避免互相覆盖。"
-fi
-ui_print " "
-ui_print "若选字体后没能开机，下次开机会自动"
-ui_print "恢复为「无字体」。"
-
-# ---------------------------------------------------------------------------
-# 安装阶段不做任何耗时收集（避免刷入卡住）
-#   这里只做几个文件判断 + getprop，毫秒级完成；完整诊断报告由用户手动触发：
-#     · WebUI 里点「查看诊断报告」或「保存到 Download」（后台生成，界面不卡）
-#     · 或点模块卡片的「操作」按钮
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 刷入日志（4 区 + 分割线；与主项目同一套排版，内容换成子项目的）
+# ===========================================================================
 GD="无"; [ -f "$OLD/disable" ] && GD="有"
 GU="无"; [ -f "$OLD/update" ] && GU="有（上一次安装没被激活）"
 GS="无"; case "$(getprop persist.sys.safemode)$(getprop ro.sys.safemode)" in *1*) GS="有" ;; esac
 GM="无"; { command -v magisk >/dev/null 2>&1 || [ -e /data/adb/magisk ]; } && GM="有"
+
 ui_print " "
-ui_print "- 设备：$(getprop ro.product.brand) $(getprop ro.product.model)"
-ui_print "  Android $(getprop ro.build.version.release)"
-ui_print "- 门禁速查："
-ui_print "  已禁用=$GD   待激活=$GU"
-ui_print "  安全模式=$GS   Magisk共存=$GM"
-ui_print "- 需要诊断报告时："
-ui_print "  在 WebUI 里点「查看诊断报告」，"
-ui_print "  或点模块卡片上的「操作」按钮"
-ui_print "  （不用手动保存）"
-ui_print "  （生成完会自动存到 Download）"
-ui_print "  报告只产出一个文件："
-ui_print "  Download/完整体检报告.txt"
+ui_print "========================================================"
+ui_print " 保时捷字体（三合一）  $(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')"
+ui_print "========================================================"
+ui_print " "
+ui_print "[1/4] 设备与系统"
+ui_print "- 设备：$(getprop ro.product.brand 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
+ui_print "- 系统：Android $(getprop ro.build.version.release 2>/dev/null)   内核 $(uname -r 2>/dev/null)"
+ui_print "- 系统识别：${ROM_NAME:-未知}"
+ui_print "- Root 管理器：$(root_manager_name "$RM" 2>/dev/null)"
+if [ "$(mount_mode 2>/dev/null)" = manager ]; then
+  ui_print "- 挂载方式：交给管理器 / 元模块"
+else
+  ui_print "- 挂载方式：模块自带挂载（无需元模块）"
+fi
+ui_print "- 门禁：已禁用=$GD   待激活=$GU   安全模式=$GS   Magisk共存=$GM"
+ui_print "--------------------------------------------------------"
+ui_print " "
+ui_print "[2/4] 内置配色"
+ui_print "- 自带配色：${LIB_COUNT:-0} 套（素装 / 一点红 / 烈焰）"
+ui_print "  位置：$LIB"
+if [ -n "${PEND:-}" ] && [ "$PEND" != "none" ]; then
+  ui_print "- 当前选择：$PEND"
+else
+  ui_print "- 当前选择：无字体（系统默认）"
+fi
+if [ -d "$LIB/.orig" ]; then
+  _okb=$(du -sk "$LIB/.orig" 2>/dev/null | awk '{print $1}')
+  ui_print "- 主题字体原件备份：${_okb:-0} KB（卸载时自动还原）"
+fi
+ui_print "- 更新模块不会丢失选择；卸载全部配色包才会删除字体库"
+ui_print "--------------------------------------------------------"
+ui_print " "
+ui_print "[3/4] 扫描与槽位"
+_slotn=$(grep -c . "$MODPATH/slots.map" 2>/dev/null | tr -d ' ')
+[ -n "$_slotn" ] || _slotn=0
+_tcn=$(awk '$2 ~ /\.ttc$/ {c++} END {print c+0}' "$MODPATH/slots.map" 2>/dev/null)
+ui_print "- 槽位计划：${_slotn} 个，其中中文合集槽位 ${_tcn:-0} 个"
+_sf=$(ls -1 /system/fonts 2>/dev/null | grep -c . )
+_pf=$(ls -1 /product/fonts 2>/dev/null | grep -c . )
+ui_print "- 系统字体：/system/fonts ${_sf:-0} 个，/product/fonts ${_pf:-0} 个"
+_cfg=$(ls -1 /system/etc/fonts.xml /system/etc/fonts_fallback.xml 2>/dev/null | head -n1)
+if [ -n "$_cfg" ]; then
+  _cfgkb=$(du -k "$_cfg" 2>/dev/null | awk '{print $1}')
+  ui_print "- 字体配置：$_cfg（${_cfgkb:-?} KB）"
+fi
+if [ -n "${CONFLICTS:-}" ]; then
+  ui_print "- ⚠ 冲突字体模块：$CONFLICTS   （建议先停用，避免互相覆盖）"
+else
+  ui_print "- 冲突字体模块：无"
+fi
+ui_print "--------------------------------------------------------"
+ui_print " "
+ui_print "[4/4] 完成"
+ui_print "- 模块版本：$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')   安装位置：$MODPATH"
+_um="不适用"
+if [ -d /data/adb/ksu ]; then
+  if [ -e /data/adb/ksu/umount_enabled ] || [ "$(cat /data/adb/ksu/.umount 2>/dev/null)" = "1" ]; then
+    _um="开启（部分 App 可能看不到挂载）"
+  else
+    _um="关闭（App 里也能看到字体）"
+  fi
+fi
+ui_print "- 管理器卸载机制：$_um"
+if [ -n "${PEND:-}" ] && [ "$PEND" != "none" ]; then
+  ui_print "- ⏳ 重启后生效（现在还是系统原字体）"
+fi
+ui_print " "
+ui_print "- 使用方法："
+ui_print "  1. 管理器里点本模块 → 打开（WebUI）"
+ui_print "  2. 点选配色卡片切换（内置三套，不用导入）"
+ui_print "  3. 重启生效；选「无字体」即恢复系统默认"
+if [ "$RM" = magisk ]; then
+  ui_print "  · Magisk 没有 WebUI 入口：先装 KsuWebUI，再点模块卡片的「操作」"
+fi
+ui_print " "
+ui_print "- 出问题时：界面「诊断报告」→ 生成（会自动存到 Download）"
+ui_print "- 保险：若选配色后没能开机，下次开机会自动恢复为「无字体」"
+ui_print "========================================================"
+
 if [ -f "$MODPATH/diag.sh" ]; then
   cp -f "$MODPATH/diag.sh" /data/local/tmp/font_diag.sh 2>/dev/null
   chmod 755 /data/local/tmp/font_diag.sh 2>/dev/null
 fi
-ui_print "===================================="
-ui_print "- 完成"
+
 
 
 # ---------------------------------------------------------------------------

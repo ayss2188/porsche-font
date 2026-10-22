@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 自定义字体切换模块 - 字体库管理 / 应用脚本（供 WebUI、安装脚本调用）
+# 保时捷字体（三合一） - 字体库管理 / 应用脚本（供 WebUI、安装脚本调用）
 # 用法：
 #   sh fontctl.sh status                      输出 A=<生效> P=<待生效> R=<系统> 等状态
 #   sh fontctl.sh list                        列出字体库：id|名称|字节数|元数据
@@ -1167,7 +1167,7 @@ do_report() {
   A=$(cur_active); P=$(cur_pending)
   # 一键体检的结论放最前面（见 diag.sh）
   [ -f "$MODDIR/diag.sh" ] && sh "$MODDIR/diag.sh" brief 2>/dev/null
-  echo "== 自定义字体切换模块 诊断报告 =="
+  echo "== 保时捷字体（三合一） 诊断报告 =="
   echo "模块版本: $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null) ($(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null))"
   echo "设备: $(getp ro.product.brand) $(getp ro.product.model) | Android $(getp ro.build.version.release) (SDK $(getp ro.build.version.sdk))"
   echo "系统: $(detect_rom) / $(rom_name "$(detect_rom)")"

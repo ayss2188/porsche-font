@@ -721,7 +721,11 @@ slot_scan_cache_stamp() {   # $1=moddir → 扫描完成后写指纹
   return 0
 }
 
-slot_device_scan() {   # $1=moddir → 生成 device.list
+slot_device_scan() {
+  # ★ 2026-10-23（魅族闪退）：Flyme 上不做本机扫描，槽位只来自机型清单（等价早期版本）
+  local _rom_f
+  _rom_f=$(tr -d '[:space:]' 2>/dev/null < "${1:-${MODDIR:-}}"/current_rom)
+  [ "$_rom_f" = "flyme" ] && return 1   # $1=moddir → 生成 device.list
   local moddir="${1:-${MODDIR:-}}"
   local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
   local _dev="$_sd/device.list"
@@ -1008,7 +1012,7 @@ slot_oem_names_raw() {
   case "$rom" in
     coloros)  pat='sysfont*|syssans*|oplussans*|oplusosui*|opposans*|opsans*|din*|oppodin*|sourcesanspro*' ;;
     originos) pat='*vivosans*|*vivo-sans*|*originsans*|*origin-sans*|*iqoosans*|*iqoo-sans*' ;;
-    flyme)    pat='*flymefont*|*flymesans*|*flyme-sans*|*meizusans*|*meizu-sans*|*mflyme*' ;;
+    flyme)    pat='*flymefont*|*flymesans*|*flyme-sans*|*meizusans*|*meizu-sans*|*mflyme*|sfpro*|sfdin*|sf-*|*dinpro*|*myriadpro*|*sfrounded*' ;;
     *) return 0 ;;
   esac
   t="${TMPDIR:-/data/local/tmp}/.oem.$$"

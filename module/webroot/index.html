@@ -770,8 +770,8 @@ body { min-height: 100%; }
 @keyframes uiLift{from{opacity:0;transform:translateY(12px) scale(.985)}
   to{opacity:1;transform:translateY(0) scale(1)}}
 @keyframes uiPop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
-@keyframes uiToast{from{opacity:0;transform:translateY(18px) scale(.96)}
-  to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes uiToast{from{opacity:0;transform:translate(-50%, 18px) scale(.96)}
+  to{opacity:1;transform:translate(-50%, 0) scale(1)}}
 @keyframes uiTagPop{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:scale(1)}}
 
 @media (prefers-reduced-motion: no-preference){
@@ -817,6 +817,29 @@ body { min-height: 100%; }
   .lib-box{transition:grid-template-rows .26s cubic-bezier(.3,.9,.3,1)}
 }
 
+
+/* === 过渡与光效（子项目同步）=== */
+:root { --mt-fast: .16s; --mt-base: .24s; --mt-slow: .34s; }
+.modal-mask, .pv-mask, .fontact-mask, .po-mask, .ab-mask, .mg-mask, .mg-pick-mask, .imp-menu-mask {
+  opacity: 0; transition: opacity var(--mt-base) ease-out;
+}
+.modal-mask.show, .pv-mask.show, .fontact-mask.show, .po-mask.show,
+.ab-mask.show, .mg-mask.show, .mg-pick-mask.show, .imp-menu-mask.show { opacity: 1; }
+.pv-sheet, .fontact, .modal-mask > .modal, .po-sheet, .ab-sheet {
+  transform: translateY(10px) scale(.994);
+  transition: transform var(--mt-base) cubic-bezier(.2,.9,.2,1);
+}
+.modal-mask.show > .modal, .pv-mask.show .pv-sheet, .fontact-mask.show .fontact,
+.po-mask.show .po-sheet, .ab-mask.show .ab-sheet { transform: none; }
+#fontList .option { transition: transform var(--mt-fast) ease-out, box-shadow var(--mt-base) ease-out; }
+#fontList .option:active { transform: scale(.985); }
+.g-btn:active { transform: scale(.972); }
+@media (prefers-reduced-motion: reduce) {
+  .modal-mask, .pv-mask, .fontact-mask, .po-mask, .ab-mask, .mg-mask,
+  .pv-sheet, .fontact, #fontList .option, .g-btn {
+    transition: none !important; animation: none !important; transform: none !important;
+  }
+}
 </style>
 <script>
 try {
@@ -1129,7 +1152,7 @@ try {
     <!-- ★ 2026-10-16 作者要求：上传前先提醒要梯子（服务器在国外） -->
     <div class="g-hint vpn-tip" style="margin-bottom:10px">
       <b>上传前请先连 VPN</b> —— 报告是传到我自己的服务器（在国外），
-      不连 VPN 一般传不上去。连不上就点右边的「连接自检」，它会告诉你卡在哪一步。
+      不连 VPN 一般传不上去。连不上会直接提示，也可以到最下面的「网络诊断」里看卡在哪一步。
     </div>
       <div class="g-hint" style="margin-bottom:12px">
         <b>先试「一键上报」</b> —— 两秒生成、点一下就发到我邮箱，不用你找文件。
@@ -1139,7 +1162,6 @@ try {
 
       <div class="btn-row">
         <button class="g-btn primary-blue" id="fbkQuickBtn" onclick="fbkQuickSend()">一键上报</button>
-      <button class="g-btn" id="fbkTestBtn" onclick="fbkSelfTest()">连接自检</button>
       </div>
       <div class="btn-row">
         <button class="g-btn" id="fbkExportBtn" onclick="fbkExportFile()">导出小报告</button>
@@ -1170,6 +1192,20 @@ try {
       </div>
       <div class="g-hint" style="opacity:.75">
         生成完那个窗口底部会多出一个「上传给作者」————
+
+
+      <div class="divider"></div>
+
+      <!-- ★ 2026-10-23（作者要求）：网络诊断单独一块，不和一键上报挤在一起 -->
+      <div class="fbk-sec">④ 网络诊断</div>
+      <div class="g-hint" style="margin-bottom:10px">
+        上传前会自动检测能不能连上服务器；这里可以手动再测一次，
+        结果会写清是<b>网络不通</b>、<b>口令不对</b>还是<b>服务器异常</b>。
+      </div>
+      <div class="btn-row">
+        <button class="g-btn" id="fbkTestBtn" onclick="fbkSelfTest()">连接自检</button>
+      </div>
+      <div class="g-hint" id="fbkStatusNet" style="display:none"></div>
         点它就能把报告当附件传上去。
       </div>
     </div>
@@ -1544,6 +1580,8 @@ async function refreshAll() {
         .catch(() => { /* 补族键失败：界面其余部分照常 */ });
     } catch (e) { /* 同步异常也不影响首屏 */ }
   } finally {
+    clearTimeout(__subWatchdog);
+    try { await repShowUploadResult(); } catch (e) {}
     refreshBusy = false;
   }
 }
@@ -1871,6 +1909,35 @@ const pvFaces = new Map();
 
 // 把字体库里的文件临时搬进 webroot，fetch 成 ArrayBuffer 后立刻删掉。
 // FontFace 直接吃 ArrayBuffer，不用 base64（省内存也省时间）。
+// ★ 2026-10-23（与主项目同步）：预览内存上限 + 关闭释放
+const PV_MAX_BYTES = 300 * 1024 * 1024;   // ★ 只当保险丝（原来 60MB 会把 A/B 的另一半挤掉）
+// ★ 2026-10-23：A/B 对比要同时装两份（各 40+MB），淘汰会把先加载的那份挤掉，
+//   表现成"左边完全不像该字体"（退回 serif）。打开 A/B 期间把两边钉住。
+const pvPinned = new Set();
+function pvBytesNow() {
+  let n = 0;
+  try { pvFaces.forEach(v => { n += (v && v.buf && v.buf.byteLength) || 0; }); } catch (e) {}
+  return n;
+}
+function pvRelease(id) {
+  const rec = pvFaces && pvFaces.get && pvFaces.get(id);
+  if (!rec) return;
+  try { if (rec.face && document.fonts) document.fonts.delete(rec.face); } catch (e) {}
+  rec.face = null; rec.buf = null;
+  try { pvFaces.delete(id); } catch (e) {}
+}
+function pvEvictToFit(keepId) {
+  let guard = 0;
+  while (pvBytesNow() > PV_MAX_BYTES && guard++ < 20) {
+    let oldest = null, t = Infinity;
+    try {
+      pvFaces.forEach((v, k) => { if (k === keepId || pvPinned.has(k)) return; const tt = (v && v.at) || 0; if (tt < t) { t = tt; oldest = k; } });
+    } catch (e) { break; }
+    if (!oldest) break;
+    pvRelease(oldest);
+  }
+}
+
 async function pvLoadFace(id) {
   if (pvFaces.has(id)) return pvFaces.get(id).face;
   // 先扫掉上次异常退出留下的临时字体（最多几十 MB，别攒着）
@@ -1897,7 +1964,7 @@ async function pvLoadFace(id) {
   }
   await face.load();
   document.fonts.add(face);
-  pvFaces.set(id, { face, buf });     // 字节一起留着：属性面板要拿它算覆盖率
+  pvFaces.set(id, { face, buf, at: Date.now() });;     // 字节一起留着：属性面板要拿它算覆盖率
   return face;
 }
 
@@ -5268,7 +5335,7 @@ async function abCompare(targetId) {
   const wRow = document.createElement("div");
   wRow.className = "pv-wrow";
   const wLab = document.createElement("div");
-  wLab.className = "pv-wlabel"; wLab.textContent = "粗细（两边同步）";
+  wLab.className = "pv-wlabel"; wLab.textContent = "粗细（两边同步；静态字体只能模拟）";
   const wLine = document.createElement("div");
   wLine.className = "pv-wline";
   const wIn = document.createElement("input");
@@ -5280,8 +5347,12 @@ async function abCompare(targetId) {
   wRow.append(wLab, wLine);
   wIn.oninput = () => {
     wVal.textContent = wIn.value;
+    // ★ 2026-10-23：除了可变轴，**同时**设 font-weight。
+    //   静态字体没有 wght 轴，只设 variation 的话左边（当前字体）会一动不动，
+    //   看起来像"只有右边粗细会变"。设数值后浏览器会合成粗细，两边都有反馈。
     [left.bx, right.bx].forEach(b => {
-      b.style.fontVariationSettings = '"wght" ' + wIn.value;
+      try { b.style.fontVariationSettings = '"wght" ' + wIn.value; } catch (e) {}
+      b.style.fontWeight = wIn.value;
     });
   };
 
@@ -5299,13 +5370,19 @@ async function abCompare(targetId) {
   document.body.append(mask);
   requestAnimationFrame(() => mask.classList.add("show"));
 
-  const close = () => { mask.classList.remove("show"); setTimeout(() => mask.remove(), 180); };
+  const __unpin = () => {
+    try { pvPinned.delete(curId); pvPinned.delete(targetId); } catch (e) {}
+  };
+  const close = () => { __unpin(); mask.classList.remove("show"); setTimeout(() => mask.remove(), 180); };
   cls.onclick = close;
   cancel.onclick = close;
   go.onclick = async () => {
     close();
     await selectFont(targetId);
   };
+
+  // ★ 2026-10-23：先钉住两边，避免第二份加载后把第一份挤掉（各 40+MB，超 60MB 上限）
+  try { pvPinned.add(curId); pvPinned.add(targetId); } catch (e) {}
 
   // 加载两边的字体（失败就退回系统字体，不挡流程）
   try {
@@ -5363,7 +5440,8 @@ async function showFontInfo(id, name) {
   closeBtn.className = "pv-close";
   closeBtn.textContent = "✕";
   closeBtn.setAttribute("aria-label", "关闭");
-  closeBtn.onclick = () => { mask.classList.remove("show"); setTimeout(() => mask.remove(), 200); };
+  closeBtn.onclick = () => {
+    try { pvRelease(id); } catch (e) {} mask.classList.remove("show"); setTimeout(() => mask.remove(), 200); };
   head.append(title, posterBtn, closeBtn);
 
   const sub = document.createElement("div");
@@ -5594,6 +5672,15 @@ async function selectFont(id) {
   setCardBusy(card, true);
   showToast("修改中…", true);
   await nextPaint();
+  // ★ 2026-10-23：看门狗 —— apply 走的是同步 exec，卡住时界面会永远停在"修改中"
+  let __applyDone = false;
+  const __applyWd = setTimeout(() => {
+    if (__applyDone) return;
+    try { busy = false; } catch (e) {}
+    try { setCardBusy(card, false); } catch (e) {}
+    showToast("处理时间过长，已停止等待。可以再看一眼状态，或打开诊断报告", true);
+    try { refreshStatusOnly(); } catch (e) {}
+  }, 180000);
   try {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh apply ${shq(id)}`);
     // ★ 2026-10-18 修：返回值末尾可能带 `:kl=N`（do_apply 附带的诊断字段），
@@ -5607,8 +5694,19 @@ async function selectFont(id) {
   } catch (e) {
     showToast("切换失败：" + errText(e));
   } finally {
+    __applyDone = true;
+    try { clearTimeout(__applyWd); } catch (e) {}
     busy = false;
-    await refreshAll();
+    try { setCardBusy(card, false); } catch (e) {}
+    // ★ 2026-10-23：切完字必须**立刻**让界面更新。
+    //   原来只调 refreshAll()，但它开头 `if (refreshBusy) return;` ——
+    //   撞上别的刷新在跑就直接返回（还不抛错），界面停在旧状态。
+    //   顺序：先本地乐观更新 → 再直刷顶部 → 再全量 → 最后再兜一次。
+    // 只改 pending（待重启生效）；active 保持『本次开机实际生效』不变
+    try { pendingId = id; render(); } catch (e) {}
+    try { await refreshStatusOnly(); } catch (e) {}
+    try { await refreshAll(); } catch (e) {}
+    setTimeout(() => { try { refreshStatusOnly(); } catch (e) {} }, 1200);
   }
 }
 
@@ -6279,7 +6377,12 @@ async function toggleSetting(key) {
   //   原来只调 refreshStatusOnly()（只更新顶部几行），槽位数要等下次整页刷新，
   //   于是用户看到的就是"开关点了、数字没变"。
   //   用 refreshAll() 会连发 list+status 两条命令，但这两条现在都很快（有缓存）。
-  try { await refreshAll(); } catch (e) { await refreshStatusOnly(); }
+  // ★ 2026-10-23：refreshAll 开头有 `if (refreshBusy) return;`
+  //   正好撞上别的刷新在跑时，这次调用直接返回 → 顶部数字不更新。
+  //   所以先直接刷新顶部那几行（不受这个闸门限制），再补一次完整刷新。
+  try { await refreshStatusOnly(); } catch (e) {}
+  try { await refreshAll(); } catch (e) {}
+  setTimeout(() => { try { refreshStatusOnly(); } catch (e) {} }, 1200);
 }
 /* ---------- 诊断报告 ---------- */
 // 设计要点（全部围绕"点了立刻有反应"）：
@@ -7275,7 +7378,171 @@ async function shWriteB64(text, path) {
      · 小于 1.5MB：用 fetch 直接发（简单，走 WebView 的网络栈）
      · 更大：用设备上的 curl 发（避免把几十万字符塞过 shell 桥）
    两者都带上 x-cfs-* 头，作者后台列表里能直接看出是谁的问题。 */
+// 上传结果弹窗（只弹一次；成功给编号、失败给原因）
+let __subUpResult = null;
+async function repShowUploadResult() {
+  if (__subUpShown) return;
+  __subUpShown = true;
+  try {
+    const r = __subUpResult;
+    if (!r) return;
+    try { document.getElementById("modalMask").classList.remove("show"); } catch (e) {}
+    if (r.ok) {
+      const num = (String(r.raw || "").match(/[A-Z0-9]{6}/) || [])[0] || "";
+      await dialog({
+        title: "上传成功",
+        msg: "报告已收到，谢谢！" + (num ? "\n\n报告编号：" + num : "") + "\n\n作者能看到完整内容，不用再做什么了。",
+        okText: "知道了"
+      });
+    } else {
+      await dialog({
+        title: "上传失败",
+        msg: "原因：" + String(r.err || "未知") +
+             "\n\n报告已保存在 Download/，可以直接把文件发给作者。" +
+             "\n\n想自己传：确认梯子是【全局模式】，或给管理器 App 开代理。",
+        okText: "知道了"
+      });
+    }
+  } catch (e) {}
+}
+
+
+/* ===========================================================================
+   ★ 2026-10-23：补齐三个"死按钮"（一键上报 / 连接自检 / 导出小报告）
+   ---------------------------------------------------------------------------
+   之前（含 4.4.7）这三个按钮的 onclick 指向的函数根本不存在 → 点了没反应。
+   这里用子项目已有的帮手实现，不引入新框架：
+     · 采集：diag-quick.sh file <路径>（约 2KB 纯文本）
+     · 上传：写文件 → shell curl（WebView 的 fetch 在这台设备上走不通）
+     · 提示：写到「快速通道」下面的状态行
+   =========================================================================== */
+function fbkSay(html, kind) {
+  const el = document.getElementById("fbkStatus");
+  if (!el) return;
+  if (!html) { el.style.display = "none"; el.innerHTML = ""; return; }
+  el.style.display = "block";
+  el.innerHTML = (kind === "ok" ? "✅ " : kind === "err" ? "❌ " : "") + html;
+  el.style.color = kind === "err" ? "#ff6b6b" : (kind === "ok" ? "#4ade80" : "");
+}
+function fbkBusy(on, id) {
+  const b = document.getElementById(id);
+  if (b) b.disabled = !!on;
+}
+async function fbkCollectQuick() {
+  const p = "/data/local/tmp/cfs-quick.txt";
+  await ksuExec("sh " + MODDIR + "/diag-quick.sh file " + p + " >/dev/null 2>&1");
+  const txt = String(await ksuExec("cat " + p + " 2>/dev/null") || "");
+  return txt;
+}
+async function fbkQuickSend() {
+  const btn = document.getElementById("fbkQuickBtn");
+  if (btn && btn.disabled) return;
+  const desc = await askDesc("这份状态");
+  if (desc === null) return;
+  fbkBusy(true, "fbkQuickBtn");
+  fbkSay("正在生成（两秒左右）…");
+  try {
+    const txt = await fbkCollectQuick();
+    if (!txt) { fbkSay("生成失败：拿不到状态文件", "err"); return; }
+    // 本地留一份，上传失败也能自己发
+    try { await ksuExec("cp -f /data/local/tmp/cfs-quick.txt /sdcard/Download/快捷报告.txt"); } catch (e) {}
+
+    fbkSay("正在检查网络…");
+    const code = String(await ksuExec(
+      "command -v curl >/dev/null 2>&1 && curl -sS -m 6 -o /dev/null -w '%{http_code}' " +
+      WORKER_URL + "/health 2>/dev/null || echo NOCURL")).trim();
+    if (code === "NOCURL") {
+      fbkSay("设备上没有 curl，没法直传。报告已保存到 Download/快捷报告.txt，可以直接发给作者。", "err");
+      return;
+    }
+    if (code === "000" || code === "") {
+      fbkSay("连不上服务器（多半是没连 VPN）。报告已保存到 Download/快捷报告.txt，可以直接发给作者。", "err");
+      __subUpResult = { ok: false, err: "网络不通（服务器在境外，需要 VPN）" };
+      __subUpShown = false;
+      await repShowUploadResult();
+      return;
+    }
+
+    fbkSay("正在上传…");
+    await shWriteB64(txt, UP_TMP);
+    const hdr = " -H 'x-cfs-key: " + WORKER_KEY + "' -H 'content-type: text/plain'";
+    const note = String(desc || "").replace(/'/g, "");
+    const h2 = note ? " -H 'x-cfs-note: " + encodeURIComponent(note) + "'" : "";
+    const raw = String(await ksuExec(
+      "curl -sS -m 40 --data-binary @" + UP_TMP + " " + WORKER_URL + "/report" + hdr + h2 + " 2>&1") || "");
+    const ok = /ok/i.test(raw) || /[A-Z0-9]{6}/.test(raw);
+    if (ok) {
+      const id = (raw.match(/[A-Z0-9]{6}/) || [""])[0];
+      fbkSay("已上传，谢谢！" + (id ? "（编号 <b>" + id + "</b>）" : ""));
+      __subUpResult = { ok: true, raw: raw };
+      __subUpShown = false;
+      await repShowUploadResult();
+    } else {
+      fbkSay("上传失败：" + (raw.slice(0, 120) || "服务器没响应") +
+             "<br>报告已保存到 Download/快捷报告.txt，可以直接发给作者。", "err");
+      __subUpResult = { ok: false, err: raw.slice(0, 160) || "服务器没响应" };
+      __subUpShown = false;
+      await repShowUploadResult();
+    }
+  } catch (e) {
+    fbkSay("出错了：" + errText(e), "err");
+  } finally {
+    fbkBusy(false, "fbkQuickBtn");
+  }
+}
+async function fbkExportFile() {
+  const btn = document.getElementById("fbkExportBtn");
+  if (btn && btn.disabled) return;
+  fbkBusy(true, "fbkExportBtn");
+  fbkSay("正在导出…");
+  try {
+    await ksuExec("sh " + MODDIR + "/diag-quick.sh file /sdcard/Download/快捷报告.txt >/dev/null 2>&1");
+    const sz = String(await ksuExec("wc -c < /sdcard/Download/快捷报告.txt 2>/dev/null")).trim();
+    if (!sz || sz === "0") { fbkSay("导出失败：文件是空的", "err"); return; }
+    fbkSay("已存到 <b>Download/快捷报告.txt</b>（" + sz + " 字节），可以先打开看一眼。", "ok");
+    showToast("已导出到 Download");
+  } catch (e) {
+    fbkSay("导出失败：" + errText(e), "err");
+  } finally {
+    fbkBusy(false, "fbkExportBtn");
+  }
+}
+async function fbkSelfTest() {
+  const btn = document.getElementById("fbkTestBtn");
+  if (btn && btn.disabled) return;
+  fbkBusy(true, "fbkTestBtn");
+  const out = document.getElementById("fbkStatusNet") || document.getElementById("fbkStatus");
+  const say = (html, color) => {
+    if (!out) return;
+    out.style.display = "block";
+    out.style.color = color || "";
+    out.innerHTML = html;
+  };
+  try {
+    say("正在检测…");
+    const raw = String(await ksuExec(
+      "command -v curl >/dev/null 2>&1 && curl -sS -m 8 -o /dev/null -w '%{http_code}' " +
+      WORKER_URL + "/health 2>&1 || echo NOCURL")).trim();
+    if (raw === "NOCURL") {
+      say("设备上没有 curl，无法直传。<br>报告可以保存到 Download 后手动发。", "#ff6b6b");
+    } else if (raw === "200" || raw === "204") {
+      say("✅ 服务器能连上（HTTP " + raw + "），可以直接上传。", "#4ade80");
+    } else if (raw === "401" || raw === "403") {
+      say("服务器能连上，但口令不对（HTTP " + raw + "）。<br>请把这条发给作者。", "#ffb84d");
+    } else if (raw === "000" || raw === "") {
+      say("❌ 连不上服务器（超时/被拦）。<br>服务器在境外 —— 先连 VPN（建议全局模式），或给管理器 App 开代理。", "#ff6b6b");
+    } else {
+      say("服务器返回 HTTP " + raw + "（能连上，但状态异常）。<br>把这条发给作者。", "#ffb84d");
+    }
+  } catch (e) {
+    say("检测失败：" + errText(e), "#ff6b6b");
+  } finally {
+    fbkBusy(false, "fbkTestBtn");
+  }
+}
+
 async function repSendServer() {
+  __subUpShown = false;
   const btn = repEl("reportServerBtn");
   if (btn && btn.disabled) return;
 
@@ -7289,7 +7556,18 @@ async function repSendServer() {
     showToast("上报服务器没配置");
     return;
   }
-  if (btn) btn.disabled = true;
+  if (btn) { btn.disabled = true; if (btn.textContent) btn.textContent = "上传中…"; }
+  // ★ 上传看门狗：75 秒没结果就收尾，不让界面永远转
+  clearTimeout(__subWatchdog);
+  __subWatchdog = setTimeout(function () {
+    try {
+      if (!__subUpResult) __subUpResult = { ok: false, err: "上传卡住了（超过 75 秒没有结果）" };
+      __subUpShown = false;
+      repShowUploadResult();
+      if (btn) { btn.disabled = false; btn.textContent = "上传"; }
+      try { repBusyOff(); } catch (e) {}
+    } catch (e) {}
+  }, 75000);
 
   // ★ 2026-10-17（作者真机反馈"点上传时下半屏白，上传完才恢复"）：
   //   我第一版推断是"软键盘收起后 WebView 没重排"，加了下面这三步 ——
@@ -7324,9 +7602,23 @@ async function repSendServer() {
       });
     } catch (e) { /* 读不到就维持原样 */ }
 
-    const szs = (await ksuExec(`wc -c < ${path} 2>/dev/null`)).trim();
-    const sz = parseInt(szs, 10) || 0;
-    if (!sz) { repBusyOff(); showToast("找不到报告文件，请先生成"); return; }
+    // ★ 先确认文件真在；Download 没有就退到模块库里那份
+    let szs = (await ksuExec(`wc -c < ${path} 2>/dev/null`)).trim();
+    let sz = parseInt(szs, 10) || 0;
+    let _usePath = path;
+    if (!sz) {
+      const alt = LIB + "/font_diag.txt";
+      const s2 = parseInt((await ksuExec(`wc -c < ${alt} 2>/dev/null`)).trim(), 10) || 0;
+      if (s2) { sz = s2; _usePath = alt; }
+    }
+    if (!sz) {
+      repBusyOff();
+      if (btn) { btn.disabled = false; btn.textContent = "上传"; }
+      __subUpResult = { ok: false, err: "报告文件不在了（两处都没找到），请重新生成" };
+      __subUpShown = false;
+      await repShowUploadResult();
+      return;
+    }
 
     showToast("正在上传 " + Math.round(sz / 1024) + " KB…（别退出）");
     showToast("正在检查网络…");
@@ -7385,6 +7677,7 @@ async function repSendServer() {
                       "（已试 3 次 —— 多半是网络：服务器在境外，需梯子覆盖该域名）");
     }
 
+    __subUpResult = { ok: true, raw: (typeof out !== "undefined" ? out : "") };
     showToast("已上传，谢谢！");
   } catch (e) {
     repBusyOff();   // ★ 失败也要撤遮罩，否则界面被盖住
@@ -7750,7 +8043,7 @@ function withTimeout(promise, ms) {
   });
 }
 
-const UPD_REPOS = ["ayss2188/custom-font-switcher"];
+const UPD_REPOS = ["ayss2188/porsche-font"];
 async function loadOnlineChangelog() {
   const box = document.getElementById("logText");
   const ld = document.getElementById("logLoading");

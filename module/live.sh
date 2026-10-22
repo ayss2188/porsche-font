@@ -624,21 +624,12 @@ _relive() {
   return 0
 }
 
-
 case "$CMD" in
   mount)     do_mount ;;
   unmount)   do_unmount ;;
-  reboot)    _relive && do_softreboot ;;
-  # ★ 2026-10-19 新增：只软重启，不碰挂载。
-  #   给「免重启」流程的第 2 步用 —— 那一步之前已经跑过 mount 了，
-  #   再走 _relive 等于把刚挂好的卸了重挂一遍，白白慢一倍。
+  reboot)     _relive && do_softreboot ;;
   softreboot) do_softreboot ;;
-  # ★ 2026-10-19 新增：只做「清理旧挂载 + 按新计划重挂」，不重启。
-  #   给「免重启」流程的第 1 步用：
-  #   原来那一步只调 do_mount，而 do_mount 只挂"新计划里的槽位" ——
-  #   切开关后新计划变少（151→119），少掉的 32 个时钟挂载不会被撤，
-  #   所以点了「免重启」时钟还是被替换。
-  relive)    _relive ;;
+  relive)     _relive ;;
   free)
     # ★ 2026-10-18（真机反馈「切开关后软重启不生效」）：
     #   原来只有 do_mount —— 它只处理"新计划里有的槽位"。
@@ -651,44 +642,6 @@ case "$CMD" in
     if [ -s "$MNT_LIST" ]; then
       do_unmount >/dev/null 2>&1
     fi
-    # ★ 2026-10-19 修复「切保留时钟开关，多切几次就不生效」：
-    #
-    #   每次软重启都从**干净状态**开始：按 slots.list 全量卸载所有可能挂过的槽位。
-    #   为什么不能只卸"上一份计划里的"：切换开关会改变计划（151 ⇄ 119），
-    #   一旦某次挂载部分失败或开机挂载覆盖过占位，该卸的和实际挂着的就越差越多。
-    #
-    #   ⚠️ 两种清单格式不同，路径拼法必须区分：
-    #     scanned/slots.list = "role 目录 文件名"     → 目录 + "/" + 文件名
-    #     slots.map          = "role 完整路径 文件名" → 第 2 列已经是完整路径
-    setup_ns 2>/dev/null
-    _pn=0
-    _all="$LIB/scanned/slots.list"
-    if [ -s "$_all" ]; then
-      while IFS=' ' read -r _r _d _n || [ -n "$_r" ]; do
-        [ -n "$_n" ] || continue
-        case "$_d" in
-          */"$_n") _dst="$_d" ;;                 # 第 2 列已含文件名
-          *) _dst="${_d%/}/$_n" ;;                # 第 2 列是目录
-        esac
-        case "$_dst" in /*) ;; *) _dst="/$_dst" ;; esac
-        if _umount "$_dst" 2>/dev/null; then _pn=$((_pn + 1)); fi
-      done < "$_all"
-    else
-      for _f in "$MODDIR/slots.map.prev" "$MODDIR/slots.map"; do
-        [ -s "$_f" ] || continue
-        while IFS=' ' read -r _r _d _n || [ -n "$_r" ]; do
-          [ -n "$_n" ] || continue
-          case "$_d" in
-            */"$_n") _dst="$_d" ;;
-            *) _dst="${_d%/}/$_n" ;;
-          esac
-          case "$_dst" in /*) ;; *) _dst="/$_dst" ;; esac
-          if _umount "$_dst" 2>/dev/null; then _pn=$((_pn + 1)); fi
-        done < "$_f"
-      done
-    fi
-    rm -f "$MODDIR/slots.map.prev" 2>/dev/null
-    [ "$_pn" -gt 0 ] && echo "   已清理旧挂载（$_pn 个）"
     do_mount || { echo "❌ 挂载失败，已终止（没有软重启）"; exit 1; }
     do_softreboot
     ;;

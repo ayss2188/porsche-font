@@ -3335,7 +3335,7 @@ sec15() {
 }
 
 report_full() {
-  echo "== 自定义字体切换模块 · 一键体检报告 =="
+  echo "== 保时捷字体（三合一） · 一键体检报告 =="
   collect_once
   conclusion
     sec0

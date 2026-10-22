@@ -1,3 +1,21 @@
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-23（与主项目同步的三项清理改进）
+# ---------------------------------------------------------------------------
+_umount_ours() {
+  [ -f "$LIB/.mounted" ] || return 0
+  while IFS= read -r _d; do
+    [ -n "$_d" ] || continue
+    umount -l "$_d" 2>/dev/null || umount "$_d" 2>/dev/null
+  done < "$LIB/.mounted"
+  return 0
+}
+_clean_tmp() {
+  rm -f /data/local/tmp/.pv.* /data/local/tmp/.slots.clean.* /data/local/tmp/.oem.* \
+        /data/local/tmp/.marks.* 2>/dev/null
+}
+_umount_ours
+
 #!/system/bin/sh
 # 卸载时先把"商店缓存桥接"还原掉（否则那些缓存文件会一直显示我们的字体）
 [ -f "$MODDIR/gms_cache.sh" ] && sh "$MODDIR/gms_cache.sh" off >/dev/null 2>&1
@@ -166,5 +184,7 @@ else
     fi
   fi
 fi
+
+_clean_tmp
 
 exit 0

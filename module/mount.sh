@@ -303,6 +303,7 @@ payload_mount() {
   else
     _usemap="$map"
   fi
+  _rom_now=$(tr -d '[:space:]' 2>/dev/null < "$moddir/current_rom")
   while read -r id rel src || [ -n "$rel" ]; do
     case "$id" in ""|*[!A-Za-z0-9_]*) continue ;; esac
     case "$rel" in ""|/*|*..*) continue ;; esac
@@ -333,6 +334,23 @@ payload_mount() {
         fi
         ;;
     esac
+    # ★ 2026-10-22（魅族闪退验证）：跳过厂商 UI 字体槽位。
+    #   现象：魅族用户「默认卸载模块」关掉（挂载对 App 可见）后，
+    #   WebUI 闪退、酷安不能跳外链、B 站看视频退回桌面 —— 像是字体被各应用读到后出问题。
+    #   最可疑的是 product/fonts 下魅族自己的 UI 字体（SFDIN-*/SFPRO-* 等）。
+    #   这里先跳过它们做验证；确认有效后再做成设置开关。
+    case "$_rom_now" in
+      flyme*)
+        case "$rel" in
+          product/fonts/SF*|product/fonts/sf*|product/fonts/*DIN*|product/fonts/*PRO*)
+            skip=$((skip+1))
+            echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 跳过厂商 UI 字体槽位（魅族验证）：$rel" >> "$LIB/mount.log" 2>/dev/null
+            continue
+            ;;
+        esac
+        ;;
+    esac
+
     # 幂等：已经指向我们的文件了就别再叠一层
     # （post-fs-data 和 post-mount 万一都跑到，或者被重复调用，会叠出多层挂载且再也数不清）
     if [ "$(stat -L -c '%d:%i' "$src" 2>/dev/null)" = "$(stat -L -c '%d:%i' "$dst" 2>/dev/null)" ]; then

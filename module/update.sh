@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 自定义字体切换模块 - GitHub 在线更新（在手机本地下载并安装，不用电脑）
+# 保时捷字体（三合一） - GitHub 在线更新（在手机本地下载并安装，不用电脑）
 # 更新信息来自 module.prop 里的 updateJson（仓库里那份 UPDATE-<版本>.json），
 # Magisk / KernelSU / APatch 管理器也用同一个地址显示"有更新"。
 #
@@ -379,7 +379,22 @@ case "${1:-check}" in
     # 少了 pid 会被误判成"worker 已死"（这个坑在 installbg 那边踩过）。
     printf 'stage=install\ncur=0\ntotal=0\nmsg=正在安装（管理器解包中）\npid=%s\n' "$_IPID" > "$STATE" 2>/dev/null
     _iwaited=0
+    _MID=$(prop id)
+    _PREVVER=$(prop version)          # 安装前的版本：要求"变了"才算装好
+    _iok=0
     while [ ! -f "$TMP/install.rc" ]; do
+      # ★ 2026-10-23（作者实测"卡在正在安装"）：管理器**装完不返回**，install.rc 永远不写。
+      #   所以除了退出码，再加"版本判据"：已装好的模块版本 == 目标版本，
+      #   或出现了 modules_update/<id>（管理器已接管待生效），都算装好了。
+      _iv=$(sed -n 's/^version=//p' "/data/adb/modules/$_MID/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
+      if [ -n "$_MID" ] && [ "$_iv" = "$NEW_VER" ] && [ "$_iv" != "${_PREVVER:-}" ]; then
+        _iok=1
+        break
+      fi
+      if [ -n "$_MID" ] && [ -d "/data/adb/modules_update/$_MID" ]; then
+        _iok=1
+        break
+      fi
       # 关机中就别再等了
       [ -n "$(getprop sys.powerctl)$(getprop sys.shutdown.requested)" ] && { kill "$_IPID" 2>/dev/null; break; }
       # ★ 必须判存在：安装器可能几秒内一个字都不吐，这时 `wc -c` 会**往 stderr 报错**
@@ -397,13 +412,21 @@ case "${1:-check}" in
         "${_iby:-0}" "$_ipct" "$_IPID" > "$STATE" 2>/dev/null
       sleep 1
       _iwaited=$((_iwaited + 1))
-      if [ "$_iwaited" -ge 600 ]; then
+      if [ "$_iwaited" -ge 180 ]; then
         case "$_IPID" in ''|*[!0-9]*|0|1) ;; *) kill "$_IPID" 2>/dev/null ;; esac
         break
       fi
     done
-    wait "$_IPID" 2>/dev/null
-    rc=$(cat "$TMP/install.rc" 2>/dev/null)
+    if [ "${_iok:-0}" = 1 ] && [ ! -f "$TMP/install.rc" ]; then
+      # 版本已对得上（管理器装好了只是没返回）→ 直接收工，别再等
+      wait "$_IPID" 2>/dev/null
+      rc=0
+    else
+      wait "$_IPID" 2>/dev/null
+      rc=$(cat "$TMP/install.rc" 2>/dev/null)
+    fi
+    # 超时但版本已经对得上 → 也当成功（真机常见：装完了管理器不回话）
+    if [ -z "$rc" ] && [ "${_iok:-0}" = 1 ]; then rc=0; fi
     rm -f "$TMP/install.rc" 2>/dev/null
     if [ "$rc" = 0 ]; then
       rm -f "$ZIP"
