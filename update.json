@@ -1,7 +1,7 @@
 {
-  "version": "v4.4.8",
-  "versionCode": 4408,
-  "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v4.4.8/porsche-font-multi-v4.4.8.zip",
+  "version": "v4.4.8.1",
+  "versionCode": 44081,
+  "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v4.4.8.1/porsche-font-multi-v4.4.8.1.zip",
   "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/CHANGELOG.md",
-  "sha256": "d61c0787521f337b839eb002fdbd033064bd8fdc5abf1c0b27195d8aef5184ba"
+  "sha256": "df4e7579fa491af0ac352444eeeecd895e850034c5806a8bae71f8a12cafe40c"
 }
