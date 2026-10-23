@@ -721,12 +721,9 @@ slot_scan_cache_stamp() {   # $1=moddir → 扫描完成后写指纹
   return 0
 }
 
-slot_device_scan() {
-  # ★ 2026-10-23（魅族闪退）：Flyme 上不做本机扫描，槽位只来自机型清单（等价早期版本）
-  local _rom_f
-  _rom_f=$(tr -d '[:space:]' 2>/dev/null < "${1:-${MODDIR:-}}"/current_rom)
-  [ "$_rom_f" = "flyme" ] && return 1   # $1=moddir → 生成 device.list
+slot_device_scan() {   # $1=moddir → 生成 device.list
   local moddir="${1:-${MODDIR:-}}"
+
   local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
   local _dev="$_sd/device.list"
   local tmp n
@@ -734,10 +731,10 @@ slot_device_scan() {
   mkdir -p "$_sd" 2>/dev/null
   tmp="$_dev.tmp.$$"
   {
-    slot_xml_names              | sed 's/^/x /'
-    slot_static_names "$moddir" 0 0 0 | sed 's/^/s /'
-    slot_oem_names "$moddir"    | sed 's/^/o /'
-    slot_dir_names              | sed 's/^/d /'
+    slot_xml_names                      | sed 's/^/x /'
+    slot_static_names "$moddir" 0 0 0   | sed 's/^/s /'
+    slot_oem_names "$moddir"            | sed 's/^/o /'
+    slot_dir_names                      | sed 's/^/d /'
   } 2>/dev/null > "$tmp.raw"
   awk '{ src=substr($0,1,1); nm=substr($0,3)
          if (nm == "") next
@@ -766,7 +763,7 @@ slot_device_scan() {
   if [ "${n:-0}" -ge 1 ]; then
     if mv -f "$tmp" "$_dev" 2>/dev/null; then
       slot_scan_cache_stamp "$moddir"
-    return 0
+      return 0
     fi
     rm -f "$tmp" 2>/dev/null
     return 1

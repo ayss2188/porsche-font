@@ -976,6 +976,7 @@ try {
     <div><div class="t">保留锁屏时钟字体</div><div class="d">小米/红米/POCO 的锁屏时钟有<b>自己专用的一份字体</b>，默认会一起换成你的字体。<br><b>开</b>：那几份保留原样，你还能在系统里换锁屏时钟样式。<br><b>关</b>：连锁屏时钟也换成你的字体。<br>（其他品牌没有这种专用字体，开关无影响）</div></div>
     <div class="sw" id="sw_keep_lockscreen"></div>
   </div>
+
   <div class="switch-row fade" onclick="toggleSetting('mount_mode')">
     <div><div class="t">自带挂载</div><div class="d"><b>开</b>：模块自己把字体挂上去（推荐，不用装元模块）。<br><b>关</b>：交给 Root 管理器 / 元模块来挂。</div></div>
     <div class="sw on" id="sw_mount_mode"></div>
@@ -5685,12 +5686,24 @@ async function selectFont(id) {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh apply ${shq(id)}`);
     // ★ 2026-10-18 修：返回值末尾可能带 `:kl=N`（do_apply 附带的诊断字段），
     //   这里以前没接受它 → 后端明明成功、界面却提示"切换失败"（真机实测）。
-    const m = out.match(/^OK:(.*):(\d+):(\w+)(?::(kl=\d))?\s*$/m);
+    // ★ 2026-10-23（ColorOS 真机）：后端返回 "OK:无字体（系统默认）:0:none:" ——
+    //   末尾还有一个空字段，旧正则要求 \w+ 后立刻结束 → 匹配不上 → 误报"切换失败"。
+    //   现在把尾部字段整体放宽，并且槽位为 0 时也走"成功"。
+    const m = out.match(/^OK:(.*?):(\d+):(\w+)(?::([^\n]*))?\s*$/m);
     if (m) {
-      showToast(id === "none"
-        ? "已选择「无字体」，重启后恢复系统默认"
-        : "已选择「" + labelOf(id) + "」：将替换 " + m[2] + " 个槽位（" + (SCOPE_TEXT[m[3]] || m[3]) + "），重启后生效");
-    } else showToast("切换失败：" + out.replace(/^ERROR:/, ""));
+      const slots = parseInt(m[2], 10) || 0;
+      if (id === "none" || slots === 0) {
+        showToast("已恢复系统默认（重启后生效）");
+      } else {
+        showToast("已选择「" + labelOf(id) + "」：将替换 " + slots + " 个槽位（" +
+                  (SCOPE_TEXT[m[3]] || m[3]) + "），重启后生效");
+      }
+    } else if (/^\s*OK:/m.test(out)) {
+      // 后端说 OK，只是格式没按预期 —— 也当成功，别吓用户
+      showToast("已应用（重启后生效）");
+    } else {
+      showToast("切换失败：" + out.replace(/^ERROR:/, ""));
+    }
   } catch (e) {
     showToast("切换失败：" + errText(e));
   } finally {

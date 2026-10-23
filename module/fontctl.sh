@@ -1153,6 +1153,13 @@ do_apply() {
   #     · 选的是 none   → 删掉 .last_good（这是用户意图，不该在下次升级被"恢复"回来）
   if [ "$sel" = none ]; then
     rm -f "$LIB/.last_good" 2>/dev/null
+    # ★ 2026-10-23（ColorOS 真机反馈"恢复不了原字体，得卸载才恢复"）：
+    #   主题字体（/data 下那几份）是**物理替换**上去的，原件备份在 $LIB/.orig。
+    #   原来只有开机时（pending=none）才还原；用户选「无字体」当场不还原，
+    #   看起来就像"没恢复"。这里立刻把原件盖回去 —— 不用等重启。
+    if command -v datafont_restore >/dev/null 2>&1; then
+      datafont_restore >/dev/null 2>&1
+    fi
   else
     printf '%s\n' "$sel" > "$LIB/.last_good" 2>/dev/null
   fi
