@@ -1076,7 +1076,9 @@ fi
 [ -n "$APPLIED_TTC" ] || APPLIED_TTC=0
 
 # 字体库清单
-LIB_FONTS=$(ls -1 "$LIB"/f*.ttf 2>/dev/null)
+# ★ 2026-10-24：内置配色（builtin_*.ttf）也算字体库 —— 以前只数 f*.ttf，
+#   于是"字体库 0 个"却占 128MB（三套内置配色），报告自相矛盾。
+LIB_FONTS=$(ls -1 "$LIB"/*.ttf 2>/dev/null)
 LIB_N=$(printf '%s\n' "$LIB_FONTS" | grep -c . )
 
 # ---------------------------------------------------------------------------
@@ -1767,6 +1769,15 @@ sec_unadapted() {
         for _one in $_fid; do
           if ! _xml_family_ok "$_one" ""; then _should=0; break; fi
         done
+      fi
+    fi
+    # ★ 2026-10-24（魅族真机报告）：protect.list / 「粗细调节」族里的字体是**刻意不动**的，
+    #   以前这里不查跳过名单，于是 RobotoFlex-Regular.ttf 被误报成 [★要修]。
+    if [ "$_should" = 1 ]; then
+      _lf2=$(printf '%s' "$_fl" | tr 'A-Z' 'a-z')
+      _skl="${LIB:-/data/adb/custom_font_lib}/scanned/skip.list"
+      if [ -s "$_skl" ] && grep -qx "$_lf2" "$_skl" 2>/dev/null; then
+        _should=0
       fi
     fi
     if [ "$_should" = 1 ]; then

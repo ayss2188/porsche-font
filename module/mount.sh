@@ -273,7 +273,10 @@ payload_mount() {
     #   刚好被 20 秒掐断 → 自愈失效（回归测试 newfix-test 第 2 节就是这么红的）。
     #   自愈是**开机后台**动作，等 40 秒不影响用户；而"自愈没生效"会让字体整轮不挂载。
     #   宁可多等，不要静默失败。
-    _to_s 40 sh "$moddir/fontctl.sh" apply "$_p" >/dev/null 2>&1
+    # ★ 2026-10-24（真机：魅族开机 slots.map 为空、补计划 rc=1 但日志看不出原因）
+    #   把 apply 的输出留下来：成功/失败都能在诊断报告的 mount.log 里看到最后几行。
+    _apl="${TMPDIR:-/data/local/tmp}/.cfs_apply.$$"
+    _to_s 40 sh "$moddir/fontctl.sh" apply "$_p" > "$_apl" 2>&1
     _rc=$?
     # 还原：不用 `CFS_NO_TTC=1 函数名` 那种写法 —— POSIX 对"赋值前缀 + 函数"的作用域
     # 措辞是 **unspecified**（busybox ash 实测是临时的，但真机跑的是 mksh，不赌这个）。
@@ -285,6 +288,16 @@ payload_mount() {
       CFS_NO_TTC=$_ttc_prev
       export CFS_NO_TTC
     fi
+    if [ ! -s "$map" ]; then
+      # 把这次 apply 的最后几行写进 mount.log（下次报告就能看到真正的原因）
+      _tail=$(tail -n 3 "$_apl" 2>/dev/null | tr '\n' ' ')
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 补计划失败输出：${_tail:-（无输出）}" >> "$LIB/mount.log" 2>/dev/null
+      # ★ 再补一次「完整」重算（这次允许合成合集）：轻量模式被跳过的东西不再跳过。
+      #   之所以值得再花时间：这一次开机本来一个槽位都没挂上，重算成功至少能让合集也进去。
+      CFS_NO_TTC= sh "$moddir/fontctl.sh" apply "$_p" >> "$_apl" 2>&1
+      _rc=$?
+    fi
+    rm -f "$_apl" 2>/dev/null
     if [ ! -s "$map" ]; then
       # 退出码 124 = 被上面那个 20 秒上限掐断了
       echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 重新生成后仍然没有挂载计划（退出码 $_rc），本次不挂载（请把诊断报告发给作者）" >> "$LIB/mount.log" 2>/dev/null

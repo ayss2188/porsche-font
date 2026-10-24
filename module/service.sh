@@ -65,8 +65,16 @@ if [ -f "$MODDIR/fontctl.sh" ] && [ ! -s "$MODDIR/slots.map" ]; then
     *)
       if [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" != manager ]; then
         beat service "计划为空，开机后补做完整计划（含合集）"
-        sh "$MODDIR/fontctl.sh" apply "$_p2" >/dev/null 2>&1
-        beat service "补做结果：计划 $(grep -c . "$MODDIR/slots.map" 2>/dev/null) 个槽位（下次开机生效）"
+        # ★ 2026-10-24：留下 apply 的输出，失败时能看出原因（魅族真机 rc=1 却没有日志）
+        _svc_ap="${TMPDIR:-/data/local/tmp}/.cfs_apply_svc.$$"
+        sh "$MODDIR/fontctl.sh" apply "$_p2" > "$_svc_ap" 2>&1
+        _svc_rc=$?
+        _svc_n=$(grep -c . "$MODDIR/slots.map" 2>/dev/null)
+        beat service "补做结果：计划 ${_svc_n:-0} 个槽位（退出码 ${_svc_rc}，下次开机生效）"
+        if [ "${_svc_n:-0}" = 0 ]; then
+          echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] service 补计划失败（rc=${_svc_rc}）：$(tail -n 3 "$_svc_ap" 2>/dev/null | tr '\n' ' ')" >> "$LIB/mount.log" 2>/dev/null
+        fi
+        rm -f "$_svc_ap" 2>/dev/null
       fi
       ;;
   esac
@@ -214,3 +222,8 @@ sh "$MODDIR/fontctl.sh" relink >/dev/null 2>&1
 MISSED=0
 [ -f "$MODDIR/mount_missed" ] && MISSED=1
 beat service "finish active=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font") missed=$MISSED"
+
+# ★ 2026-10-24：上次开着抓日志（开机前没来得及关）→ 这次开机自动续抓
+if [ -f "${LIB:-/data/adb/custom_font_lib}/logs/.on" ] && [ -f "$MODDIR/logcatch.sh" ]; then
+  sh "$MODDIR/logcatch.sh" resume >/dev/null 2>&1
+fi

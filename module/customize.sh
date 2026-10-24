@@ -37,6 +37,17 @@ _OLD=$(cat "$_MK" 2>/dev/null | tr -d '\r\n')
 if [ -n "$_CUR" ] && [ "$_OLD" != "$_CUR" ]; then
   rm -rf "$LIB/scanned" 2>/dev/null
   rm -f "$LIB"/*.ttc[0-9]* 2>/dev/null
+  # ★ 2026-10-24：删完缓存**当场重扫一次**。
+  #   以前只删不扫，指望后面 apply 自己补 —— 真机上（魅族）出现过
+  #   "开机时 slots.map 为空、补计划失败" → 那一次开机没有任何字体。
+  #   装完就扫好，开机只读缓存，最稳。
+  if [ -f "$MODPATH/fontctl.sh" ]; then
+    if sh "$MODPATH/fontctl.sh" rescan >/dev/null 2>&1; then
+      ui_print "- 已按新版本逻辑重扫字体（首次开机不用再等）"
+    else
+      ui_print "  ⚠ 重扫没成功，开机时会再试一次"
+    fi
+  fi
   rm -f "$LIB/.verify.cache" "$LIB/.device_fonts" "$LIB/.cand.cache" \
         "$LIB/.plan.cache" "$LIB/.plan.marks" 2>/dev/null
   if [ -n "$_OLD" ]; then
@@ -191,8 +202,12 @@ fi
 WANTED="$LAST"
 
 for f in common.sh slots.sh mount.sh fontctl.sh update.sh google_font.sh gms_cache.sh nameclone.sh action.sh \
-         diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh metaprobe.sh fdata.sh ; do
+         diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh metaprobe.sh fdata.sh logcatch.sh ; do
   chmod 755 "$MODPATH/$f" 2>/dev/null
+done
+# Magisk 用户没有「操作」按钮：这几个文件放在模块目录里，点「执行」就能用
+for _uf in "抓日志-开始.sh" "抓日志-停止导出.sh" "抓日志-状态.sh" "打开WebUI.sh"; do
+  [ -f "$MODPATH/$_uf" ] && chmod 755 "$MODPATH/$_uf" 2>/dev/null
 done
 rm -f "$MODPATH/customize.sh.bak" 2>/dev/null
 
@@ -229,9 +244,10 @@ if [ "$LAST" != none ]; then
   #   用户会以为卡死了、甚至去强杀管理器。真机反馈过（截图里就是停在"上次选择"这行不动）。
   #   提示要写在 apply **之前**（写在后面就是马后炮了，用户已经等完了）。
   #   ⚠️ 改这里时别删：它不参与任何逻辑，纯粹是给用户看的。
-  ui_print "  ⏳ 正在扫描本机字体并生成槽位清单"
-      ui_print "     大概十几秒到一分钟。"
-      ui_print "     卡住不动是正常的，请稍等…"
+  # ★ 2026-10-24（作者真机反馈）：这一步实测能到几分钟（槽位多 + 要合成合集）。
+  #   原来写"十几秒到一分钟"是不准的；现在按实情说，不给具体秒数。
+  ui_print "  ⏳ 正在生成挂载计划（槽位多或设备慢时要几十秒到几分钟）"
+  ui_print "     这段时间没有任何输出是正常的，请耐心等，别退出管理器"
 
   _APPLY_OUT=$(sh "$MODPATH/fontctl.sh" apply "$LAST" 2>&1)
   OUT=$(printf '%s\n' "$_APPLY_OUT" | tail -n1)
@@ -327,11 +343,10 @@ if [ -n "$PEND" ] && [ "$PEND" != none ]; then
   if [ ! -s "$MODPATH/slots.map" ]; then
     ui_print " "
     ui_print "- 正在为「$PEND」生成挂载计划…"
-    # ★ 2026-10-14（与主项目同步）：这一步要扫一遍字体配置，会停十几秒到一分钟，
-    #   必须先在界面上说清楚，否则用户以为卡死（真机反馈过）。
-    ui_print "  ⏳ 正在扫描本机字体并生成槽位清单"
-      ui_print "     大概十几秒到一分钟"
-      ui_print "     卡住不动是正常的，请稍等…"
+    # ★ 2026-10-24（作者真机反馈）：这一步实测能到几分钟（槽位多 + 要合成合集），
+    #   原来"十几秒到一分钟"的承诺不准；改成为实情描述，不给具体秒数。
+    ui_print "  ⏳ 正在生成挂载计划（槽位多或设备慢时要几十秒到几分钟）"
+    ui_print "     这段时间没有任何输出是正常的，请耐心等，别退出管理器"
     sh "$MODPATH/fontctl.sh" apply "$PEND" >/dev/null 2>&1 || true
     if [ ! -s "$MODPATH/slots.map" ]; then
       ui_print "⚠ 挂载计划没有生成（slots.map 为空）"

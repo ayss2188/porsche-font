@@ -985,11 +985,17 @@ try {
 
   <div class="divider"></div>
 
+  <div class="section-title fade"><span>遇到问题？抓日志 / 报故障</span></div>
+  <div class="g-hint fade" style="margin:-2px 0 10px">
+    里面有<b>完整诊断报告</b>（字体指纹、映射、挂载实测，给作者看细节）、
+    <b>抓崩溃日志</b>、<b>一键上报</b>（两秒，不用自己找文件）。<br>
+    遇到 App 闪退、WebUI 闪退、字体没换全、某个 App 没变 ——
+    用「抓日志」记下过程，停止后导出，作者拿到就能直接分析。
+  </div>
   <div class="switch-row fade fbk-entry" onclick="openFbk()">
     <div>
-      <div class="t">遇到问题？把现场发我</div>
-      <div class="d">字体没换全 / 某个 App 没变 / 显示方块 □ / 想加粗没变化 ——
-        点这里<b>两秒</b>上报，不用找文件。</div>
+      <div class="t">打开「日志 / 上报」面板</div>
+      <div class="d">完整诊断报告 · 抓崩溃日志 · 一键上报</div>
     </div>
     <div class="row-arrow">›</div>
   </div>
@@ -1126,7 +1132,7 @@ try {
        ================================================== -->
   <div class="sheet" id="fbkSheet">
     <div class="sheet-head">
-      <div class="sheet-title">遇到问题？把现场发我</div>
+      <div class="sheet-title">遇到问题？抓日志 / 报故障</div>
       <button class="sheet-x" onclick="closeFbk()" aria-label="关闭">✕</button>
     </div>
     <div class="fbk-body">
@@ -1195,10 +1201,25 @@ try {
         生成完那个窗口底部会多出一个「上传给作者」————
 
 
+
       <div class="divider"></div>
 
-      <!-- ★ 2026-10-23（作者要求）：网络诊断单独一块，不和一键上报挤在一起 -->
-      <div class="fbk-sec">④ 网络诊断</div>
+      <!-- ★ 2026-10-24：一键抓崩溃日志（App 闪退 / WebUI 闪退都适用） -->
+      <div class="fbk-sec">④ 抓崩溃日志</div>
+      <div class="g-hint" style="margin-bottom:10px">
+        点「开始」→ 去复现问题（打开会闪退的 App）→ 回来再点一次停止，
+        会自动生成 <b>Download/崩溃日志_时间.txt</b>，然后可以一键上传。<br>
+        <span style="opacity:.75">WebUI 本身也会闪退的话：到管理器里点模块卡片的「操作」按钮，效果一样。</span>
+      </div>
+      <div class="btn-row">
+        <button class="g-btn primary-blue" id="logcatchStartBtn" onclick="logcatchStart()">开始抓日志</button>
+        <button class="g-btn danger" id="logcatchStopBtn" onclick="logcatchGo('stop')" style="display:none">停止并导出</button>
+        <button class="g-btn" id="logcatchUploadBtn" onclick="logcatchUpload()" style="display:none">上传给作者</button>
+      </div>
+      <div class="g-hint" id="logcatchStatus" style="display:none"></div></div>
+
+<!-- ★ 2026-10-23（作者要求）：网络诊断单独一块，不和一键上报挤在一起 -->
+      <div class="fbk-sec">⑤ 网络诊断</div>
       <div class="g-hint" style="margin-bottom:10px">
         上传前会自动检测能不能连上服务器；这里可以手动再测一次，
         结果会写清是<b>网络不通</b>、<b>口令不对</b>还是<b>服务器异常</b>。
@@ -7272,9 +7293,11 @@ function hideBusy() {
 //   讲清"不采集什么"比空泛的"绝对安全"更有说服力 —— 用户能自己核对。
 //   注意 dialog() 的 msg 是走 textContent，所以换行直接写 \n 就是真换行。
 const FBK_PRIVACY =
-  "会上报：设备品牌/型号、Android 版本、模块版本、\n" +
-  "生效状态、字体槽位计划、字体文件名清单、挂载日志。\n" +
-  "大小约 2KB。\n\n" +
+  "会上报：设备品牌/型号、Android 版本、模块版本、环境(root/内核)、\n" +
+  "生效状态、槽位计划、字体库清单、扫描缓存概况、挂载与合集日志、\n" +
+  "开机事件、设置项、抓日志状态、冲突模块。\n" +
+  "这些都是模块自己已经存在磁盘上的状态文件，只读不改，\n" +
+  "生成约 1～2 秒，大小通常 5～20KB。\n\n" +
   "不会采集：\n" +
   "  ✗ 手机号 / 账号 / 通讯录\n" +
   "  ✗ IMEI / 序列号等设备标识\n" +
@@ -7350,6 +7373,155 @@ async function askDesc(what) {
   } catch (e) { return ""; }   // 弹窗不可用时不挡住功能
 }
 
+
+
+
+/* ★ 2026-10-24 v2：抓日志的界面交互
+   · 启动用后台方式（exec 立刻返回），状态靠 fetch 读 webroot/logstate.txt —— 不卡界面
+   · 按钮变字 + 转圈；停止后可以一键上传给作者
+*/
+let __lcTimer = null;
+
+function lcUI(on, text) {
+  const b1 = document.getElementById("logcatchStartBtn");
+  const b2 = document.getElementById("logcatchStopBtn");
+  const b3 = document.getElementById("logcatchUploadBtn");
+  if (b1) {
+    b1.textContent = on ? "抓取中…（点这里停止）" : "开始抓日志";
+    b1.classList.toggle("cfs-busy", !!on);
+    b1.disabled = false;
+  }
+  if (b2) { b2.style.display = on ? "none" : ""; b2.disabled = !!on; }
+  if (b3) { b3.style.display = on ? "none" : ""; }
+  if (text !== undefined) lcSay(text);
+}
+
+function lcSay(html, color) {
+  const st = document.getElementById("logcatchStatus");
+  if (!st) return;
+  if (!html) { st.style.display = "none"; st.innerHTML = ""; return; }
+  st.style.display = "block";
+  st.style.color = color || "";
+  st.innerHTML = html;
+}
+
+function lcFmt(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m > 0 ? (m + " 分 " + s + " 秒") : (s + " 秒");
+}
+
+async function lcReadState() {
+  try {
+    const r = await fetch("./logstate.txt?_=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return null;
+    const txt = String(await r.text() || "");
+    const kv = {};
+    txt.split("\n").forEach(l => { const i = l.indexOf("="); if (i > 0) kv[l.slice(0, i)] = l.slice(i + 1).trim(); });
+    return kv;
+  } catch (e) { return null; }
+}
+
+async function lcPoll() {
+  const kv = await lcReadState();
+  if (!kv) return;
+  if (kv.state === "on") {
+    const el = (parseInt(kv.now, 10) || 0) - (parseInt(kv.started, 10) || 0);
+    const kb = Math.round((parseInt(kv.bytes, 10) || 0) / 1024);
+    lcUI(true, "已抓取 <b>" + lcFmt(el) + "</b> · " + kb + " KB" +
+      "<br><span style='opacity:.7'>现在去复现问题，回来点上面的按钮停止</span>");
+  } else {
+    lcUI(false);
+    lcSay("");
+  }
+}
+
+async function logcatchGo(act) {
+  const b1 = document.getElementById("logcatchStartBtn");
+  try {
+    if (act === "start") {
+      lcUI(true, "正在启动…");
+      // 后台启动：命令立刻返回，界面不冻结
+      await ksuExec("( sh " + MODDIR + "/logcatch.sh start >/dev/null 2>&1 & ) ; echo ok");
+      if (__lcTimer) clearInterval(__lcTimer);
+      __lcTimer = setInterval(lcPoll, 1500);
+      setTimeout(lcPoll, 400);
+    } else {
+      if (__lcTimer) { clearInterval(__lcTimer); __lcTimer = null; }
+      lcSay("正在停止并整理日志…（最多几秒）");
+      const out = String(await ksuExec("sh " + MODDIR + "/logcatch.sh stop 2>&1") || "");
+      const esc = out.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>");
+      lcUI(false);
+      lcSay(esc + "<br><span style='opacity:.75'>可以直接点「上传给作者」，或把这个文件发给作者。</span>", "#4ade80");
+      const m = out.match(/\/sdcard\/Download\/[^\s]+\.txt/);
+      if (m) showToast("已导出：" + m[0].split("/").pop());
+    }
+  } catch (e) {
+    lcUI(false);
+    lcSay("执行失败：" + errText(e), "#ff6b6b");
+  }
+}
+
+async function logcatchUpload() {
+  const b = document.getElementById("logcatchUploadBtn");
+  try {
+    // ① 先问一句"遇到什么问题" + 隐私/VPN 说明（和完整报告同一个弹窗）
+    const _d = await askDesc("这份日志");
+    if (_d === null) { lcSay("已取消上传（文件还在 Download 里，可以直接发给作者）"); return; }
+    const note = String(_d || "");
+
+    // ② 找到刚导出的文件
+    const path = String(await ksuExec("sh " + MODDIR + "/logcatch.sh lastpath 2>/dev/null") || "").trim();
+    if (!path) { lcSay("没有找到导出文件，先点一次「停止并导出」", "#ff8f6b"); return; }
+
+    // ③ 先测网络（没连 VPN 就先提示，别白等）
+    //   ★ 2026-10-24：子项目界面里没有主项目那套 uploadGate —— 直接调会报
+    //   "uploadGate is not defined"。这里做兜底：没有就用 fetch 探一下 /health。
+    let _gate = true;
+    if (typeof uploadGate === "function") {
+      _gate = await uploadGate(path);
+    } else {
+      try {
+        const r = await fetch(WORKER_URL + "/health", { cache: "no-store" });
+        _gate = r.ok;
+      } catch (e) { _gate = false; }
+      if (!_gate) {
+        lcSay("连不上服务器 —— 服务器在境外，请先把梯子切成<b>全局模式</b>再点一次。<br>" +
+              "文件已经在这：<b>" + repEsc(path) + "</b>，也可以直接发给作者。", "#ff8f6b");
+        return;
+      }
+    }
+    if (!_gate) {
+      lcSay("已取消上传。文件已保存在：<br>" + repEsc(path) + "<br>可以直接发给作者。");
+      return;
+    }
+
+    if (b) { b.classList.add("cfs-busy"); b.textContent = "上传中…"; }
+    lcSay("正在上传（最多约 60 秒）…");
+    await nextPaint(); await nextPaint();
+
+    const enc = encodeURIComponent(note || "");
+    const out = String(await ksuExec("sh " + MODDIR + "/logcatch.sh upload " + JSON.stringify(enc) + " 2>&1") || "");
+    if (/ok|OK/.test(out) && !/ERROR/.test(out)) {
+      const id = (out.match(/[A-Z0-9]{6,}/) || [""])[0];
+      lcSay("✅ 已上传，谢谢！" + (id ? "（编号 <b>" + repEsc(id) + "</b>）" : "") +
+            "<br><span style='opacity:.75'>作者能直接看到这份日志。</span>", "#4ade80");
+    } else {
+      lcSay("上传失败：<br>" + repEsc(out).replace(/\n/g, "<br>") +
+            "<br><span style='opacity:.75'>文件还在：" + repEsc(path) + " —— 可以直接发给作者。</span>", "#ff8f6b");
+    }
+  } catch (e) {
+    lcSay("上传失败：" + errText(e), "#ff6b6b");
+  } finally {
+    if (b) { b.classList.remove("cfs-busy"); b.textContent = "上传给作者"; }
+  }
+}
+// 「开始/停止」同一个按钮：抓取中再点就是停止（作者反馈：开始后像没反应）
+async function logcatchStart() {
+  const kv = await lcReadState();
+  if (kv && kv.state === "on") return logcatchGo("stop");
+  return logcatchGo("start");
+}
 
 /* ===========================================================================
    ★ 2026-10-16：上传改走 shell（真机实测 fetch 走不通）

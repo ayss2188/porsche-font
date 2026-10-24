@@ -231,6 +231,89 @@ EOF_OQ
   [ -e "$MODDIR/remove" ]  && { printf '  ! 模块待卸载\n'; any=1; }
   [ "$any" = 0 ] && printf '  （无）\n'
   printf '\n'
+  # -----------------------------------------------------------------------
+  # ★ 2026-10-24（作者要求）：把**已经存在**的数据都带上 —— 仍然只读、不扫描。
+  #   一键上报的意义是"快"，所以这里只 cat/head/glob，不做任何计算。
+  # -----------------------------------------------------------------------
+  printf '== 选中字体元数据 ==\n'
+  _meta=""
+  for _m in "$LIB/scanned/slots.meta" "$LIB/font_meta" "$LIB/$pend.meta" "$MODDIR/scanned/slots.meta"; do
+    [ -s "$_m" ] && { _meta="$_m"; break; }
+  done
+  if [ -n "$_meta" ]; then
+    grep -iE "${pend:-____}" "$_meta" 2>/dev/null | head -n 3 | sed 's/^/  /'
+    [ -z "$_meta" ] || printf '  （元数据文件：%s）\n' "${_meta##*/}"
+  else
+    printf '  （没有元数据缓存 —— 重新应用一次字体就会生成）\n'
+  fi
+  printf '\n'
+
+  printf '== 字体库清单 ==\n'
+  ls -1S "$LIB" 2>/dev/null | grep -E '\.(ttf|otf|ttc)$' | head -n 20 | while IFS= read -r _f; do
+    _k=$(wc -c < "$LIB/$_f" 2>/dev/null | tr -d ' ')
+    printf '  %-28s %s KB\n' "$_f" "$(( ${_k:-0} / 1024 ))"
+  done
+  _libn=$(ls -1 "$LIB" 2>/dev/null | grep -cE '\.(ttf|otf|ttc)$')
+  [ "${_libn:-0}" -gt 20 ] && printf '  …（共 %s 个）\n' "$_libn"
+  printf '\n'
+
+  printf '== 扫描缓存 ==\n'
+  printf '  device.list=%s 行   slots.list=%s 行   skip.list=%s 行\n' \
+    "$(grep -c . "$LIB/scanned/device.list" 2>/dev/null)" \
+    "$(grep -c . "$LIB/scanned/slots.list" 2>/dev/null)" \
+    "$(grep -c . "$LIB/scanned/skip.list" 2>/dev/null)"
+  printf '  扫描版本标记: 模块要求 %s / 设备记录 %s\n' \
+    "$(sed -n 's/^slot=//p' "$MODDIR/scanmarks.conf" 2>/dev/null | head -n1 | tr -d '\r')" \
+    "$(sed -n 's/^slot=//p' "$LIB/.scanmarks" 2>/dev/null | head -n1 | tr -d '\r')"
+  [ -e "$LIB/.force_rescan" ] && printf '  ! 存在 .force_rescan（下次开机强制重扫）\n'
+  printf '\n'
+
+  printf '== 挂载状态 ==\n'
+  printf '  mount.state: %s\n' "$(tr -d '\r' < "$MODDIR/mount.state" 2>/dev/null | head -n1)"
+  [ -e "$MODDIR/mount_missed" ] && printf '  ! 本次开机没有执行自带挂载（mount_missed）\n'
+  [ -e "$MODDIR/rescued" ] && printf '  ! 触发过开机救援（rescued）\n'
+  [ -n "$(cat "$LIB/rescue_count" 2>/dev/null)" ] && printf '  救援次数: %s\n' "$(tr -d '\r' < "$LIB/rescue_count" 2>/dev/null)"
+  printf '\n'
+
+  printf '== 合集合成（ttc.log 末 8 行）==\n'
+  if [ -s "$LIB/ttc.log" ]; then tail -n 8 "$LIB/ttc.log" 2>/dev/null | sed 's/^/  /'; else printf '  （无）\n'; fi
+  printf '\n'
+
+  printf '== 抓日志状态 ==\n'
+  if [ -f "$LIB/logs/.on" ]; then
+    printf '  正在抓（catch.log %s KB）\n' "$(( $(wc -c < "$LIB/logs/catch.log" 2>/dev/null | tr -d ' ' || echo 0) / 1024 ))"
+  else
+    printf '  未在抓\n'
+  fi
+  _lastlog=$(cat "$LIB/logs/last_export.txt" 2>/dev/null)
+  [ -n "$_lastlog" ] && printf '  最近导出: %s\n' "${_lastlog##*/}"
+  printf '\n'
+
+  printf '== 冲突模块 ==\n'
+  _cf=0
+  for _d in /data/adb/modules/*; do
+    [ -d "$_d" ] || continue
+    case "${_d##*/}" in "$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')") continue ;; esac
+    case "${_d##*/}" in *font*|*Font*|*FONT*) printf '  ! %s\n' "${_d##*/}"; _cf=1 ;; esac
+  done
+  [ "$_cf" = 0 ] && printf '  （无）\n'
+  printf '\n'
+
+  printf '== 环境 ==\n'
+  printf '  管理器=%s  内核=%s\n' \
+    "$( [ -d /data/adb/ksu ] && echo KernelSU/APatch || ([ -d /data/adb/magisk ] && echo Magisk || echo '?') )" \
+    "$(uname -r 2>/dev/null)"
+  printf '  ksud=%s\n' "$(ksud -V 2>/dev/null | head -n1 | tr -d '\r')"
+  printf '\n'
+
+  printf '== 开机事件（末 6 条）==\n'
+  [ -s "$LIB/boot_events.log" ] && tail -n 6 "$LIB/boot_events.log" 2>/dev/null | sed 's/^/  /' || printf '  （无）\n'
+  printf '\n'
+
+  printf '== 设置全文 ==\n'
+  sed 's/^/  /' "$MODDIR/settings.conf" 2>/dev/null
+  printf '\n'
+
   printf '== 说明 ==\n'
   printf '只读现成状态文件 + 一次目录名比对，不扫描内容、不算哈希。\n'
   printf '需要完整数据请用「导出完整报告」。\n'
@@ -247,7 +330,7 @@ EOF_OQ
 # 所以这里做最后一道：真超了就在**末尾**明确打印一句，而不是让服务端静默切掉。
 # 留 200 字节余量给界面自己加的尾巴。
 # ---------------------------------------------------------------------------
-LIMIT=${CFS_QUICK_MAX:-4000}
+LIMIT=${CFS_QUICK_MAX:-65536}
 LIMIT=$((LIMIT - 200))
 [ "$LIMIT" -gt 500 ] 2>/dev/null || LIMIT=3800
 
@@ -266,7 +349,7 @@ emit_limited() {
     else
       printf '%s' "$_tmp" | head -c "$LIMIT"
     fi
-    printf '\n（这份报告 %s 字符，超过邮件正文上限，已在此截断）\n' "$_n"
+    printf '\n（这份报告 %s 字符，超过上限，已在此截断）\n' "$_n"
     printf '需要完整数据请用「查看 / 生成完整报告」，或把 Download/快捷报告.txt 直接发我。\n'
   else
     printf '%s' "$_tmp"
