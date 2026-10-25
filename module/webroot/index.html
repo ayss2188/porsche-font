@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0545</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0555</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -7826,6 +7826,19 @@ function uiToggleLightDark() {
   window.cfsHeaderFix = apply;
   setTimeout(() => { try { cfsCheckInstallId(); } catch (e) {} }, 1200);
 
+function cfsUpdHardReset() {
+  try {
+    if (window.__updActive) return;
+    UPD2.phase = "idle";
+    if (typeof u2paint === "function") u2paint();
+    var b = document.getElementById("rebootBtn"); if (b) b.style.display = "none";
+    var c = document.getElementById("updCheckBtn"); if (c) c.disabled = false;
+    var mn = document.getElementById("updMainBtn"); if (mn) mn.disabled = !UPD2.has;
+    try { resetInstallButton(false); } catch (e) {}
+  } catch (e) {}
+}
+[900, 2500, 6000].forEach(function (ms) { setTimeout(cfsUpdHardReset, ms); });
+
 document.addEventListener("DOMContentLoaded", apply);
   setTimeout(apply, 300);
   setTimeout(apply, 1500);
@@ -10811,6 +10824,8 @@ function u2fmt(n) {
 }
 
 function u2paint() {
+  // 2026-10-26 闸门：没在本页面点过安装，就不显示待重启，也不会把按钮锁死
+  if (UPD2.phase === "done" && !window.__updActive) { UPD2.phase = "idle"; }
   const main = u2("updMainBtn"), check = u2("updCheckBtn"), foot = u2("updFoot");
   const panel = u2("updPanel"), wrap = u2("updBarWrap"), spin = u2("updSpin"), text = u2("updText");
   if (!main) return;
@@ -10931,6 +10946,7 @@ function updMainClick() {
 
 /* 开始下载+安装 */
 async function updInstall() {
+  window.__updActive = true;
   if (!UPD2.has) { showToast("没有可安装的新版本"); return; }
   const yes = await dialog({
     title: "安装 " + UPD2.newVer + "？",
