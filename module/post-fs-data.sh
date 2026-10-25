@@ -12,17 +12,31 @@
 
 MODDIR=${0%/*}
 # 商店缓存桥接：必须在 zygote 起来之前挂，应用（含商店）才看得到
-# 2026-10-21：桥接功能已摘除（对 Play 商店无效，且会让部分 Google 应用异常）
+# ★ 2026-10-21：桥接功能已摘除（对 Play 商店无效，且会让部分 Google 应用异常）
+#   这行不再执行，只留注释说明历史原因。
 
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
 [ -f "$MODDIR/mount.sh" ] && . "$MODDIR/mount.sh"
 
 rm -f "$MODDIR/mount_missed"
 
+# ★ 2026-10-25：没开「写真实文件」时，把以前写进 /data 主题字体的原件还原回去
+if [ "$(cfg_get theme_phys 0 2>/dev/null)" != 1 ] && [ -f "$MODDIR/mount.sh" ]; then
+  _pf0=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
+  case "$_pf0" in
+    ""|none) : ;;
+    *) ( . "$MODDIR/mount.sh"; datafont_restore ) >/dev/null 2>&1 || true ;;
+  esac
+fi
+
 # 心跳：证明 post-fs-data 阶段确实被执行了（诊断用）
 beat post-fs-data "pending=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font") root=$(root_manager) mode=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode") u=$(cut -d' ' -f1 /proc/uptime 2>/dev/null | cut -d. -f1)"
 
-if [ -f "$MODDIR/.booting" ]; then
+# ★ 2026-10-24 B6：排查时可以不自动救援 / 不自动停用
+_NO_RESCUE=$(cfg_get no_rescue 0 2>/dev/null)
+_NO_DISABLE=$(cfg_get no_auto_disable 0 2>/dev/null)
+
+if [ -f "$MODDIR/.booting" ] && [ "$_NO_RESCUE" != 1 ]; then
   # 上次开机留下的保护标记：先确认上次到底有没有开机成功
   _BID=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/.booting")
   _OKBOOT=0
@@ -70,7 +84,10 @@ if [ -f "$MODDIR/.booting" ]; then
     _rn=$((_rn + 1))
     printf '%s' "$_rn" > "$LIB/rescue_count" 2>/dev/null
     if [ "$_rn" -ge 2 ] 2>/dev/null; then
-      touch "$MODDIR/disable" 2>/dev/null
+      # ★ 2026-10-24 B6：高级设置里可以禁止自动停用
+      if [ "${_NO_DISABLE:-0}" != 1 ]; then
+        touch "$MODDIR/disable" 2>/dev/null
+      fi
       {
         echo "连续 ${_rn} 次开机没有正常完成，已自动停用本模块。"
         echo "手机现在可以正常开机了（字体回到系统默认）。"

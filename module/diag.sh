@@ -1,4 +1,6 @@
 #!/system/bin/sh
+# 诊断脚本构建戳（报告头部会写出来，便于分辨装的是哪一版）
+DIAG_BUILD="2026-10-23.19"
 # diag.sh - 一键体检
 #
 # 目的：把「重启了也不生效 / 字体没变化」的可能原因一次跑完，并给出大白话结论。
@@ -218,6 +220,7 @@ size_kb() { local s; s=$(stat -c %s "$1" 2>/dev/null); [ -n "$s" ] && echo "$((s
 # 只起 head + tr 两个进程，标签匹配用纯 shell（以前是 head|tr|grep|sort|tr 五个进程，
 # 每个"被配置引用的字体"都要付一次，字体多的机器上很可观）
 SFNT_KNOWN="cmap glyf loca head hhea hmtx maxp name OS/2 post fvar gvar avar STAT HVAR MVAR CFF CFF2 GPOS GSUB kern DSIG"
+
 sfnt_tags() {
   _ST_RAW=$(head -c 3072 "$1" 2>/dev/null | tr -c 'A-Za-z0-9/ ' '\n')
   [ -n "$_ST_RAW" ] || return 0
@@ -446,6 +449,209 @@ HASH_KEY=""; HASH_MAP=""
 #     概率低到可以忽略（真有这种情况，第 5 节还有 dev:inode 与魔数可交叉验证）。
 #
 # 输出直接就是"哈希 大小 路径"里的哈希字段（大小/mtime 已混进去），所以调用方不用改。
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-22（提速）：指纹缓存
+#   完整报告的大头是给几百个字体算稀疏指纹（每文件读头尾 64KB 再 sha256）。
+#   但"字体有没有被换过"这个问题，同一台机器上绝大多数文件是长期不变的 ——
+#   所以用「路径+大小+修改时间」作为键做缓存，命中就直接复用。
+#   缓存是**可丢弃的加速层**：删掉它只会让下次慢一点，不影响任何结论。
+# ---------------------------------------------------------------------------
+FP_CACHE_FILE="$LIB/.fp.cache"
+FP_CACHE=""
+FP_CACHE_SP=""
+FP_TAB='	'          # 直接写字面 Tab：$(printf '\\t') 在部分设备上会返回空
+
+fp_cache_load() {
+  FP_CACHE=""
+  [ -s "$FP_CACHE_FILE" ] || return 0
+  # 一行一条，转成用 | 分隔的串，方便纯 shell 做子串匹配（零进程）
+  # ★ 2026-10-23（真机数据）：缓存行里的分隔符可能是**多个空格**，
+  #   直接按 Tab 拼键永远匹配不上（1731 条缓存，命中 0 次）。
+  #   这里一次性规范成「路径<TAB>大小<TAB>mtime<TAB>哈希」，之后所有比较都按 Tab 来。
+  # 条数上限：只保留最后 6000 条，避免文件无限膨胀 + 变量过大
+  _cl=$(wc -l < "$FP_CACHE_FILE" 2>/dev/null | tr -d ' ')
+  case "$_cl" in ''|*[!0-9]*) _cl=0 ;; esac
+  if [ "$_cl" -gt 6000 ]; then
+    tail -n 6000 "$FP_CACHE_FILE" > "$FP_CACHE_FILE.tmp.$$" 2>/dev/null && mv -f "$FP_CACHE_FILE.tmp.$$" "$FP_CACHE_FILE" 2>/dev/null
+  fi
+  # ★ 2026-10-23 定稿：用 awk 的**默认分隔符**（连续空白）规范成 Tab 分隔。
+  #   踩过的坑：
+  #     · tr -s ' \t' '\t' —— 写进脚本后变成双反斜杠，tr 当成"反斜杠和字母 t"，没压缩
+  #     · $(printf '\t')   —— Tab 在命令替换里会被吞掉，键里就没有分隔符
+  #   awk 默认 FS 天然按"连续空白"切分，不写任何转义，最稳。
+  FP_CACHE=$(awk 'NF >= 4 { print $1 "\t" $2 "\t" $3 "\t" $4 }' "$FP_CACHE_FILE" 2>/dev/null | tr '\n' '|')
+  if [ -z "$FP_CACHE" ]; then
+    FP_CACHE=$(tr '\n' '|' < "$FP_CACHE_FILE" 2>/dev/null)
+  fi
+  return 0
+}
+
+# 查缓存：$1=路径 $2=大小 $3=mtime → 命中则把 hash 放进 FP_HIT
+fp_cache_hit() {
+  local key v _mt3 _h _stored_mt _mf
+  # ★ 2026-10-23：如果连续 miss 超过 30 次且一次都没命中，说明键/路径有未知差异，
+  #   本次直接停用缓存（不再白花 CPU）。缓存只是加速层，停用它不影响任何结论。
+  _mf="${FP_STAT_FILE:-}"
+  if [ -n "$_mf" ] && [ "$FP_CACHE" != "" ]; then
+    case "$(tail -c 40 "$_mf" 2>/dev/null)" in
+      *HH*|*H*) : ;;                       # 已经命中过，正常使用
+      *)
+        if [ "$(tail -c 40 "$_mf" 2>/dev/null | tr -cd N | wc -c | tr -d ' ')" -gt 30 ] 2>/dev/null; then
+          FP_CACHE=""; FP_CACHE_DISABLED=1
+        fi
+        ;;
+    esac
+  fi
+  # 兜底：FP_TAB 若为空（极端环境），用一个从 IFS 取的 Tab
+  if [ -z "${FP_TAB:-}" ]; then
+    FP_TAB=$(printf '\t' 2>/dev/null; printf '\t' 2>/dev/null)
+    [ -n "$FP_TAB" ] || FP_TAB=${IFS%" "}
+    [ "$(printf '%s' "$FP_TAB" | wc -c | tr -d ' ')" = "1" ] || FP_TAB="	"
+  fi
+  [ -n "$FP_LOADED" ] || { FP_LOADED=1; fp_cache_load; }
+  [ -n "$FP_CACHE" ] || return 1
+  # ★ 2026-10-23（真机数据）：键只用「路径 + 大小」。
+  #   mtime 以前也拼在键里，但它来自 load_meta 的临时表 —— 取不到时会变成 0，
+  #   于是键跟缓存里存的真实 mtime 永远对不上（1731 条缓存，命中 0 次）。
+  #   现在 mtime 命中后再比：不一致才当 miss，既可靠又不会漏。
+  _mt3=${3:-}
+  key="${1}${FP_TAB}${2}${FP_TAB}"
+  case "$FP_CACHE" in
+    *"$key"*)
+      v=${FP_CACHE#*"$key"}
+      v=${v%%|*}
+      _stored_mt=${v%%${FP_TAB}*}
+      _h=${v#*${FP_TAB}}
+      if [ -n "$_h" ]; then
+        if [ -n "$_mt3" ] && [ -n "$_stored_mt" ] && [ "$_stored_mt" != "$_mt3" ]; then
+          :   # mtime 变了 → 继续尝试空格版（一般也会 miss）
+        else
+          FP_HIT=$_h
+          return 0
+        fi
+      fi
+      ;;
+  esac
+  return 1
+}
+
+fp_cache_put() {   # $1=路径 $2=大小 $3=mtime $4=hash
+  local _mt3=${3:-0}; [ -n "$_mt3" ] || _mt3=0
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$_mt3" "$4" >> "$FP_CACHE_FILE" 2>/dev/null
+  FP_CACHE="${FP_CACHE}${1}${FP_TAB}${2}${FP_TAB}${_mt3}${FP_TAB}${4}|"
+  return 0
+}
+
+# 缓存行数过多时压缩（保留每个路径的最后一条）
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-22（准确性保险）：指纹缓存自检
+#   缓存是加速层，但它**绝不能替我们下结论**。所以每次生成报告时：
+#     · 随机挑最多 3 条"命中缓存"的记录
+#     · 绕过缓存**重新真算一遍**
+#     · 有任何一条对不上 → 清空缓存并写进报告（说明这次数据不可信）
+#   统计口径也一起暴露：新算多少、复用多少。
+# ---------------------------------------------------------------------------
+FP_STAT_FILE="$LIB/.fp.stat.$$"
+: > "$FP_STAT_FILE" 2>/dev/null
+FP_STAT_NEW=0
+FP_STAT_HIT=0
+FP_STAT_BAD=0
+
+# 原始计算（完全绕过缓存）——自检用
+fp_raw() {
+  local f="$1" sz mt
+  sz=$(sz_lookup "$f"); mt=$(mt_lookup "$f")
+  [ -n "$sz" ] || { printf '%s' "-"; return 0; }
+  {
+    printf 'sz=%s mt=%s\n' "$sz" "$mt"
+    head -c 65536 "$f" 2>/dev/null
+    tail -c 65536 "$f" 2>/dev/null
+  } | sha256sum 2>/dev/null | { read -r _h _rest; printf '%s' "${_h}"; }
+}
+
+fp_cache_verify() {
+  [ -s "$FP_CACHE_FILE" ] || { echo "  指纹缓存自检：没有缓存（首次生成，全部为新算）"; return 0; }
+  local n=0 checked=0 bad=0 p sz mt h h2
+  # 取前 3 条存在的记录做抽样
+  while IFS="$FP_TAB" read -r p sz mt h; do
+    [ -n "$p" ] || continue
+    [ -f "$p" ] || continue
+    checked=$((checked + 1))
+    h2=$(fp_raw "$p")
+    if [ "$h2" != "$h" ]; then
+      bad=$((bad + 1))
+    fi
+    [ "$checked" -ge 3 ] && break
+  done < "$FP_CACHE_FILE"
+  FP_STAT_BAD=$bad
+  if [ "$bad" -gt 0 ]; then
+    rm -f "$FP_CACHE_FILE" 2>/dev/null
+    FP_CACHE=""
+    echo "  ★ 指纹缓存自检：抽查 $checked 条，其中 $bad 条对不上 → 已清空缓存，本次全部重新计算"
+  elif [ "$checked" -gt 0 ]; then
+    echo "  指纹缓存自检：抽查 $checked 条，全部一致 ✓"
+  else
+    echo "  指纹缓存自检：缓存里没有可用记录（本次全部重新计算）"
+  fi
+  _fsf="${FP_STAT_FILE:-}"
+  if [ -n "$_fsf" ] && [ -s "$_fsf" ]; then
+    _n_new=$(tr -cd 'N' < "$_fsf" 2>/dev/null | wc -c | tr -d ' ')
+    _n_hit=$(tr -cd 'H' < "$_fsf" 2>/dev/null | wc -c | tr -d ' ')
+  else
+    _n_new=$FP_STAT_NEW; _n_hit=$FP_STAT_HIT
+  fi
+  echo "  指纹来源统计：新算 ${_n_new:-0} 个 / 复用缓存 ${_n_hit:-0} 个"
+  if [ "${FP_CACHE_DISABLED:-0}" = 1 ]; then
+    echo "  （缓存已自动停用：本次一次都没命中，为避免拖慢报告，剩余文件按逐文件计算）"
+  fi
+  # ★ 2026-10-23：设备上缓存一直 0 命中 —— 把真实数据打出来对账（本地同格式是能命中的）
+  if [ -s "$FP_CACHE_FILE" ]; then
+    # 显式在主 shell 里加载一次（不加载的话这里永远是 0 字符 —— 之前的报告就是这样误导的）
+    [ -n "${FP_LOADED:-}" ] || { FP_LOADED=1; fp_cache_load; }
+    _cl=$(wc -l < "$FP_CACHE_FILE" 2>/dev/null | tr -d ' ')
+    echo "  缓存文件：${_cl:-?} 条，加载后 ${#FP_CACHE} 字符（文件 $(wc -c < "$FP_CACHE_FILE" 2>/dev/null | tr -d ' ') 字节）"
+    _cf=$(head -n 1 "$FP_CACHE_FILE" 2>/dev/null | tr -s ' \t' '\t' | cut -f1-2)
+    if [ -n "$_cf" ]; then
+      _cp=${_cf%%"$FP_TAB"*}
+      _cs=${_cf#*"$FP_TAB"}
+      echo "  反查样本：路径=$(printf '%s' "$_cp" | tr '\t' '|')  大小=$_cs"
+      case "$FP_CACHE" in
+        *"$_cp"*) echo "  路径是否在缓存中：是" ;;
+        *)        echo "  路径是否在缓存中：否 ★（说明扫描用的路径与缓存里不一致）" ;;
+      esac
+      if fp_cache_hit "$_cp" "$_cs" ""; then
+        echo "  反查结果：命中 ✓（说明键是对的，问题在调用侧）"
+      else
+        echo "  反查结果：未命中 ★（看下面的字节级对照）"
+        _k="${_cp}${FP_TAB}${_cs}${FP_TAB}"
+        echo "  缓存首行（Tab 显示为 |）：$(head -n 1 "$FP_CACHE_FILE" 2>/dev/null | tr '\t' '|' | cut -c1-90)"
+        echo "  样本路径字节：$(printf '%s' "$_cp" | od -An -c 2>/dev/null | head -n 2 | tr -s ' ')"
+        echo "  拼出的键字节：$(printf '%s' "$_k" 2>/dev/null | od -An -c 2>/dev/null | head -n 2 | tr -s ' ')"
+        echo "  缓存第1行字节：$(head -n 1 "$FP_CACHE_FILE" 2>/dev/null | od -An -c 2>/dev/null | head -n 3 | tr -s ' ')"
+        echo "  加载片段：$(head -n 1 "$FP_CACHE_FILE" 2>/dev/null | tr '\t' '|' | cut -c1-100)"
+      fi
+    else
+      echo "  反查样本：取不到（前几行字段不足 4 段？）"
+      head -n 2 "$FP_CACHE_FILE" 2>/dev/null | tr '\t' '|' | sed 's/^/    /'
+    fi
+  fi
+  return 0
+}
+
+fp_cache_compact_if_big() {
+  [ -s "$FP_CACHE_FILE" ] || return 0
+  local n
+  n=$(wc -l < "$FP_CACHE_FILE" 2>/dev/null | tr -d ' ')
+  case "${n:-0}" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$n" -le 5000 ] && return 0
+  awk -F'\t' '{ a[$1] = $0 } END { for (k in a) print a[k] }' "$FP_CACHE_FILE" 2>/dev/null \
+    > "$FP_CACHE_FILE.tmp.$$" 2>/dev/null && mv -f "$FP_CACHE_FILE.tmp.$$" "$FP_CACHE_FILE" 2>/dev/null
+  fp_cache_load
+  return 0
+}
+
 fp_of() {
   local f="$1" sz mt
   # ★ 2026-10-14：先查批量 stat 建好的表（load_meta），查不到再回退去 stat。
@@ -455,6 +661,8 @@ fp_of() {
   #   所以这两个查询命中的是纯 shell 字符串匹配，零进程。
   sz=$(sz_lookup "$f"); mt=$(mt_lookup "$f")
   if [ -z "$sz" ]; then printf '%s' "-"; return 0; fi
+  # ★ 先查指纹缓存：大小与修改时间都对得上 → 直接复用，不读盘
+  if fp_cache_hit "$f" "$sz" "$mt"; then printf '%s' "$FP_HIT"; return 0; fi
   # tail -c 可能因 busybox 版本差异不支持，兜底只取头部（一样能判变化）
   # ★ 2026-10-18（提速）：取哈希首字段不再多起一个 cut 进程，改用 read 拆字段。
   #   这个函数每个字体都会跑一次（真机 300 个左右），省下来就是 300 个进程。
@@ -465,6 +673,22 @@ fp_of() {
   } | sha256sum 2>/dev/null | { read -r _h _rest; printf '%s' "${_h}"; }
 }
 
+# 带缓存的指纹（计算后写回缓存）—— 第 6 步统一走这个
+fp_cached() {
+  local f="$1" sz mt h
+  sz=$(sz_lookup "$f"); mt=$(mt_lookup "$f")
+  [ -n "$sz" ] || { printf '%s' "-"; return 0; }
+  if fp_cache_hit "$f" "$sz" "$mt"; then
+    printf 'H' >> "${FP_STAT_FILE:-/dev/null}" 2>/dev/null
+    printf '%s' "$FP_HIT"; return 0
+  fi
+  printf 'N' >> "${FP_STAT_FILE:-/dev/null}" 2>/dev/null
+  h=$(fp_of "$f")
+  [ -n "$h" ] || h="-"
+  fp_cache_put "$f" "$sz" "$mt" "$h"
+  printf '%s' "$h"
+}
+
 hash_flush() {
   [ -n "$HASH_BATCH" ] || return 0
   # 1.0.9.2：不再把一批文件塞给同一个 sha256sum —— 稀疏指纹要按文件"跳读"，
@@ -472,7 +696,7 @@ hash_flush() {
   #   现在每文件 1 次；但每次只读 128KB，总 I/O 降低约 20 倍，净收益很大。
   _hf_i=0
   for _hf_f in $HASH_BATCH; do
-    _hf_v=$(fp_of "$_hf_f")
+    _hf_v=$(fp_cached "$_hf_f")
     [ -n "$_hf_v" ] || _hf_v="-"
     _hf_i=$((_hf_i + 1))
     _hf_k=$(printf '%s\n' $HASH_KEY | sed -n "${_hf_i}p")
@@ -484,7 +708,7 @@ hash_flush() {
 }
 # 单个文件指纹（文件名带空格之类没法批量时用）
 hash_one() {
-  _HO_H=$(fp_of "$1")
+  _HO_H=$(fp_cached "$1")
   [ -n "$_HO_H" ] || _HO_H="-"
   printf '%s  %s  %s\n' "$_HO_H" "$(size_of "$1")" "$1"
   HN=$((HN + 1))
@@ -1628,7 +1852,7 @@ d2_in() {
 # ---------------------------------------------------------------------------
 sec_adapted() {
   echo
-  echo "【4】★ 语言 → 字体文件：这台系统靠什么生效"
+  echo "【摘要4】★ 语言 → 字体文件：这台系统靠什么生效"
   hr
   echo "  说明：每一行都从**你这台机器自己的字体配置**里读出来（不是按机型猜）。"
   echo "        「本次」= 这个文件在不在当前的替换计划里。"
@@ -1672,7 +1896,7 @@ sec_adapted() {
 # ---------------------------------------------------------------------------
 sec_unadapted() {
   echo
-  echo "【5】★ 没被替换的字体（配置引用了，但本次不会换）"
+  echo "【摘要5】★ 没被替换的字体（配置引用了，但本次不会换）"
   hr
   echo "  给作者看的：这台设备上**真实存在、且被字体配置引用**、但**本次计划里没有**的字体。"
   echo "  已按「该不该换」分成两类，看第一类就行："
@@ -2881,6 +3105,91 @@ pack_extra() {
   #   · 去重：同一份文件只真正算一次。字体目录里大量文件是指向同一份的
   #     硬链接/符号链接（真机实测过 18 个文件指向同一个），以前同一份内容被反复读好几遍。
   #     做法是两遍式：第一遍按 dev:inode 去重后算出指纹，第二遍每个路径各输出一行（复用指纹）。
+  # ★ 2026-10-22（提速，带自证）：门牌号（dev:inode）快判。
+  #   仍保留原指纹逻辑；只有"抽样核对通过"时才启用快判。
+  OUR_INO=""; FP_FAST=0; FP_FAST_N=0; FP_SAMPLE_OK=0; FP_SAMPLE_BAD=0
+  _mk_ours() {
+    SMAP=$(slots_map_path)
+    local _s _id _ino
+    for _s in "$LIB"/*.ttf; do
+      [ -e "$_s" ] || continue
+      _id=${_s##*/}; _id=${_id%.ttf}
+      _ino=$(stat -L -c '%d:%i' "$_s" 2>/dev/null)
+      [ -n "$_ino" ] || continue
+      case "$OUR_INO" in *"|$_ino="*) ;; *) OUR_INO="$OUR_INO|$_ino=$_id" ;; esac
+    done
+    if [ -s "$SMAP" ]; then
+      awk -v lib="$LIB" 'NF >= 2 { print ($3 != "" ? $3 : lib "/" $1 ".ttf") }' "$SMAP" 2>/dev/null | tr -d '\r' | sort -u | \
+      while IFS= read -r _s; do
+        [ -e "$_s" ] || continue
+        _ino=$(stat -L -c '%d:%i' "$_s" 2>/dev/null)
+        [ -n "$_ino" ] || continue
+        printf '%s\n' "$_ino"
+      done > "$LIB/.ours.ino.$$" 2>/dev/null
+      if [ -s "$LIB/.ours.ino.$$" ]; then
+        OUR_INO="$OUR_INO$(sed 's/^/|/;s/$/=map/' "$LIB/.ours.ino.$$" 2>/dev/null)"
+      fi
+      rm -f "$LIB/.ours.ino.$$" 2>/dev/null
+    fi
+  }
+  # 抽样核对：源文件与目标槽位的 inode 必须一致（bind 挂载语义）
+  _fp_sample() {
+    SMAP=$(slots_map_path)
+    local _rel _src _dst _a _b _n=0 _line _seen=0
+    [ -s "$SMAP" ] || return 0
+    while IFS= read -r _line; do
+      _line=${_line%$'\r'}
+      [ -n "$_line" ] || continue
+      _seen=$((_seen + 1))
+      [ "$_seen" -gt 30 ] && break          # 最多看 30 行，避免大文件白跑
+      FP_SCAN=$_seen
+      # shellcheck disable=SC2086
+      set -- $_line
+      [ $# -ge 2 ] || continue
+      _rel="$2"; _src="$3"
+      # ★ 第三列是可选的（mount.sh：<id> <目标> [挂哪个文件]），缺省就是 $LIB/<id>.ttf
+      [ -n "$_src" ] || _src="$LIB/$1.ttf"
+      case "$_rel" in
+        /*) _dst="${CFS_DST_ROOT:-}$_rel" ;;
+        *)  _dst="${CFS_DST_ROOT:-}/$_rel" ;;
+      esac
+      # 源文件容错：原样不存在就试试字体库里的同名文件
+      if [ ! -e "$_src" ]; then
+        case "$_src" in
+          */*) _src="$LIB/${_src##*/}" ;;
+        esac
+      fi
+      [ -e "$_dst" ] || continue
+      [ -e "$_src" ] || continue
+      _a=$(stat -L -c '%d:%i' "$_src" 2>/dev/null)
+      _b=$(stat -L -c '%d:%i' "$_dst" 2>/dev/null)
+      [ -n "$_a" ] && [ -n "$_b" ] || continue
+      _n=$((_n + 1))
+      if [ "$_a" = "$_b" ]; then
+        echo "OK $_dst  <- $_src"
+      else
+        echo "BAD $_dst  (目标 $_b / 源 $_a)"
+      fi
+      [ "$_n" -ge 2 ] && break
+    done < "$SMAP" 2>/dev/null
+    # ★ 扫描行数由函数自己打印（它跑在子 shell 里，变量传不回去）
+    echo "SCAN $_seen"
+  }
+  _mk_ours
+  _smp=$( _fp_sample )
+  # 从输出里取扫描行数（子 shell 里设的变量回不来）
+  FP_SCAN=$(printf '%s\n' "$_smp" | sed -n 's/^SCAN //p' | head -n1)
+  case "$FP_SCAN" in ''|*[!0-9]*) FP_SCAN=0 ;; esac
+  # 明细里去掉 SCAN 行，只留 OK/BAD 样本
+  FP_SAMPLE_DETAIL=$(printf '%s\n' "$_smp" | grep -E '^(OK|BAD) ' 2>/dev/null)
+  _smp=$(printf '%s' "$FP_SAMPLE_DETAIL")
+  case "$_smp" in
+    *BAD*) FP_FAST=0; FP_SAMPLE_BAD=$(printf '%s' "$_smp" | grep -c BAD) ;;
+    "")    FP_FAST=0 ;;
+    *)     FP_FAST=1; FP_SAMPLE_OK=$(printf '%s' "$_smp" | grep -c OK) ;;
+  esac
+  echo "@@FPFAST fast=$FP_FAST ok=$FP_SAMPLE_OK bad=$FP_SAMPLE_BAD" >> "$LIB/.perf.log" 2>/dev/null
+
   HASH_MAP=""          # "|dev:inode=指纹|..."（去重后的唯一文件）
   HASH_KEY=""; HASH_SEEN=""; HASH_DONE=0; HASH_TOTAL=0
   HASH_BATCH=""; HASH_BN=0
@@ -2902,6 +3211,17 @@ pack_extra() {
         HASH_SEEN="$HASH_SEEN|$_hk|"
       fi
       HASH_TOTAL=$((HASH_TOTAL + 1))
+      # ★ 门牌号快判：这个文件就是我们挂上去的那份 → 不用读盘算指纹
+      if [ "$FP_FAST" = 1 ] && [ -n "$_hk" ]; then
+        case "$OUR_INO" in
+          *"|$_hk="*)
+            _oid=${OUR_INO#*"|$_hk="}; _oid=${_oid%%|*}
+            HASH_MAP="$HASH_MAP|$_hk=o:$_oid"
+            HASH_DONE=$((HASH_DONE + 1))
+            FP_FAST_N=$((FP_FAST_N + 1))
+            continue ;;
+        esac
+      fi
       case "$f" in
         *" "*)
           hash_flush
@@ -3132,6 +3452,9 @@ echo "# 检测到的: ${DATAFONT_LIST:-无}"
 }
 
 # ---------------------------------------------------------------------------
+
+
+
 # ---------------------------------------------------------------------------
 sec12() {
   echo
@@ -3234,6 +3557,7 @@ sec12() {
   hr
   echo "  说明：本节只读 .meta / .fdata 小文件，不读字体本体、不解析 cmap，几乎不耗时。"
 }
+
 
 sec13() {
   echo
@@ -3345,26 +3669,257 @@ sec15() {
   echo
 }
 
+
+sec16() {
+    SMAP=$(slots_map_path)
+  echo
+  echo "【16】字重组应用情况（哪个槽位用了组里哪一档）"
+  hr
+  local sel grp members id w src tgt wtg
+  sel=$(tr -d '[:space:]' < "$LIB/last_selection" 2>/dev/null)
+  [ -n "$sel" ] || sel=$(tr -d '[:space:]' < "$LIB/active_font" 2>/dev/null)
+  echo "  当前选择：${sel:-none}"
+
+  grp=""
+  if [ -n "$sel" ] && [ -f "$LIB/$sel.meta" ]; then
+    grp=$(sed -n 's/^group=//p' "$LIB/$sel.meta" 2>/dev/null | tail -n1 | tr -d '\r')
+  fi
+
+  if [ -z "$grp" ]; then
+    echo "  这个字体没有加入字重组（单独一份字体，字重只由它自己决定）。"
+  else
+    echo "  所属字重组：组长 $grp"
+    echo "  ---- 组内成员 ----"
+    members=0
+    for id in $(lib_font_ids 2>/dev/null); do
+      [ -n "$id" ] || continue
+      [ -f "$LIB/$id.meta" ] || continue
+      [ "$(sed -n 's/^group=//p' "$LIB/$id.meta" 2>/dev/null | tail -n1 | tr -d '\r')" = "$grp" ] || continue
+      members=$((members + 1))
+      w=$(sed -n 's/^wght=//p' "$LIB/$id.meta" 2>/dev/null | tail -n1 | tr -d '\r')
+      printf '    %-16s 字重 %-5s %s\n' "$id" "${w:-?}" \
+        "$([ "$id" = "$grp" ] && echo '← 组长' || echo '')"
+    done
+    [ "$members" -gt 0 ] || echo "    （没找到组内成员档案）"
+  fi
+
+  echo "  ---- 槽位 → 实际使用的文件 ----"
+  if [ -s "$SMAP" ]; then
+    # slots.map 每行： <选择的id> <目标槽位> <源文件>
+    awk '{
+      src = $3; sub(/^.*\//, "", src); sub(/\.ttf$/, "", src);
+      print $2 "\t" src;
+    }' "$SMAP" 2>/dev/null | sort | \
+    awk -F'\t' '
+      { cnt[$2]++; if (!(($1) in seen)) { seen[$1] = 1; sample[$2] = sample[$2] "\n      " $1 } }
+      END {
+        for (k in cnt) printf "    %-18s → %d 个槽位%s\n", k, cnt[k], sample[k];
+      }' 2>/dev/null
+    echo "    （按来源统计；每个来源下面缩进的是它覆盖的槽位示例）"
+    echo "  ---- 中文字重相关槽位明细（前 12 条）----"
+    grep -iE 'cjk|han|sc|tc|jp|kr|Sans' "$SMAP" 2>/dev/null | \
+      awk '{ k = $2 "\t" $3; if (!(k in seen)) { seen[k] = 1; print } }' | head -n 12 | \
+      while IFS= read -r _l; do
+        _t=$(printf '%s' "$_l" | awk '{print $2}')
+        _s=$(printf '%s' "$_l" | awk '{print $3}' | sed 's#.*/##;s#\.ttf$##')
+        _w=$(sed -n 's/^wght=//p' "$LIB/$_s.meta" 2>/dev/null | tail -n1 | tr -d '\r')
+        printf '    %-52s → %-16s 字重 %s\n' "${_t##*/}" "$_s" "${_w:-?}"
+      done
+  else
+    echo "    （没有 slots.map：本机可能还没应用过字体，或挂载记录被清掉了）"
+  fi
+
+  echo "  ---- 被跳过的槽位（合集/结构校验）----"
+  if [ -s "$LIB/ttc.log" ]; then
+    grep -E 'ttcbad|跳过' "$LIB/ttc.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
+  else
+    echo "    （没有跳过记录）"
+  fi
+  hr
+  echo "  说明：如果某个槽位本该吃 Bold 却显示用了常规字重，或整段没有中文槽位，"
+  echo "        就是这里的映射问题；把这份报告发给作者即可定位。"
+  echo
+}
+
+
+sec17() {
+  echo
+  echo "【17】模块账本快照（.index）—— 模块自己认为的状态"
+  hr
+  if [ -s "$LIB/.index" ]; then
+    sed -n '1,60p' "$LIB/.index" 2>/dev/null | sed 's/^/  /'
+    _ln=$(wc -l < "$LIB/.index" 2>/dev/null | tr -d ' ')
+    case "${_ln:-0}" in ''|*[!0-9]*) _ln=0 ;; esac
+    [ "$_ln" -gt 60 ] && echo "  …（共 $_ln 行，其余略）"
+  else
+    echo "  （没有 .index：还没建立过索引，或已被清理）"
+  fi
+  hr
+  echo "  说明：这一节是模块**自己记录的**结果；若与下面几节的实测不一致，"
+  echo "        说明索引过期或有外部改动 —— 把报告发作者，按这个对照即可定位。"
+  echo
+}
+
+sec18() {
+    SMAP=$(slots_map_path)
+  echo
+  echo "【18】每个槽位的决策记录（换成了什么 / 为什么没换）"
+  hr
+  if [ -s "$SMAP" ]; then
+    echo "  ---- 槽位 → 源文件（前 20 条）----"
+    awk 'NR <= 20 {
+      src = $3; sub(/^.*\//, "", src);
+      printf "    %-46s ← %s\n", $2, (src == "" ? "（同 id.ttf）" : src);
+    }' "$SMAP" 2>/dev/null
+    _n=$(grep -c . "$SMAP" 2>/dev/null)
+    echo "  （共 ${_n:-0} 条）"
+    echo
+    echo "  ---- 按源文件汇总 ----"
+    awk '{
+      s = $3; if (s == "") s = $1;
+      sub(/^.*\//, "", s);
+      c[s]++;
+    } END { for (k in c) printf "    %-24s %d 个槽位\n", k, c[k]; }' "$SMAP" 2>/dev/null
+  else
+    echo "  （没有 slots.map：还没应用过字体，或记录被清掉了）"
+  fi
+
+  echo
+  echo "  ---- 未替换 / 跳过记录 ----"
+  if [ -s "$LIB/ttc.log" ]; then
+    echo "  合集相关（最近 8 条）："
+    grep -E 'via=|跳过' "$LIB/ttc.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
+  fi
+  if [ -s "$LIB/mount.log" ]; then
+    echo "  挂载相关（最近 8 条）："
+    grep -E '失败|跳过|异常' "$LIB/mount.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
+  fi
+  [ -s "$LIB/ttc.log" ] || [ -s "$LIB/mount.log" ] || echo "    （没有跳过/失败记录）"
+
+  echo
+  echo "  ---- 门牌号核对（前 12 个槽位：目标 inode 是否等于源文件）----"
+  if [ -s "$SMAP" ]; then
+    awk 'NR <= 12 { print $2 "\t" $3 }' "$SMAP" 2>/dev/null | \
+    while IFS="$(printf '\t')" read -r _rel _src; do
+      [ -n "$_rel" ] || continue
+      [ -n "$_src" ] || _src=""
+      _dst="/$_rel"
+      [ -e "$_dst" ] || { printf '    %-46s ← 目标不存在\n' "$_rel"; continue; }
+      [ -n "$_src" ] && [ -e "$_src" ] || { printf '    %-46s ← 源文件缺失\n' "$_rel"; continue; }
+      _a=$(stat -L -c '%d:%i' "$_src" 2>/dev/null)
+      _b=$(stat -L -c '%d:%i' "$_dst" 2>/dev/null)
+      if [ -n "$_a" ] && [ "$_a" = "$_b" ]; then
+        printf '    %-46s ✓ 是模块字体（inode 一致 %s）\n' "$_rel" "$_a"
+      else
+        printf '    %-46s ✗ 不是（目标 %s / 源 %s）\n' "$_rel" "${_b:-?}" "${_a:-?}"
+      fi
+    done
+    echo "    （这项与上面的指纹结论应当一致；不一致说明有外部改动或挂载异常）"
+  else
+    echo "    （没有 slots.map，跳过）"
+  fi
+  hr
+  echo "  说明：若某个槽位本该替换却出现在\"跳过\"里，原因就在上面这些行里。"
+  echo
+}
+
+
+# 毫秒级计时（date +%s 只有 1 秒精度，很多节都显示 0s，看不出真正的耗时）
+now_ms() {
+  local _v _i _f
+  # ① 纳秒时钟（最可靠；Android 的 toybox date 支持）
+  _v=$(date +%s%N 2>/dev/null)
+  case "$_v" in
+    *[!0-9]*) _v="" ;;
+  esac
+  if [ -n "$_v" ] && [ ${#_v} -ge 16 ]; then
+    printf '%s' "$(( _v / 1000000 ))"
+    return 0
+  fi
+  # ② /proc/uptime（有些环境里是假文件，恒为一个常数 —— 所以放第二）
+  _v=$(cut -d' ' -f1 /proc/uptime 2>/dev/null)
+  case "$_v" in
+    ''|*[!0-9.]*|*.*.*) _v="" ;;
+  esac
+  if [ -n "$_v" ]; then
+    case "$_v" in
+      *.*)
+        _i=${_v%%.*}
+        _f=${_v#*.}
+        _f=$(printf '%-3s' "$_f" | tr ' ' '0' | cut -c1-3)
+        ;;
+      *) _i=$_v; _f=000 ;;
+    esac
+    case "$_i" in ''|*[!0-9]*) _i=0 ;; esac
+    printf '%s' "$(( _i * 1000 + 10#$_f ))"
+    return 0
+  fi
+  # ③ 最差情况：秒级
+  _v=$(date +%s 2>/dev/null)
+  case "$_v" in ''|*[!0-9]*) _v=0 ;; esac
+  printf '%s' "$(( _v * 1000 ))"
+}
+
+# slots.map 的真实位置是**模块目录**（fontctl: mv -f "$stage.map" "$MODDIR/slots.map"）；
+# 历史版本里可能残留在字体库目录，所以两个都看。
+slots_map_path() {
+  if [ -n "${MODDIR:-}" ] && [ -s "$MODDIR/slots.map" ]; then
+    printf '%s' "$MODDIR/slots.map"
+  elif [ -s "$LIB/slots.map" ]; then
+    printf '%s' "$LIB/slots.map"
+  else
+    printf '%s' "$LIB/slots.map"
+  fi
+}
+
 report_full() {
-  echo "== 保时捷字体（三合一） · 一键体检报告 =="
+  echo "== 自定义字体切换模块 · 一键体检报告 =="
+  echo "诊断脚本构建: ${DIAG_BUILD:-?}   节数: 0-18（含 12~18 为新增）"
   collect_once
   conclusion
-    sec0
-  sec1
-  sec2
-  sec3
-  sec4
-  sec5
-  sec6
-  sec7
-  sec8
-  sec9
-  sec10
-  sec11
-  sec12
-  sec13
-  sec14
-  sec15
+  # ★ 逐节执行并记录耗时（用数据回答"报告慢在哪"，而不是靠猜）
+  _secs="sec0 sec1 sec2 sec3 sec4 sec5 sec6 sec7 sec8 sec9 sec10 sec11 sec12 sec13 sec14 sec15 sec16 sec17 sec18"
+  _perf=""
+  for _fn in $_secs; do
+    command -v "$_fn" >/dev/null 2>&1 || continue
+    _t0=$(now_ms)
+    "$_fn"
+    _t1=$(now_ms)
+    _ms=$((_t1 - _t0))
+    [ "$_ms" -lt 0 ] && _ms=0
+    if [ "$_ms" -lt 100 ]; then
+      _perf="${_perf}  ${_fn}  <0.1s\n"
+    else
+      _perf="${_perf}  ${_fn}  $((_ms / 1000)).$(( (_ms % 1000) / 100 ))s\n"
+    fi
+  done
+  echo
+  echo "【耗时】各节用时"
+  hr
+  printf '%b' "$_perf"
+  hr
+  printf '%b' "$_perf" > "$LIB/.perf.log" 2>/dev/null
+  echo "  字体指纹一节有缓存（.fp.cache）：同一台机器第二次生成会明显更快。"
+  echo
+  echo "【加速说明】门牌号快判（dev:inode 相同 ⇒ 就是模块挂上去的那份文件）"
+  hr
+  if [ "${FP_FAST:-0}" = 1 ]; then
+    echo "  本次启用：用门牌号跳过 $FP_FAST_N 个文件的读盘计算"
+    echo "  抽样核对：$FP_SAMPLE_OK 对一致（源文件与目标槽位 inode 相同）"
+  else
+    if [ "${FP_SAMPLE_BAD:-0}" -gt 0 ] 2>/dev/null; then
+      echo "  ★ 抽样核对发现 $FP_SAMPLE_BAD 对不一致 → **本次未启用**门牌号快判（已退回逐文件计算）"
+      echo "    这通常意味着挂载没生效、或有别的模块在替换同一批文件。"
+    else
+      echo "  本次未启用（没有可核对的槽位，或记录为空）—— 按逐文件计算处理"
+    fi
+  fi
+  echo "  说明：这是**加速手段**，不影响任何结论；不一致时会自动退回慢速但可靠的路径。"
+
+  echo
+  echo "【数据可信度】指纹缓存自检（抽样重算比对）"
+  hr
+  fp_cache_verify
   echo
   echo "== 报告结束 =="
 }
@@ -3466,14 +4021,16 @@ now_s() { _NS_D=$(date +%s 2>/dev/null); isnum "$_NS_D" && printf '%s' "$_NS_D" 
 # ---------------------------------------------------------------------------
 TIMING_LIST=""
 timing_add() {   # timing_add <名称> <开始秒>
-  _TA_N=$(now_s)
-  _TA_D=$(( _TA_N - ${2:-$_TA_N} ))
-  [ "$_TA_D" -lt 0 ] && _TA_D=0
-  TIMING_LIST="$TIMING_LIST$1|$_TA_D
+  local _n _d
+  _n=$(now_s)
+  _d=$(( _n - ${2:-$_n} ))
+  [ "$_d" -lt 0 ] && _d=0
+  TIMING_LIST="${TIMING_LIST}$1|${_d}s
 "
-  [ "$BG_STATE" = 1 ] && printf '%s|%s\n' "$1" "$_TA_D" >> "$LIB/.diag.timing" 2>/dev/null
+  [ "${BG_STATE:-0}" = 1 ] && printf '%s|%s\n' "$1" "$_d" >> "$LIB/.diag.timing" 2>/dev/null
   return 0
 }
+
 # 给任意函数计时：pt <标签> <函数> [参数...]   —— 输出走 stdout# 为什么需要它：真机反馈"整份报告 30 分钟"，而「每一步耗时」只到 6 个大步 ——
 #   第 1 步把整个 collect() 包住了（1371 秒），看不出是哪一段。
 #   collect() 里几个可疑点（候选枚举、自适应扫描、XML 解析…）用这个一量就知道。
@@ -3730,6 +4287,7 @@ kit_report() {
   fi
   TIMING_LIST=""
   _KR_T0=$(now_s)
+  { echo "诊断脚本构建: ${DIAG_BUILD:-?}   小节: 0~18"; } >> "$tmpf" 2>&1
   [ "$BG_STATE" = 1 ] && : > "$LIB/.diag.timing" 2>/dev/null
   # ★ 1.0.9：阶段从 6 步改成 7 步，把"写报告文件"单独作为最后一步。
   #   以前"6/6 打包哈希清单"是最重的一步（要算全量指纹），而报告正文打印和写盘
@@ -3789,6 +4347,17 @@ kit_report() {
   _TT=$(now_s); { sec10; } >> "$tmpf" 2>&1; timing_add 'Z sec10' "$_TT"
   _TT=$(now_s); { sec11; } >> "$tmpf" 2>&1; timing_add 'Z sec11' "$_TT"
   timing_add '5 清单 / 冲突 / 日志 / App 可见性' "$_PH_T0"
+  # ★ 2026-10-23（修正）：12~18 节以前只写在 report_full() 里，而界面实际用的是
+  #   kit_report() —— 所以这几节从来没出现在报告里。现在接在这里。
+  subnote "正在检查：字体结构 / 合集 / 覆盖率"
+  _TT=$(now_s); { sec12; } >> "$tmpf" 2>&1; timing_add 'Y sec12 字体结构' "$_TT"
+  _TT=$(now_s); { sec13; } >> "$tmpf" 2>&1; timing_add 'Y sec13 合集校验' "$_TT"
+  _TT=$(now_s); { sec14; } >> "$tmpf" 2>&1; timing_add 'Y sec14 覆盖率' "$_TT"
+  subnote "正在整理：崩溃摘要 / 字重组 / 账本 / 决策"
+  _TT=$(now_s); { sec15; } >> "$tmpf" 2>&1; timing_add 'Y sec15 崩溃摘要' "$_TT"
+  _TT=$(now_s); { sec16; } >> "$tmpf" 2>&1; timing_add 'Y sec16 字重组' "$_TT"
+  _TT=$(now_s); { sec17; } >> "$tmpf" 2>&1; timing_add 'Y sec17 账本快照' "$_TT"
+  _TT=$(now_s); { sec18; } >> "$tmpf" 2>&1; timing_add 'Y sec18 决策记录' "$_TT"
   export_part "$tmpf"
   _PH_T0=$(now_s)
   dphase '6/7 逐文件指纹（稀疏：大小+mtime+头尾 64KB，同一份只算一次）'
@@ -3800,6 +4369,24 @@ kit_report() {
     echo "## 每一步耗时（秒）—— 慢在哪一步看这里（反馈问题时请连这一段一起发）"
     printf '%s' "$TIMING_LIST"
     echo "合计|$(( $(now_s) - ${_KR_T0:-$(now_s)} ))"
+    echo
+    echo "【数据可信度】指纹缓存自检（抽样重算比对）"
+    fp_cache_verify 2>&1
+    echo
+    echo "【加速说明】门牌号快判（dev:inode 相同 ⇒ 就是模块挂上去的那份文件）"
+    echo "  抽样扫描：读了 ${FP_SCAN:-0} 行 slots.map，取到 ${FP_SAMPLE_OK:-0} 对一致样本"
+    if [ -n "${FP_SAMPLE_DETAIL:-}" ]; then
+      printf '%s\n' "$FP_SAMPLE_DETAIL" | sed 's/^/    /'
+    else
+      echo "    （没有取到任何样本：slots.map 可能为空，或槽位文件/源文件不存在）"
+    fi
+    if [ "${FP_FAST:-0}" = 1 ]; then
+      echo "  本次启用：用门牌号跳过 ${FP_FAST_N:-0} 个文件的读盘计算"
+    elif [ "${FP_SAMPLE_BAD:-0}" -gt 0 ] 2>/dev/null; then
+      echo "  ★ 抽样核对发现 ${FP_SAMPLE_BAD} 对不一致 → 本次未启用快判（已退回逐文件计算）"
+    else
+      echo "  本次未启用（没有可核对的槽位，或记录为空）—— 按逐文件计算处理"
+    fi
   } >> "$tmpf" 2>&1
   printf '== 报告结束 ==\n' >> "$tmpf"
   _PH_T0=$(now_s)

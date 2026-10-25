@@ -13,9 +13,10 @@
     --pending-blue: #3a8bff;
     --ok: #22c55e;
     --bg: #0e0e10;
-    --card: #1a1a1d;
-    --card-pending: #1a1f2a;
-    --card-press: #232326;
+    --card: rgba(26, 26, 29, var(--card-alpha, 1));
+    --glass-bg: rgba(24, 24, 27, .62);
+    --card-pending: rgba(26, 31, 42, var(--card-alpha, 1));
+    --card-press: rgba(35, 35, 38, var(--card-alpha, 1));
     --text: #f2f2f2;
     --text-dim: #9a9a9a;
     --border: #2c2c2f;
@@ -30,9 +31,10 @@
     --pending-blue: #2f6fe0;
     --ok: #16a34a;
     --bg: #f4f4f6;
-    --card: #ffffff;
-    --card-pending: #eef4ff;
-    --card-press: #ececef;
+    --card: rgba(255, 255, 255, var(--card-alpha, 1));
+    --glass-bg: rgba(252, 252, 254, .66);
+    --card-pending: rgba(238, 244, 255, var(--card-alpha, 1));
+    --card-press: rgba(236, 236, 239, var(--card-alpha, 1));
     --text: #141418;
     --text-dim: #71717a;
     --border: #e4e4e9;
@@ -166,8 +168,8 @@ body { min-height: 100%; }
     background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer;
     box-shadow: var(--shadow); transition: transform .15s ease;
   }
-  .g-btn.primary { background: var(--accent); color: #fff; border: none; }
-  .g-btn.primary-blue { background: var(--pending-blue); color: #fff; border: none; }
+  .g-btn.primary { background: var(--btn, var(--accent)); color: #fff; border: none; }
+  .g-btn.primary-blue { background: var(--btn, var(--pending-blue)); color: #fff; border: none; }
   .g-btn.urgent { background: var(--danger); color: #fff; border: none; animation: urgentPulse 1.6s ease-in-out 8; }
   .g-btn.urgent:disabled { opacity: 1; }
   @keyframes urgentPulse { 0%, 100% { opacity: 1; } 50% { opacity: .7; } }
@@ -840,7 +842,653 @@ body { min-height: 100%; }
     transition: none !important; animation: none !important; transform: none !important;
   }
 }
+
+  /* ★ 2026-10-24：高级设置里「运行」标签 + 结果页 */
+  .adv-chip { flex: 0 0 auto; font-size: 12px; padding: 4px 10px; border-radius: 999px;
+              border: 1px solid var(--border); background: var(--card); color: var(--text-dim); }
+  .adv-out { margin-top: 10px; padding: 12px; background: var(--card);
+             border: 1px solid var(--border); border-radius: 12px;
+             font-size: 12px; line-height: 1.6; white-space: pre-wrap;
+             word-break: break-all; max-height: 62vh; overflow: auto;
+             font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+  /* ★ 2026-10-25 界面自定义 */
+  body.cfs-noanim * { transition: none !important; animation: none !important; }
+  body.cfs-simple .cfs-hidable { display: none !important; }
+  body.cfs-dense .switch-row { padding-top: 8px !important; padding-bottom: 8px !important; }
+  body.cfs-flat .switch-row, body.cfs-flat .cardg, body.cfs-flat .status-box { border-radius: 6px !important; }
+  body.cfs-flat .g-btn { border-radius: 8px !important; }
+  body.cfs-hide-update #updateBlock, body.cfs-hide-update #updateBanner { display: none !important; }
+  body.cfs-hide-google #googleBlock { display: none !important; }
+  body.cfs-hide-feedback #fbkEntryBlock { display: none !important; }
+  body.cfs-list-compact .font-card { padding: 8px 10px !important; }
+
+  /* ★ 2026-10-25 背景图层 */
+
+  /* ★ 2026-10-25 紧凑度 / 列表样式（作用到真实卡片 .option） */
+  body.cfs-dense .option { padding-top: 6px !important; padding-bottom: 6px !important; }
+  body.cfs-dense .switch-row { padding-top: 7px !important; padding-bottom: 7px !important; }
+  body.cfs-dense .g-hint, body.cfs-dense .d { font-size: 11px !important; line-height: 1.35 !important; }
+  body.cfs-list-compact .option { padding: 6px 10px !important; }
+  body.cfs-list-compact .option .pv, body.cfs-list-compact .option .preview { display: none !important; }
+
+  /* ★ 2026-10-25 背景上的文字对比 */
+  input[type=range] { height: 28px; }
+
+  /* ★ 2026-10-25 壁纸层（图片 + 暗化 + 内容抬高） */
+  body.cfs-hasbg { background: transparent !important; }
+  #cfsBg { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover;
+           z-index: 0; pointer-events: none; }
+  /* ★ 抬高正文时**必须排除浮层**：它们是 position:fixed，改成 relative 会跑到页面底部 */
+  body.cfs-hasbg > *:not(#cfsBg):not(#cfsBgDim):not(.sheet):not(.modal-mask):not(.fontact-mask):not(.mg-mask):not(.mg-pick-mask):not(.po-mask):not(.pv-mask):not(.ab-mask):not(.imp-menu-mask):not(.toast) {
+    position: relative; z-index: 1;
+  }
+
+  /* ★ 2026-10-25 有壁纸时：边框/分割线用中性半透明灰，深浅色都看得见 */
+  body.cfs-hasbg { --border: rgba(150, 150, 150, .45); --line: rgba(150, 150, 150, .35); }
+  body.cfs-hasbg .divider { background: rgba(150, 150, 150, .45) !important; }
+  body.cfs-hasbg .status-row { border-top-color: rgba(150, 150, 150, .38) !important; }
+
+  /* ★ 2026-10-25 有壁纸时：彩色按钮也跟着半透明 */
+  body.cfs-hasbg .g-btn.primary,
+  body.cfs-hasbg .g-btn.primary-blue,
+  body.cfs-hasbg .g-btn.urgent,
+  body.cfs-hasbg .import-main,
+  body.cfs-hasbg .batch-btn,
+  body.cfs-hasbg .adv-chip {
+    background: var(--accent-a, var(--accent)) !important;
+  }
+
+  /* ★ 2026-10-25 有壁纸时：二级界面（整屏面板 / 弹窗 / 底部面板）也半透明 */
+  body.cfs-hasbg .pv-sheet,
+  body.cfs-hasbg .po-sheet,
+  body.cfs-hasbg .ab-sheet,
+  body.cfs-hasbg .fontact {
+    background: var(--card) !important;
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+
+  /* ★ 2026-10-25 主题配色 = 按钮色 + 背景泛光；有壁纸时按钮跟卡片同透明度 */
+  body.cfs-hasbg .g-btn.primary,
+  body.cfs-hasbg .g-btn.primary-blue,
+  body.cfs-hasbg .g-btn.urgent,
+  body.cfs-hasbg .import-main,
+  body.cfs-hasbg .batch-btn {
+    background: var(--btn-a, var(--btn, var(--accent))) !important;
+  }
+  /* 有壁纸时二级界面直接透出壁纸（跟主界面同款），不再盖一层卡片色 */
+
+  body.cfs-hasbg .sheet .switch-row,
+  body.cfs-hasbg .sheet .g-hint { background: var(--card); }
+
+  /* ★ 2026-10-25 这些按钮统一跟「主题配色」走 */
+  .reboot-btn, .import-main, .batch-btn, .manage-btn, .lh-btn, .link-btn {
+    background: var(--btn, var(--accent)) !important;
+  }
+  /* 有壁纸时：按钮半透明 + 文字跟随深浅模式反色 */
+  body.cfs-hasbg .reboot-btn,
+  body.cfs-hasbg .import-main,
+  body.cfs-hasbg .batch-btn,
+  body.cfs-hasbg .manage-btn,
+  body.cfs-hasbg .lh-btn,
+  body.cfs-hasbg .link-btn,
+  body.cfs-hasbg .g-btn.primary,
+  body.cfs-hasbg .g-btn.primary-blue,
+  body.cfs-hasbg .g-btn.urgent {
+    background: var(--btn-a, var(--btn, var(--accent))) !important;
+    color: var(--btn-text, #fff) !important;
+  }
+
+  /* ★ 2026-10-25 有壁纸时：按钮无色（跟卡片同色），只调透明度 */
+  body.cfs-hasbg .g-btn.primary,
+  body.cfs-hasbg .g-btn.primary-blue,
+  body.cfs-hasbg .g-btn.urgent,
+  body.cfs-hasbg .import-main,
+  body.cfs-hasbg .batch-btn,
+  body.cfs-hasbg .manage-btn,
+  body.cfs-hasbg .lh-btn,
+  body.cfs-hasbg .link-btn,
+  body.cfs-hasbg .reboot-btn {
+    background: var(--card) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    text-shadow: none !important;
+  }
+
+  /* ★ 2026-10-25 二级菜单：壁纸层用伪元素铺，模糊/暗化和主页一致 */
+  body.cfs-hasbg .sheet { background: transparent !important; }
+  body.cfs-hasbg .sheet::before {
+    content: "";
+    position: absolute;
+    inset: -24px;
+    z-index: -1;
+    background-image: var(--bg-img, none);
+    background-size: cover;
+    background-position: center;
+    filter: blur(var(--bg-blur-px, 0px)) brightness(var(--bg-bright, 1));
+    transform: scale(1.06);
+    pointer-events: none;
+  }
+
+  /* ★ 2026-10-25 顶部说明不要背景框（纯文字）；系统选择器按钮也去框 */
+  .adv-plain { background: transparent !important; border: none !important;
+               padding: 0 !important; box-shadow: none !important; }
+  #sysPickBtn { background: transparent !important; border: none !important;
+                padding: 0 !important; box-shadow: none !important; text-decoration: underline; }
+  /* 浮层里的说明文字 */
+
+  
+
+  
+
+  
+
+
+  /* ★ 2026-10-25 合成界面的下拉框跟面板统一（只在这一点上修，不动别的） */
+  .mg-panel select {
+    background: rgba(255, 255, 255, .10) !important;
+    color: var(--text) !important;
+    border: 1px solid rgba(255, 255, 255, .18) !important;
+    border-radius: 10px !important;
+  }
+  :root[data-theme="light"] .mg-panel select {
+    background: rgba(0, 0, 0, .05) !important;
+    color: #141418 !important;
+    border-color: rgba(0, 0, 0, .12) !important;
+  }
+  .mg-panel option { background: #ffffff; color: #141418; }
+
+  /* ★ 2026-10-25 统一毛玻璃（只改背景和模糊，不动字色） */
+  .pv-sheet, .po-sheet, .ab-panel, .mg-pick, .modal, .fontact, .sheet-foot, [class*='-mask'] > div , .mg-panel{
+    background: var(--glass-bg) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(1.1) !important;
+    backdrop-filter: blur(20px) saturate(1.1) !important;
+  }
+
+  /* ★ 2026-10-25 浮层内容区也要毛玻璃（比面板更深一档，层次更清楚） */
+  #logText, #repText, .mg-body, .mg-list, .pv-body, .fbk-body .rep-box {
+    background: rgba(0, 0, 0, .18) !important;
+    -webkit-backdrop-filter: blur(26px) !important;
+    backdrop-filter: blur(26px) !important;
+    border: 1px solid rgba(255, 255, 255, .08) !important;
+    border-radius: 12px !important;
+  }
+  :root[data-theme="light"] #logText,
+  :root[data-theme="light"] #repText,
+  :root[data-theme="light"] .mg-body,
+  :root[data-theme="light"] .mg-list,
+  :root[data-theme="light"] .pv-body {
+    background: rgba(255, 255, 255, .55) !important;
+    border-color: rgba(0, 0, 0, .07) !important;
+  }
+
+  /* ★ 2026-10-25 诊断面板的说明段落：不要背景框 */
+  .fbk-body .g-hint, .fbk-body .fbk-note, .fbk-body .fbk-step, .fbk-body .hint {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  /* ★ 2026-10-25 灰字加深（保留灰感，不用纯黑/纯白） */
+  :root[data-theme="dark"] { --text-dim: #a9a9b4; }
+  :root[data-theme="light"] { --text-dim: #45454d; }
+
+
+  /* ★ 2026-10-25 选择字体弹层 / 字体海报：加厚，不让人看见底下的字 */
+  .mg-pick-mask > div, .mg-pick,
+  #posterMask > div, .poster-mask > div, .poster-sheet, .po-mask > div.poster {
+    background: rgba(24, 24, 27, .95) !important;
+    -webkit-backdrop-filter: blur(26px) !important;
+    backdrop-filter: blur(26px) !important;
+  }
+  :root[data-theme="light"] .mg-pick-mask > div,
+  :root[data-theme="light"] .mg-pick,
+  :root[data-theme="light"] #posterMask > div,
+  :root[data-theme="light"] .poster-mask > div,
+  :root[data-theme="light"] .poster-sheet {
+    background: rgba(252, 252, 254, .96) !important;
+  }
+
+  /* ★ 2026-10-25 浮层毛玻璃：铺模糊壁纸（不依赖 backdrop-filter） */
+  body.cfs-hasbg [class*="-mask"]::before,
+  body.cfs-hasbg .modal-mask::before {
+    content: "";
+    position: fixed;
+    inset: -40px;
+    z-index: -1;
+    pointer-events: none;
+    background-image: var(--bg-img, none);
+    background-size: cover;
+    background-position: center;
+    filter: blur(26px) brightness(var(--bg-bright, 1));
+  }
+  /* 面板半透明，才能透出上面那层模糊壁纸 */
+  body.cfs-hasbg .pv-sheet,
+  body.cfs-hasbg .po-sheet,
+  body.cfs-hasbg .ab-panel,
+  body.cfs-hasbg .mg-panel,
+  body.cfs-hasbg .mg-pick,
+  body.cfs-hasbg .fontact,
+  body.cfs-hasbg .modal,
+  body.cfs-hasbg .sheet-foot,
+  body.cfs-hasbg [class*="-mask"] > div {
+    background: rgba(20, 20, 23, .58) !important;
+  }
+  body.cfs-hasbg .mg-pick-mask > div,
+  body.cfs-hasbg .mg-pick {
+    background: rgba(20, 20, 23, .80) !important;
+  }
+  :root[data-theme="light"] body.cfs-hasbg .pv-sheet,
+  :root[data-theme="light"] body.cfs-hasbg .po-sheet,
+  :root[data-theme="light"] body.cfs-hasbg .ab-panel,
+  :root[data-theme="light"] body.cfs-hasbg .mg-panel,
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick,
+  :root[data-theme="light"] body.cfs-hasbg .fontact,
+  :root[data-theme="light"] body.cfs-hasbg .modal,
+  :root[data-theme="light"] body.cfs-hasbg .sheet-foot,
+  :root[data-theme="light"] body.cfs-hasbg [class*="-mask"] > div {
+    background: rgba(252, 252, 254, .66) !important;
+  }
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick-mask > div,
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick {
+    background: rgba(252, 252, 254, .88) !important;
+  }
+
+  /* ★ 2026-10-25 修正图层顺序：模糊壁纸在「遮罩底色之上、面板之下」 */
+  body.cfs-hasbg [class*="-mask"]::before,
+  body.cfs-hasbg .modal-mask::before {
+    z-index: 0 !important;
+  }
+  body.cfs-hasbg [class*="-mask"] > div,
+  body.cfs-hasbg .modal-mask > div {
+    position: relative !important;
+    z-index: 1 !important;
+  }
+  /* 两个被点名的面板：再抬高一层保证生效 */
+  html body.cfs-hasbg .mg-panel,
+  html body.cfs-hasbg .mg-pick-mask > div,
+  html body.cfs-hasbg .mg-pick,
+  html body.cfs-hasbg .poster-mask > div,
+  html body.cfs-hasbg .poster-sheet {
+    background: rgba(20, 20, 23, .62) !important;
+  }
+  :root[data-theme="light"] html body.cfs-hasbg .mg-panel,
+  :root[data-theme="light"] html body.cfs-hasbg .mg-pick-mask > div,
+  :root[data-theme="light"] html body.cfs-hasbg .mg-pick,
+  :root[data-theme="light"] html body.cfs-hasbg .poster-mask > div,
+  :root[data-theme="light"] html body.cfs-hasbg .poster-sheet {
+    background: rgba(252, 252, 254, .70) !important;
+  }
+
+  /* ★ 2026-10-25 浮层内部的内容框：半透明加深（能透出模糊壁纸） */
+  #logText, #repText, .rep-view, textarea.report, .poster-card {
+    background: rgba(0, 0, 0, .58) !important;
+    border: 1px solid rgba(255, 255, 255, .10) !important;
+    border-radius: 12px !important;
+    color: var(--text) !important;
+  }
+  :root[data-theme="light"] #logText,
+  :root[data-theme="light"] #repText,
+  :root[data-theme="light"] .rep-view,
+  :root[data-theme="light"] textarea.report,
+  :root[data-theme="light"] .poster-card {
+    background: rgba(255, 255, 255, .90) !important;
+    border-color: rgba(0, 0, 0, .10) !important;
+    color: #141418 !important;
+  }
+
+  /* ★ 2026-10-25 选择字体页 / 字体海报：跟其它浮层同一档透明度 */
+  body.cfs-hasbg .mg-pick-mask > div,
+  body.cfs-hasbg .mg-pick,
+  body.cfs-hasbg .poster-mask > div,
+  body.cfs-hasbg .poster-sheet,
+  body.cfs-hasbg .po-mask > div.poster {
+    background: rgba(20, 20, 23, .58) !important;
+  }
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick-mask > div,
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick,
+  :root[data-theme="light"] body.cfs-hasbg .poster-mask > div,
+  :root[data-theme="light"] body.cfs-hasbg .poster-sheet {
+    background: rgba(252, 252, 254, .66) !important;
+  }
+
+  /* ★ 2026-10-25 内层对齐（覆盖之前的实心值） */
+  .mg-list, .mg-body, .poster-body, .pv-body {
+    background: rgba(0, 0, 0, .22) !important;
+    border: 1px solid rgba(255, 255, 255, .10) !important;
+  }
+  :root[data-theme="light"] .mg-list,
+  :root[data-theme="light"] .mg-body,
+  :root[data-theme="light"] .poster-body,
+  :root[data-theme="light"] .pv-body {
+    background: rgba(255, 255, 255, .22) !important;
+    border-color: rgba(0, 0, 0, .08) !important;
+  }
+
+  /* ★ 2026-10-25 合成面板：中间滚动区透明，行也用半透明 */
+  .mg-body { background: transparent !important; }
+  .mg-row {
+    background: rgba(255, 255, 255, .06) !important;
+    border: 1px solid rgba(255, 255, 255, .10) !important;
+    border-radius: 12px !important;
+    margin: 0 0 10px !important;
+  }
+  :root[data-theme="light"] .mg-row {
+    background: rgba(255, 255, 255, .42) !important;
+    border-color: rgba(0, 0, 0, .07) !important;
+  }
+  .mg-panel select {
+    background: rgba(255, 255, 255, .08) !important;
+    color: var(--text) !important;
+    border: 1px solid rgba(255, 255, 255, .16) !important;
+    border-radius: 10px !important;
+  }
+  :root[data-theme="light"] .mg-panel select {
+    background: rgba(255, 255, 255, .55) !important;
+    color: #141418 !important;
+    border-color: rgba(0, 0, 0, .10) !important;
+  }
+
+  /* ★ 2026-10-25 日志/报告正文：半透明，不再是一块白 */
+  #logText, #repText, .rep-view, textarea.report {
+    background: rgba(0, 0, 0, .28) !important;
+    color: var(--text) !important;
+  }
+  :root[data-theme="light"] #logText,
+  :root[data-theme="light"] #repText,
+  :root[data-theme="light"] .rep-view,
+  :root[data-theme="light"] textarea.report {
+    background: rgba(255, 255, 255, .38) !important;
+    color: #141418 !important;
+  }
+
+  /* ★ 2026-10-25 最终透明档位（放在最后，确保覆盖前面所有值） */
+  body.cfs-hasbg .mg-panel,
+  body.cfs-hasbg .mg-pick-mask > div,
+  body.cfs-hasbg .mg-pick,
+  body.cfs-hasbg .pv-sheet,
+  body.cfs-hasbg .po-sheet,
+  body.cfs-hasbg .ab-panel,
+  body.cfs-hasbg .fontact,
+  body.cfs-hasbg .modal,
+  body.cfs-hasbg .sheet-foot,
+  body.cfs-hasbg [class*="-mask"] > div {
+    background: rgba(18, 18, 20, .45) !important;
+  }
+  :root[data-theme="light"] body.cfs-hasbg .mg-panel,
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick-mask > div,
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick,
+  :root[data-theme="light"] body.cfs-hasbg .pv-sheet,
+  :root[data-theme="light"] body.cfs-hasbg .po-sheet,
+  :root[data-theme="light"] body.cfs-hasbg .ab-panel,
+  :root[data-theme="light"] body.cfs-hasbg .fontact,
+  :root[data-theme="light"] body.cfs-hasbg .modal,
+  :root[data-theme="light"] body.cfs-hasbg .sheet-foot,
+  :root[data-theme="light"] body.cfs-hasbg [class*="-mask"] > div {
+    background: rgba(252, 252, 254, .45) !important;
+  }
+  .mg-body { background: transparent !important; }
+  .mg-row {
+    background: rgba(255, 255, 255, .04) !important;
+    border: 1px solid rgba(255, 255, 255, .08) !important;
+  }
+  :root[data-theme="light"] .mg-row {
+    background: rgba(255, 255, 255, .18) !important;
+    border-color: rgba(0, 0, 0, .06) !important;
+  }
+  #logText, #repText, .rep-view, textarea.report {
+    background: rgba(0, 0, 0, .18) !important;
+  }
+  :root[data-theme="light"] #logText,
+  :root[data-theme="light"] #repText,
+  :root[data-theme="light"] .rep-view,
+  :root[data-theme="light"] textarea.report {
+    background: rgba(255, 255, 255, .14) !important;
+  }
+  body.cfs-hasbg [class*="-mask"]::before {
+    filter: blur(30px) brightness(var(--bg-bright, 1)) !important;
+  }
+
+  .mg-body,
+  :root[data-theme="light"] .mg-body,
+  :root[data-theme="dark"] .mg-body { background: transparent !important; }
+
+  /* ★ 2026-10-25 合成面板：行与面板的落差再压一档 */
+  .mg-row {
+    background: rgba(255, 255, 255, .06) !important;
+    border: 1px solid rgba(255, 255, 255, .04) !important;
+    border-radius: 12px !important;
+  }
+  :root[data-theme="light"] .mg-row {
+    background: rgba(255, 255, 255, .28) !important;
+    border-color: rgba(255, 255, 255, .35) !important;
+  }
+  .mg-panel, .mg-pick-mask > div, .modal, .po-sheet, .pv-sheet, .ab-panel {
+    box-shadow: none !important;
+    border-color: rgba(255, 255, 255, .08) !important;
+  }
+  :root[data-theme="light"] .mg-panel,
+  :root[data-theme="light"] .mg-pick-mask > div,
+  :root[data-theme="light"] .modal {
+    border-color: rgba(255, 255, 255, .45) !important;
+  }
+  .mg-panel select {
+    background: rgba(255, 255, 255, .10) !important;
+    border-color: rgba(255, 255, 255, .10) !important;
+  }
+  :root[data-theme="light"] .mg-panel select {
+    background: rgba(255, 255, 255, .45) !important;
+    border-color: rgba(255, 255, 255, .55) !important;
+  }
+
+  /* ★ 2026-10-25 合成面板的行改回分割线，不再有白底/外框 */
+  .mg-body .mg-row,
+  .mg-row {
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 1px solid rgba(255, 255, 255, .10) !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    padding: 12px 0 !important;
+  }
+  :root[data-theme="light"] .mg-body .mg-row,
+  :root[data-theme="light"] .mg-row {
+    background: transparent !important;
+    border-bottom-color: rgba(0, 0, 0, .08) !important;
+  }
+  .mg-body .mg-row:last-child { border-bottom: none !important; }
+  /* 滚动区保持全透 */
+  .mg-body { background: transparent !important; }
+
+  /* ★ 2026-10-25 浅色：白玻璃 → 中性灰玻璃（不再发白） */
+  :root[data-theme="light"] body.cfs-hasbg .mg-panel,
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick-mask > div,
+  :root[data-theme="light"] body.cfs-hasbg .mg-pick,
+  :root[data-theme="light"] body.cfs-hasbg .pv-sheet,
+  :root[data-theme="light"] body.cfs-hasbg .po-sheet,
+  :root[data-theme="light"] body.cfs-hasbg .ab-panel,
+  :root[data-theme="light"] body.cfs-hasbg .fontact,
+  :root[data-theme="light"] body.cfs-hasbg .modal,
+  :root[data-theme="light"] body.cfs-hasbg .sheet-foot,
+  :root[data-theme="light"] body.cfs-hasbg [class*="-mask"] > div {
+    background: rgba(226, 226, 232, .34) !important;
+    border-color: rgba(255, 255, 255, .40) !important;
+  }
+  :root[data-theme="light"] .mg-panel select {
+    background: rgba(255, 255, 255, .26) !important;
+    border-color: rgba(0, 0, 0, .10) !important;
+  }
+  :root[data-theme="light"] .mg-row {
+    border-bottom-color: rgba(0, 0, 0, .10) !important;
+  }
+  :root[data-theme="light"] #logText,
+  :root[data-theme="light"] #repText,
+  :root[data-theme="light"] .rep-view,
+  :root[data-theme="light"] textarea.report {
+    background: rgba(255, 255, 255, .10) !important;
+  }
+
+  /* ★ 2026-10-25 开关颜色跟随强调色 */
+  .sw.on, body .sw.on { background: var(--accent, var(--pending-blue)) !important; }
+
+  /* ★ 2026-10-25 壁纸尺寸用像素固定，输入法弹出时不重算 */
+  #cfsBg {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important;
+    width: var(--bg-w, 100vw) !important;
+    height: var(--bg-h, 100vh) !important;
+    object-fit: cover !important;
+  }
+  body.cfs-hasbg [class*="-mask"]::before,
+  body.cfs-hasbg .modal-mask::before {
+    width: var(--bg-w, 100vw) !important;
+    height: var(--bg-h, 100vh) !important;
+    inset: 0 !important;
+  }
+
+  /* ★ 2026-10-25 展开按钮：不要底色，只留文字 */
+  .lib-head .lh-btn {
+    background: none !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    opacity: .8 !important;
+  }
+  .lib-head:active .lh-btn { background: none !important; }
+  /* 只读专区的提示条 */
+  .adv-locked-tip {
+    margin: 8px 0 12px; padding: 8px 10px; border-radius: 10px;
+    background: rgba(245, 158, 11, .14); color: #f59e0b; font-size: 12.5px;
+  }
+
+  /* ★ 2026-10-25 展开按钮彻底无底色 */
+  .lib-head .lh-btn, .lh-btn {
+    background: transparent !important;
+    background-image: none !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  .lib-head:active .lh-btn, .lh-btn:active { background: transparent !important; }
+  /* 锁定按钮：带框的小胶囊 */
+  #advLockBtn {
+    background: rgba(128,128,128,.14) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 9px !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    padding: 4px 12px !important;
+    margin: 0 0 0 10px !important;
+  }
+
+  /* ★ 2026-10-25 头部：标题不撑满，锁定紧贴标题；其余按钮靠右 */
+  #advSheet .sheet-head, #advConSheet .sheet-head { gap: 8px; }
+  #advSheet .sheet-head .sheet-title, #advConSheet .sheet-title {
+    flex: 0 0 auto !important; margin-right: 2px;
+  }
+  #advLockBtn { margin-left: 0 !important; }
+  #advSheet #advBackBtn, #advSheet .sheet-x[onclick*="advClose"],
+  #advConSheet .sheet-x { margin-left: auto !important; }
+  #advSheet #advBackBtn + .sheet-x { margin-left: 0 !important; }
+
+  /* ★ 2026-10-25 展开按钮：用最具体的选择器压掉所有底色 */
+  body .lib-head span.lh-btn,
+  body .lib-head span.lh-btn:active,
+  body .lib-head:active span.lh-btn {
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* ★ 2026-10-25 头部：标题与锁定靠左，关闭永远最右 */
+  #advSheet .sheet-head .sheet-x:last-child,
+  #advConSheet .sheet-head .sheet-x:last-child {
+    margin-left: auto !important;
+  }
+  #advSheet .sheet-head #advBackBtn { margin-left: auto !important; }
+
+  /* ★ 2026-10-25 壁纸：独立合成层，固定像素，键盘弹出不参与重排 */
+  #cfsBg {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important;
+    width: var(--bg-w, 100vw) !important;
+    height: var(--bg-h, 100vh) !important;
+    object-fit: cover !important;
+    will-change: transform !important;
+    transform: translateZ(0) !important;
+    contain: strict !important;
+    backface-visibility: hidden !important;
+  }
+
+  /* ★ 2026-10-25 有壁纸时：浮层不做淡入淡出，直接到位（消除闪屏） */
+  /* ★ 2026-10-25 只在输入法弹出期间关动画（平时全部保留） */
+  html.cfs-kb, html.cfs-kb body,
+  html.cfs-kb body * {
+    transition: none !important;
+    animation: none !important;
+  }
+  body.cfs-hasbg .modal-mask.show { opacity: 1 !important; }
+  body.cfs-hasbg .modal-mask.show .modal { transform: none !important; }
+
+  /* ★ 2026-10-25 高级面板关闭键永远最右 */
+  #advCloseBtn { margin-left: auto !important; }
+
+  /* ★ 2026-10-25 关闭键靠最右（兜底写法） */
+  #advSheet .sheet-head, #advConSheet .sheet-head {
+    justify-content: flex-start !important;
+  }
+  #advTitle { flex: 0 0 auto !important; }
+  #advLockBtn { flex: 0 0 auto !important; }
+  #advCloseBtn { margin-left: auto !important; flex: 0 0 auto !important; }
+
+  /* ★ 2026-10-25 浮层模糊层：始终铺满屏幕（平板/横屏不再露边） */
+  body.cfs-hasbg [class*="-mask"]::before,
+  body.cfs-hasbg .modal-mask::before {
+    inset: -60px !important;
+    width: calc(max(100vw, var(--bg-w, 100vw)) + 120px) !important;
+    height: calc(max(100vh, var(--bg-h, 100vh)) + 120px) !important;
+    filter: blur(34px) brightness(var(--bg-bright, 1)) !important;
+  }
+  /* 平板：半截面板本身也稍微加厚，保证文字压得住 */
+  @media (min-width: 700px) {
+    body.cfs-hasbg .mg-panel,
+    body.cfs-hasbg .po-sheet,
+    body.cfs-hasbg .pv-sheet,
+    body.cfs-hasbg .ab-panel,
+    body.cfs-hasbg .fontact,
+    body.cfs-hasbg .modal {
+      background: rgba(24, 24, 28, .62) !important;
+    }
+    :root[data-theme="light"] body.cfs-hasbg .mg-panel,
+    :root[data-theme="light"] body.cfs-hasbg .po-sheet,
+    :root[data-theme="light"] body.cfs-hasbg .pv-sheet,
+    :root[data-theme="light"] body.cfs-hasbg .ab-panel,
+    :root[data-theme="light"] body.cfs-hasbg .fontact,
+    :root[data-theme="light"] body.cfs-hasbg .modal {
+      background: rgba(240, 240, 244, .72) !important;
+    }
+  }
+
+  /* 2026-10-25 高级面板头部必须是 flex，否则 margin-left:auto 不生效 */
+  #advSheet .sheet-head, #advConSheet .sheet-head {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+  }
+  #advCloseBtn { margin-left: auto !important; }
+  #advTitle, #advLockBtn { flex: 0 0 auto !important; }
 </style>
+<script>
+  window.__bgW = window.innerWidth;
+  window.__bgH = window.innerHeight;
+</script>
 <script>
 try {
   var _t = localStorage.getItem("cf_theme") || "auto";
@@ -941,6 +1589,7 @@ try {
     发现新版本 <b id="updateBannerVer"></b>，可在页面下方「模块更新」里下载安装。
   </div>
 
+  <!-- ★ 2026-10-25：口令通过后出现的「高级设置」入口 -->
   <div class="section-title fade lib-head" style="--d:.05s" onclick="toggleLib()">
     <span id="libHeadText">字体库（点卡片打开菜单）</span>
     <span style="display:flex;align-items:center;gap:8px">
@@ -977,6 +1626,8 @@ try {
     <div class="sw" id="sw_keep_lockscreen"></div>
   </div>
 
+  </div>
+
   <div class="switch-row fade" onclick="toggleSetting('mount_mode')">
     <div><div class="t">自带挂载</div><div class="d"><b>开</b>：模块自己把字体挂上去（推荐，不用装元模块）。<br><b>关</b>：交给 Root 管理器 / 元模块来挂。</div></div>
     <div class="sw on" id="sw_mount_mode"></div>
@@ -1001,8 +1652,6 @@ try {
   </div>
 
   <div class="divider"></div>
-
-
   <div class="section-title fade"><span>Google 应用改用系统字体</span></div>
   <div class="status-box fade">
     <div class="status-row">
@@ -1020,34 +1669,41 @@ try {
   <div class="divider"></div>
 
   <div class="section-title fade"><span>模块更新（GitHub）</span></div>
-  <!-- ★ 2026-10-16 作者要求：把"要挂梯子"提前说清楚，别等用户点了失败才猜 -->
   <div class="g-hint vpn-tip fade" style="margin:-2px 0 10px">
     <b>更新包在 GitHub 上，国内直连大多不通</b> ——
-    如果点「检查更新」没反应、或者「下载并安装」失败，<b>先连上 VPN 再试</b>。
+    点「检查更新」没反应、或「下载并安装」失败，<b>先连上 VPN 再试</b>。
   </div>
   <div class="status-box fade">
     <div class="status-row">
       <span class="label">当前版本</span>
-      <span class="value" id="curVerLabel">-</span>
+      <span class="value" id="curVerLabel" onclick="advTap()" style="cursor:pointer">-</span>
     </div>
     <div class="status-row">
       <span class="label">最新版本</span>
       <span class="value off" id="newVerLabel">未检查</span>
     </div>
   </div>
+
+  <div id="updPanel" style="display:none;margin:12px 0 2px">
+    <div id="updText" class="g-hint" style="margin:0 0 8px"></div>
+    <div id="updBarWrap" style="height:8px;border-radius:6px;overflow:hidden;background:rgba(128,128,128,.25)">
+      <div id="updBar" style="height:100%;width:0%;background:#3b82f6;transition:width .25s ease"></div>
+    </div>
+    <div id="updSpin" style="display:none;align-items:center;gap:8px;padding:6px 0">
+      <span class="spin"></span><span id="updSpinText" class="g-hint" style="margin:0">正在安装…</span>
+    </div>
+  </div>
+
   <div class="btn-row fade">
-    <button class="g-btn" id="checkBtn" onclick="checkUpdate(true)">检查更新</button>
+    <button class="g-btn" id="updCheckBtn" onclick="updCheck(true)">检查更新</button>
     <button class="g-btn" onclick="showChangelog()">更新日志</button>
-    <button class="g-btn" id="installBtn" onclick="installUpdate()" disabled>下载并安装</button>
+    <button class="g-btn" id="updMainBtn" onclick="updMainClick()" disabled>下载并安装</button>
   </div>
-  <div class="progress" id="updProgress">
-    <div class="t" id="updProgressText">准备中...</div>
-    <div class="bar"><i id="updProgressBar"></i></div>
-  </div>
-  <div class="g-hint fade">每次打开这个页面都会自动检查一次更新。下载并安装完成后，按钮会变成红色的「立即重启生效」，点它即可重启。</div>
+  <div class="g-hint fade" id="updFoot">打开页面会自动检查一次更新。</div>
 
+  <div class="divider" id="advEntryDivider"></div>
+  <button class="import-main fade" id="advEntryBtn" onclick="advOpen()">🛠 高级设置（调试用）</button>
   <div class="divider"></div>
-
   <div class="section-title fade"><span>让字体生效</span></div>
   <div class="g-hint fade" style="margin-bottom:8px">
     换了字体后有两种做法，<b>内容一样，只是快慢和稳当程度不同</b>：
@@ -1104,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0535</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -1478,9 +2134,22 @@ function applyTheme(pref) {
   if (btn) btn.textContent = THEME_LABELS[pref] || "🌓 自动";
   try { localStorage.setItem("cf_theme", pref); } catch (e) {}
 }
+/* ★ 2026-10-25 深浅色和背景暗化联动：深色 70 / 浅色 0（只在有壁纸时） */
+function cfsSyncDimWithTheme() {
+  try {
+    if (!UI.bg) return;                       // 没壁纸：只切卡片，不动滑块
+    const light = document.documentElement.getAttribute("data-theme") === "light";
+    UI.bgDim = light ? "0" : "70";
+    UI.preset = "";
+    if (typeof uiApplyBackground === "function") uiApplyBackground();
+    if (typeof advRender === "function") advRender();
+  } catch (e) {}
+}
+
 function cycleTheme() {
   const order = ["auto", "light", "dark"];
   applyTheme(order[(order.indexOf(themePref) + 1) % order.length]);
+  try { cfsSyncDimWithTheme(); } catch (e) {}
   showToast("主题：" + (themePref === "auto" ? "跟随系统" : themePref === "light" ? "浅色" : "深色"));
 }
 
@@ -1716,6 +2385,24 @@ function applyStatus(st) {
       if (kl === "0" || kl === "1") settings.keep_lockscreen = kl;
       const swEl = document.getElementById("sw_keep_lockscreen");
       if (swEl && (kl === "0" || kl === "1")) swEl.classList.toggle("on", kl === "1");
+      // ★ 2026-10-24：中文合集替换开关的当前值（后端生效值）
+      const tr = String(g("TR") || "").trim();
+      if (tr === "0" || tr === "1") settings.ttc_replace = tr;
+      const swTtc = document.getElementById("sw_ttc_replace");
+      if (swTtc && (tr === "0" || tr === "1")) swTtc.classList.toggle("on", tr === "1");
+      // ★ 2026-10-24：三星专区另两个开关（跳过 /product/fonts、保留 Samsung 字体）
+      const spf = String(g("SPF") || "").trim();
+      if (spf === "0" || spf === "1") settings.skip_product = spf;
+      const swSpf = document.getElementById("sw_skip_product");
+      if (swSpf && (spf === "0" || spf === "1")) swSpf.classList.toggle("on", spf === "1");
+      const svf = String(g("SVF") || "").trim();
+      if (svf === "0" || svf === "1") settings.skip_vf = svf;
+      const swSvf = document.getElementById("sw_skip_vf");
+      if (swSvf && (svf === "0" || svf === "1")) swSvf.classList.toggle("on", svf === "1");
+      const ks = String(g("KS") || "").trim();
+      if (ks === "0" || ks === "1") settings.keep_samsung = ks;
+      const swKs = document.getElementById("sw_keep_samsung");
+      if (swKs && (ks === "0" || ks === "1")) swKs.classList.toggle("on", ks === "1");
     }
     const mo = g("MO").split(",");
     const ml = document.getElementById("mountLabel");
@@ -6168,7 +6855,7 @@ function openFbk() {
 
 /* ===========================================================================
    ① 状态自检（A4）
-   数据来源：fontctl.sh status 的现成输出（applyStatus 收到的同一份文本）。
+   数据来源：fontctl.sh quick 的现成输出（applyStatus 收到的同一份文本）。
    这里**不做任何检测**，只把已有字段翻译成人话，最多列 3 条提示。
    =========================================================================== */
 let lastStatusText = "";
@@ -6314,6 +7001,32 @@ const IMP_SAMPLES = [
 // 真正的下拉菜单：点「xxx ▾」弹出一个文件列表，点哪一行就预览哪个
 /* ---------- 替换范围设置 / 诊断 ---------- */
 const settings = {mount_mode: "self", theme_fonts: "0", keep_lockscreen: "0"};   // 1.0.9：只剩这两个开关；v1.1.1 加了「保留锁屏时钟字体」
+/* ★ 2026-10-25：开关状态本地缓存 —— 打开页面先用它渲染，之后再用 shell 校验覆盖 */
+const SET_CACHE_KEY = "cfs_settings_cache";
+let SET_VERIFIED = "0";   // "1" = 本次已从模块读到；"0" = 显示的是上次记录
+function setCacheLoad() {
+  try {
+    const o = JSON.parse(localStorage.getItem(SET_CACHE_KEY) || "null");
+    if (o && typeof o === "object") {
+      Object.keys(o).forEach(k => { settings[k] = String(o[k]); });
+    }
+  } catch (e) {}
+}
+function setCacheSave() {
+  try { localStorage.setItem(SET_CACHE_KEY, JSON.stringify(settings)); } catch (e) {}
+}
+async function advRefreshSettings() {
+  showToast("正在读取开关状态…");
+  try {
+    await advSyncFromDump();
+    SET_VERIFIED = "1";
+    setCacheSave();
+    showToast("已读取：" + Object.keys(settings).length + " 项");
+    advRender();
+  } catch (e) {
+    showToast("读取失败：" + errText(e) + "（显示的是上次记录）");
+  }
+}
 let mountMode = "self";
 // 恢复上次的折叠状态（默认展开）
 try { if (localStorage.getItem("cf_lib_collapsed") === "1") toggleLib(true); } catch (e) {}
@@ -6327,9 +7040,1501 @@ async function loadSettings() {
     if (el) el.classList.toggle("on", settings[k] === "1");
   });
   document.getElementById("sw_mount_mode").classList.toggle("on", settings.mount_mode !== "manager");
+  SET_VERIFIED = "1";
+  setCacheSave();
 }
+/* ===========================================================================
+   ★ 2026-10-24：高级（调试用）—— 三层菜单
+     第 1 层：大类（通用·诊断与现场 / 三星 One UI 专区）
+     第 2 层：小类（现场导出 / 槽位体检 / 运行时状态 / 一键恢复…）
+     第 3 层：具体项目（点一下就跑 adv.sh，输出显示在下方）
+   入口：连点 7 次「当前版本」的版本号 + 口令（每次都要点，不记忆）
+   =========================================================================== */
+const ADV_TREE = [
+  {
+    id: "ui", name: "界面自定义",
+    desc: "只改外观和显示，不影响字体。改完立即生效；想还原点最下面的「恢复默认界面」。",
+    children: [
+      { id: "ui_bg", name: "设置背景图片",
+        desc: "点一下会打开系统的相册/文件选择器，选一张图当背景（原图直接导入，最大 24MB）。",
+        hint: "选完立刻生效；大图会自动缩小保存。", safe: 2, cmd: "uiPickBg" },
+      { id: "ui_bgclr", name: "清除背景图片",
+        desc: "恢复纯色背景。", hint: "随时可以再设。", safe: 2, cmd: "uiClearBg" },
+
+
+      { id: "ui_preset", cycle: "preset",
+        name: "背景预设（不会调就点这里）",
+        desc: "点一下在 预设一 / 预设二 / 预设三 / 自定义 之间切换，三个滑块会自动跳好。",
+        hint: "预设一压暗；预设二最亮最清；预设三最糊。" },
+      { id: "ui_bgdim", type: "range", uiKey: "bgDim", min: 0, max: 85, step: 5, withTheme: 1,
+        name: "背景暗化", unit: "%", desc: "拖一下即时生效，越大越暗（文字更清楚）。",
+        hint: "开得越大越建议切到深色模式（右边那个按钮），否则浅色文字容易糊在背景里。" },
+      { id: "ui_bgblur", type: "range", uiKey: "bgBlur", min: 0, max: 20, step: 1,
+        name: "背景模糊", unit: "px", desc: "拖一下即时生效，越大越糊（更像壁纸）。", hint: "推荐 4~8；暗化拉得越高，模糊会自动减弱，保证还能看出壁纸。" },
+      { id: "ui_cardalpha", type: "range", uiKey: "cardAlpha", min: 30, max: 100, step: 5,
+        name: "卡片不透明度", unit: "%", desc: "卡片/面板的透明程度，越小越透。", hint: "背景花的时候调高一点。" },
+      { id: "ui_textmode", cycle: "textMode",
+        name: "背景上的文字对比", desc: "自动按主题反色，也可以强制浅色/深色。",
+        hint: "文字看不清时先调这个，再调暗化。" },
+      { id: "ui_theme", type: "color", key: "btn",
+        name: "主题配色（按钮 + 背景泛光）", desc: "点色块自己挑；管按钮颜色和背景那层淡光。",
+        hint: "想恢复出厂：点「恢复默认界面」。" },
+      
+      { id: "adv_accent", type: "color", key: "accent",
+        name: "强调色（开关 / 进度条 / 高亮）", desc: "和按钮色分开：这里管开关、进度条、高亮文字。",
+        hint: "留空 = 跟随主题配色。" },
+      
+      { id: "ui_radius", cycle: "radius", name: "卡片圆角", desc: "点一下切换大 / 中 / 小。", hint: "小圆角看起来更硬朗。" },
+      { id: "ui_title", cycle: "titleSize", name: "标题字号", desc: "点一下切小 / 中 / 大。", hint: "看着费劲就选大。" },
+      { id: "sw_anim", type: "switch", key: "__anim", uiOnly: 1,
+        name: "保留动画效果", desc: "关掉后所有过渡动画消失（老机器更顺）。", hint: "默认开。" },
+      { id: "sw_hide_update", type: "switch", key: "__hideUpdate", uiOnly: 1,
+        name: "隐藏「模块更新」整块", desc: "不想看到更新提示就打开。", hint: "还能在管理器里手动更新。" },
+      { id: "sw_no_update_check", type: "switch", key: "__noUpdateCheck", uiOnly: 1,
+        name: "完全关闭更新检查", desc: "连后台检查都不发。", hint: "想更新时去 GitHub 手动下。" },
+      { id: "sw_hide_google", type: "switch", key: "__hideGoogle", uiOnly: 1,
+        name: "隐藏「Google 兼容」卡片", desc: "用不到可以藏起来。", hint: "设置还在，只是不显示。" },
+      { id: "sw_hide_feedback", type: "switch", key: "__hideFeedback", uiOnly: 1,
+        name: "隐藏「反馈 / 上报」入口", desc: "给家人用、或不想误点。", hint: "隐藏后仍可用模块目录里的脚本抓日志。" },
+      { id: "sw_simple", type: "switch", key: "__simple", uiOnly: 1,
+        name: "简化模式", desc: "一键把其它区块全藏起来，只留字体列表 + 应用 + 重启。",
+        hint: "适合只当字体切换器用的。" },
+      { id: "ui_export", name: "导出界面设置", desc: "存成 JSON 放 Download，换机带走。",
+        hint: "文件在 Download/界面设置_时间.json。", safe: 1, cmd: "uiExport" },
+      { id: "ui_import", name: "导入界面设置", desc: "选之前导出的 JSON。", hint: "导入后立即生效。", safe: 2, cmd: "uiImport" },
+      { id: "ui_relock", name: "重新锁定高级设置", desc: "隐藏主界面的「高级设置」卡片，下次要重新输口令。",
+        hint: "锁定后这个面板会自己关掉。", safe: 2, cmd: "advRelock" },
+      { id: "ui_reset", name: "恢复默认界面", desc: "把上面所有外观改动清掉。", hint: "不影响字体设置。", safe: 2, cmd: "uiReset" },
+    ]
+  },
+  {
+    id: "diag", name: "通用 · 出问题了先看这里",
+    desc: "这里面全是「看一眼、查一下」的功能，不会改你的字体。遇到字体没生效、某个 App 闪退，从这儿找原因。",
+    children: [
+      { id: "adv_refresh_set", name: "刷新开关状态",
+        desc: "重新从模块读一遍所有开关。打开菜单不再自动读（会卡），所以想确认状态就点这里。",
+        hint: "读不到会直接告诉你；读到会更新界面。", safe: 1, cmd: "advRefreshSettings" },
+
+      { id: "export", name: "把现场打包发给作者", desc: "作者要你提供情况时，用这里的第一个就够了", children: [
+        { id: "pack", name: "打个包（推荐先点这个）",
+          desc: "把「这台机器换了哪些字体、开机时挂没挂上、报了什么错、你的设置」全部装进一个压缩包，存到手机的 Download 文件夹。",
+          hint: "只发这一个文件就够，不用截图、不用打一大堆字。",
+          safe: 1, cmd: "pack" },
+        { id: "plan", name: "看「准备换哪些字体」",
+          desc: "列一个清单：哪一份系统字体，准备换成你的字体。一行是一个。",
+          hint: "数一下有多少行，跟下面「挂载概况」里说「真的挂上了几条」对一对，数不一样就是没挂全。",
+          safe: 1, cmd: "plan" },
+        { id: "mountlog", name: "看开机时的记录",
+          desc: "每次开机，模块都会把「挂字体」这件事记一笔，成功失败都记。",
+          hint: "找里面带「失败」「没有挂载计划」的句子，那就是这次没生效的原因。",
+          safe: 1, cmd: "mountlog" },
+        { id: "ttclog", name: "看「中文合集」有没有换成功",
+          desc: "三星这类机器，中文是从一个「大包」里读的（一个文件里装好几套字体）。这里记录换没换成功。",
+          hint: "看到 wrapfail 就是没换成（中文没变就是这个原因）；看到 xml 才是换成功。",
+          safe: 1, cmd: "ttclog" },
+      ]},
+      { id: "check", name: "到底换上了没有", desc: "比「生成完整报告」快得多，几秒钟给答案", children: [
+        { id: "slots", name: "一个一个核对",
+          desc: "把清单上的每一条都对一遍：要换的那个文件在不在、你的字体在不在、到底挂上了没有。",
+          hint: "最后一行会写「挂上 X 个、没挂上 Y 个」。Y 不是 0 就往上翻，上面列了是哪几条。",
+          safe: 1, cmd: "slots" },
+        { id: "status", name: "一眼看概况",
+          desc: "准备换几个、真的换上了几个、现在用的是哪套字体、这次开机有没有干活。",
+          hint: "「准备 96 / 真的挂上 96」就是正常；真的挂上是 0，说明字体根本没换（所有地方都不会变）。",
+          safe: 1, cmd: "status" },
+        { id: "selinux", name: "看系统「认不认」这些字体",
+          desc: "安卓会给每个文件贴一个「身份标签」。标签不对，有的 App（尤其网页、WebView）就打不开这些字体。",
+          hint: "正常应该写着 system_file。如果写的是别的（比如 custom_font_lib），那就是这里出问题。",
+          safe: 1, cmd: "selinux" },
+        { id: "avc", name: "看系统拒绝记录",
+          desc: "有 App 想读字体但被系统拦下来时，会在这里留一条「denied（被拒绝）」。",
+          hint: "出现很多 denied、还牵扯 fonts，说明是权限被拦，不是字体坏了。",
+          safe: 1, cmd: "avc" },
+      ]},
+      { id: "runtime", name: "手机现在的状态", desc: "崩溃、网页组件、开机脚本、别的模块，都在这儿看", children: [
+        { id: "webview", name: "看网页组件（WebView）",
+          desc: "手机上显示网页的那套东西（各种 App 里的网页、模块的设置界面，都是用它的）。很多「一点就闪退」其实是它自己崩。",
+          hint: "如果版本很旧、或者跟你的安卓版本不搭，先去应用商店更新它，再来查字体。",
+          safe: 1, cmd: "webview" },
+        { id: "dropbox", name: "看最近 24 小时的崩溃",
+          desc: "系统自己记的「哪个 App 崩了、崩了几次」。",
+          hint: "崩的是浏览器/网页相关的东西 → 大概率不是换字体造成的。",
+          safe: 1, cmd: "dropbox" },
+        { id: "boot", name: "看这次开机的记录",
+          desc: "开机时模块该跑的两步有没有跑（跑没跑、什么时候跑的）。",
+          hint: "没跑 = 管理器没执行模块脚本（用临时 root 时常见），字体不会生效。",
+          safe: 1, cmd: "boot" },
+        { id: "conflicts", name: "看有没有别的模块也在改字体",
+          desc: "两个都在改字体的模块会互相打架，最后看到的效果就很怪。",
+          hint: "列出来了 → 去管理器里把另一个停用，重启再看。",
+          safe: 1, cmd: "conflicts" },
+        { id: "theme", name: "看主题字体有没有被改过",
+          desc: "魅族/OPPO/vivo 这类机器，主题商店里选的字体是被「真替换」的，这里能看备份还在不在。",
+          hint: "想还原：切到「无字体」重启，模块会自动把这些文件还回去。",
+          safe: 1, cmd: "theme" },
+        { id: "hash", name: "看装的是不是最新版",
+          desc: "核对手机上的文件和版本号，判断「更新到底生效了没有」。",
+          hint: "显示的两个版本号不一样 = 还没生效，重启一次再看。",
+          safe: 1, cmd: "hash" },
+        { id: "ns", name: "看系统「视角」对不对",
+          desc: "有些 root 环境下，命令看到的系统和 App 看到的不是同一个「视角」，字体挂了 App 也看不见。",
+          hint: "写「不一样」时，建议把「自带挂载」关掉、改成交给管理器挂。",
+          safe: 1, cmd: "ns" },
+      ]},
+      { id: "range", name: "换多少 / 换哪里（更细的控制）",
+        desc: "默认全部关闭 = 和现在一样。这些开关是给「一换就出问题」的机器用的：先少换，能用了再慢慢放开。",
+        children: [
+          { id: "sw_targets_only", type: "switch", key: "targets_only", el: "sw_targets_only",
+            name: "只换机型清单里的字体",
+            desc: "现在除了我们已知的机型清单，还会扫你手机上的字体一起换（154 个里有一大半是扫出来的）。"
+                + "打开后只用机型清单，不碰扫出来的那批。",
+            hint: "「一眼看概况」里的准备数量会变小；该变的地方还是变。" },
+          { id: "sw_skip_other_lang", type: "switch", key: "skip_other_lang", el: "sw_skip_other_lang",
+            name: "不换其它语言的字体",
+            desc: "叙利亚文、孟加拉文、希伯来文这些文字的字体，换了也没意义，还占资源。打开就别动它们。",
+            hint: "数量通常少 20~40 个；你的字体本来也没有这些字形。" },
+          { id: "sw_keep_serif", type: "switch", key: "keep_serif", el: "sw_keep_serif",
+            name: "保留衬线字体",
+            desc: "系统里「衬线」那一套（类似宋体的风格）保持原样，不换成你的字体。",
+            hint: "部分 App 的标题字会保持系统原样。" },
+          { id: "sw_keep_italic_mono", type: "switch", key: "keep_italic_mono", el: "sw_keep_italic_mono",
+            name: "保留斜体 / 等宽字体",
+            desc: "斜体和「等宽」（代码那种对齐字体）不换。",
+            hint: "代码块、终端类界面会保持原样。" },
+          { id: "sw_keep_bold", type: "switch", key: "keep_bold", el: "sw_keep_bold",
+            name: "保留粗体字体",
+            desc: "有些手机把粗体单独存成一份文件。打开后这些粗体文件不换。",
+            hint: "界面里「加粗」的地方会保持系统原来的粗体。" },
+          { id: "sw_only_system", type: "switch", key: "only_system_fonts", el: "sw_only_system_fonts",
+            name: "只换 /system/fonts",
+            desc: "手机里字体分散在好几个目录（system / product / vendor…）。打开后只动 system 这一个。",
+            hint: "最安全但覆盖最少；product 下的界面字不会变。" },
+          { id: "sw_sys_product", type: "switch", key: "system_and_product", el: "sw_system_and_product",
+            name: "只换 system + product",
+            desc: "常见的两个字体目录，其它目录不碰。比上一项多覆盖一点。",
+            hint: "大多数机型的界面字都在这两个目录里。" },
+          { id: "sw_skip_vendor", type: "switch", key: "skip_vendor_fonts", el: "sw_skip_vendor_fonts",
+            name: "跳过 /vendor/fonts",
+            desc: "有些机型的 vendor 分区里放着跟硬件相关的字体，换了容易出怪问题。",
+            hint: "打开后如果某个硬件相关界面恢复 → 问题就在这个目录。" },
+          { id: "sw_main_only", type: "switch", key: "main_only", el: "sw_main_only",
+            name: "只换主字体（最保守）",
+            desc: "只动「默认字体 + 中文」这几份，别的全部不碰。换得最少，最不容易出事。",
+            hint: "数量会掉到 10 个以内；界面大部分地方可能还是原字体。" },
+          { id: "adv_vendor_dirs", type: "text", key: "skip_vendor_dirs",
+            name: "跳过这些厂商目录",
+            desc: "填目录名，用英文逗号分隔。例如：my_product,mi_ext,oplus,bbkcore",
+            hint: "留空 = 不跳过任何厂商目录。" },
+        ]},
+
+      { id: "b3", name: "自己写名单（白名单 / 黑名单）",
+        desc: "想让某些字体一定换、某些一定不换，就在这里填名字（逗号或分号分隔，写文件名就行）。默认留空 = 不生效。",
+        children: [
+          { id: "adv_wl", type: "text", key: "whitelist",
+            name: "白名单：只换这些",
+            desc: "填了就用「只换这些」的规则，其它一律不换。留空 = 不启用。",
+            hint: "填字体文件名的一部分就行，例如 NotoSansCJK,Roboto" },
+          { id: "adv_bl", type: "text", key: "blacklist",
+            name: "黑名单：这些别换",
+            desc: "名单里的字体一律不替换。留空 = 不启用。",
+            hint: "例如填 Samsung 就跳过所有带 Samsung 的字体。" },
+          { id: "adv_exd", type: "text", key: "exclude_dirs",
+            name: "排除目录",
+            desc: "填目录名（不用写 / 开头），这些目录里的字体都不换。逗号分隔。",
+            hint: "例如 product/fonts,vendor/fonts" },
+          { id: "lists_export", name: "导出名单到 Download", desc: "把上面三份名单存成 txt，换机时带走。",
+            hint: "文件在 Download/字体名单_时间.txt。", safe: 1, cmd: "lists-export" },
+          { id: "lists_check", name: "检查名单写得对不对", desc: "看看名单里的名字在这台机器上到底有没有相似的字体。",
+            hint: "✗ 的那些多半是拼错了，改了再应用。", safe: 1, cmd: "lists-check" },
+        ]},
+      { id: "b4", name: "中文合集（.ttc）怎么换",
+        desc: "只有「中文来自合集」的机型（三星等）才用得上。默认就是只换中文那几号，最安全。",
+        children: [
+          { id: "b4_look", name: "看这次合集换了哪几号",
+            desc: "直接读合集替换的判定记录：换了第几号、成功还是失败。",
+            hint: "via=xml 正常；wrapfail 是失败；skip 是被高级设置跳过。", safe: 1, cmd: "ttclog" },
+          { id: "sw_ttc_all", type: "switch", key: "ttc_all_faces", el: "sw_ttc_all_faces",
+            name: "合集里所有字体都换（危险）",
+            desc: "连日语、韩语那几号也换成你的字体。你的字体没有假名/谚文字形时，那些地方会变方块。",
+            hint: "开之前想清楚：日文/韩文界面会变方块。" },
+          { id: "sw_ttc_nomix", type: "switch", key: "ttc_no_mix", el: "sw_ttc_no_mix",
+            name: "完全不碰合集（最保守）",
+            desc: "合集相关的一律不换。中文只能靠主字体那部分，但绝不会因为合集出问题。",
+            hint: "开了之后中文可能只变一半，看你取舍。" },
+        ]},
+      { id: "b5", name: "挂载方式（怎么把字体挂上去）",
+        desc: "跟「挂上去」有关的设置。默认都是关/0，改了要重启。",
+        children: [
+          { id: "sw_mnt_sys", type: "switch", key: "mount_system_only", el: "sw_mount_system_only",
+            name: "只挂 /system",
+            desc: "只把字体挂到 system 分区，product/vendor 那些不挂。",
+            hint: "更安全，但 product 下的界面字不会变。" },
+          { id: "sw_mnt_svc", type: "switch", key: "mount_in_service", el: "sw_mount_in_service",
+            name: "等开机完成后再挂",
+            desc: "有些机器开机太早挂字体，字体服务还没准备好。打开后改成开机完成再挂。",
+            hint: "开机后前几秒可能还是原字体，之后才变。" },
+          { id: "sw_dry", type: "switch", key: "dry_run", el: "sw_dry_run",
+            name: "演练：只算不挂",
+            desc: "只把「准备挂哪些」写进日志，不真的挂。用来确认计划对不对。",
+            hint: "会后看「看开机时的记录」，里面有 [DRY] 开头的行。" },
+          { id: "adv_retry", type: "text", key: "mount_retry",
+            name: "挂载失败重试次数",
+            desc: "挂载失败时重试几次（默认 3，填 0 表示不重试）。",
+            hint: "改成 5 试试；还是失败就看「看开机时的记录」里的原因。" },
+          { id: "adv_delay", type: "text", key: "mount_delay",
+            name: "挂载前等待（秒）",
+            desc: "开机后先等几秒再挂（默认 0）。",
+            hint: "字体服务慢的机器可以填 3~5。" },
+        ]},
+      { id: "b6", name: "稳定性 / 救援",
+        desc: "这几个是给「模块自己把自己搞没了」的情况用的。默认全关 = 保持现有行为。",
+        children: [
+          { id: "sw_no_disable", type: "switch", key: "no_auto_disable", el: "sw_no_auto_disable",
+            name: "别自动停用模块",
+            desc: "现在连续两次开不了机会自动把模块停用。打开后不会自己停（方便排查，但要你自己留意）。",
+            hint: "排查完记得关回去，不然开不了机时模块不会自救。" },
+          { id: "sw_no_rescue", type: "switch", key: "no_rescue", el: "sw_no_rescue",
+            name: "别自动清字体",
+            desc: "开不了机时模块会把字体清成「无字体」。打开后不清（保留现场给你查）。",
+            hint: "同上：排查用，查完关回去。" },
+          { id: "sw_no_reapply", type: "switch", key: "no_auto_reapply", el: "sw_no_auto_reapply",
+            name: "改设置后不自动重算",
+            desc: "现在改开关会立刻重算一遍计划。打开后只提示「重启生效」，省时间。",
+            hint: "排查时开关多，这个能少等很多。" },
+          { id: "sw_no_selfcheck", type: "switch", key: "no_boot_selfcheck", el: "sw_no_boot_selfcheck",
+            name: "关闭开机自检",
+            desc: "开机时不再做「扫描缓存/计划」的检查，开机快一点，但报告信息会少。",
+            hint: "只是为了快；出问题时建议关掉它。" },
+        ]},
+      { id: "recover", name: "临时关掉 / 对照着试", desc: "不用重启就能判断「到底是不是字体惹的祸」", children: [
+        { id: "umount", name: "先把字体临时撤掉",
+          desc: "马上回到手机原来的字体（不改任何文件），重启就恢复。",
+          hint: "撤掉后不闪退了、图标回来了 → 就是换字体引起的；还是老样子 → 跟字体无关。",
+          safe: 2, cmd: "umount" },
+        { id: "remount", name: "再把字体挂回去",
+          desc: "把刚才撤掉的字体重新弄回来，跟上面那条对着试。",
+          hint: "挂回去之后问题又出现 = 两次都印证，可以确定是字体问题。",
+          safe: 2, cmd: "remount" },
+        { id: "rescan", name: "重新数一遍系统的字体",
+          desc: "把之前记的清单全删掉、重新扫一遍（刚升级过系统、或者数量看着不对时用）。",
+          hint: "扫完再回来点「一眼看概况」，看准备换的数量有没有变；然后重新应用一次字体。",
+          safe: 3, cmd: "rescan" },
+        { id: "replan", name: "重新算一遍「准备换哪些」",
+          desc: "清单是空的时候、或者明显不对的时候，重新算一遍。",
+          hint: "算完看「一眼看概况」：准备换的数量不是 0 就说明好了，重启生效。",
+          safe: 3, cmd: "replan" },
+      ]},
+    ]
+  },
+  {
+    id: "oneui", name: "三星专区",
+    desc: "只对三星手机有用。三星用户如果「某个图标变成方框」「某个 App 显示怪」，就一个一个开关试，一次只改一个，改完重启再看。",
+    children: [
+      { id: "sw_ttc", type: "switch", key: "ttc_replace", el: "sw_ttc_replace",
+        name: "换掉中文合集（.ttc）",
+        desc: "三星的中文是从一个「大包」里读的（一个文件里装了日/韩/简中/繁中四套）。"
+            + "开着：把你的字体打包成一样的大包顶上去，中文也会跟着变；关掉：这个包不动。",
+        hint: "关掉后某个图标回来了 → 那个图标就画在这个包里；代价是中文只能变一半。" },
+      { id: "sw_sam", type: "switch", key: "keep_samsung", el: "sw_keep_samsung",
+        name: "三星自己的字体别动",
+        desc: "三星那些名字里带 Samsung 的字体，经常装着图标和界面字。开着就不换它们。",
+        hint: "打开后图标恢复正常 → 说明就是它们被换掉的。" },
+      { id: "sw_prod", type: "switch", key: "skip_product", el: "sw_skip_product",
+        name: "别动 /product/fonts 这个文件夹",
+        desc: "三星把一部分界面/图标字体单独放在这个文件夹里。开着就整个文件夹都不碰。",
+        hint: "打开后某个 App 的图标/界面好了 → 问题就在这个文件夹里的字体。" },
+        { id: "act_theme_restore_s", name: "把主题字体还原成原件", desc: "三星主题里选过的字体被替换过的话，这里还原。", hint: "还原完重启。", safe: 2, cmd: "theme-restore" },
+      { id: "sw_allow_sym_sam", type: "switch", key: "allow_sym", el: "sw_allow_sym_sam", danger: 1,
+        name: "把 emoji / 符号字体也换成你的字体（默认关）",
+        desc: "打开后会替换下面这些（都在 /system/fonts）："
+            + "SamsungColorEmoji.ttf（三星彩色表情＋部分图标，定位图钉就在这类）、"
+            + "NotoColorEmoji.ttf / NotoColorEmojiFlags.ttf / NotoColorEmojiLegacy.ttf（谷歌表情、国旗）、"
+            + "NotoSansSymbols-Regular-Subsetted.ttf / -Subsetted2.ttf（黑白符号）。"
+            + "旧版本从不替换它们；换掉之后这些图标会消失或变成方框。",
+        hint: "只有在排查「是不是这些字体导致的问题」时才打开；用完记得关回去，改完要重启。" },
+      { id: "sw_keep_secnum", type: "switch", key: "keep_secnum", el: "sw_keep_secnum",
+        name: "保留三星数字字体（SECNum，默认关）",
+        desc: "SECNum-VF / SECNumFixed-VF 属于系统的 sec-num 数字族，管数字（时钟、电量、部分界面数字）。"
+            + "默认会换（和旧版一样）；如果你发现数字变方块或样式怪，再打开它保持三星原样。",
+        hint: "跟定位图标无关 —— 图标是 emoji / SECFallback 那一类。" },
+      { id: "adv_force_list", type: "text", key: "force_list",
+        name: "强制替换名单（填了必换）",
+        desc: "把字体名用逗号分隔填进来，这些**一定**会换成你的字体 —— "
+            + "哪怕它本来在保护名单里、哪怕是 emoji/符号字体。"
+            + "想全换就把这几个都填上：SamsungColorEmoji.ttf,NotoColorEmoji.ttf,NotoSansSymbols-Regular-Subsetted2.ttf",
+        hint: "代价：这些字体里的图标会消失或变方框。不确定就先留空。" },
+    ]
+  },
+  {
+    id: "hyperos", name: "澎湃OS / MIUI 专区",
+    desc: "小米、红米、POCO 用。这里的开关只影响 MiSans 这类自家字体。",
+    children: [
+      { id: "sw_keep_misans", type: "switch", key: "keep_misans", el: "sw_keep_misans",
+        name: "保留 MiSans 系列字体",
+        desc: "名字里带 MiSans 的字体（小米的系统界面字）不替换。",
+        hint: "打开后界面字保持小米原样；如果换完字后按钮/标题怪怪的，试试这个。" },
+      { id: "sw_theme_fonts_h", type: "switch", key: "theme_fonts", el: "sw_theme_fonts",
+        name: "也替换「主题 / 字体样式」里选的那份",
+        desc: "小米会把你在设置里选的字体单独存一份，它比系统字体优先。开了才会一起换。",
+        hint: "开完去设置里看字体样式，应该变成你的字体。" },
+      { id: "sw_skip_product_h", type: "switch", key: "skip_product", el: "sw_skip_product_1",
+        name: "跳过 /product/fonts",
+        desc: "小米把一部分界面/加粗字体放在这个目录。开了整目录不动。",
+        hint: "换完某些界面没变、或加粗异常时，试着打开这个。" },
+      { id: "info_hyperos", name: "看看这台机器换了哪些",
+        desc: "跑一次挂载概况：计划几条、实际挂几条、当前用的是哪套。",
+        hint: "「准备 154 / init 视角 154」= 正常。", safe: 1, cmd: "status" },
+        { id: "sw_keep_mitype", type: "switch", key: "keep_mitype", el: "sw_keep_mitype", name: "保留 Mitype / 数字字体", desc: "小米的数字、时钟类字体（Mitype）不替换。", hint: "换完字后时间/数字样式怪怪的，打开这个试试。" },
+        { id: "act_theme_restore_h", name: "把主题字体还原成原件", desc: "小米主题里选过的字体，如果被模块改过，这里能还原回原文件。", hint: "还原完重启；之后如果还想换，重新应用一次字体即可。", safe: 2, cmd: "theme-restore" },
+        { id: "act_hits_h", name: "看这台机器的槽位来源", desc: "看有多少来自机型清单、有多少是扫出来的，以及识别成了哪个系统。", hint: "扫出来的太多时，可以打开「只换机型清单」。" , safe: 1, cmd: "targets-hits" },
+    ]
+  },
+  {
+    id: "flyme", name: "Flyme 专区",
+    desc: "魅族用。Flyme 的界面字是「可变字体」，WebView 对它比较敏感。",
+    children: [
+      { id: "sw_skip_vf_f", type: "switch", key: "skip_vf", el: "sw_skip_vf",
+        name: "保留可变字体（FlymeSansVF 这类）",
+        desc: "名字带 VF 的字体不替换。魅族上出现过「换完字体后任何 WebUI 一点就闪退」，"
+            + "如果遇到，打开这个再重启试试。",
+        hint: "打开后界面字可能还是原来的；但至少不会闪退。" },
+      { id: "sw_keep_flyme", type: "switch", key: "keep_flyme", el: "sw_keep_flyme",
+        name: "保留 Flyme 自家字体",
+        desc: "名字里带 flyme 的字体一律不替换（FlymeFont、FlymeSans 等）。",
+        hint: "跟上一项配合用；两个都开最保守。" },
+      { id: "sw_no_theme_phys_f", type: "switch", key: "no_theme_phys", el: "sw_no_theme_phys",
+        name: "别动主题里的字体文件",
+        desc: "魅族主题商店里选的字体是「真替换」写入的。打开后不碰这些文件（更安全，但主题字不变）。",
+        hint: "如果担心模块动了你的文件，就打开它。" },
+      { id: "info_flyme", name: "看这次开机的记录",
+        desc: "看 post-fs-data / service 有没有跑、有没有报错。",
+        hint: "缺 post-fs-data = 管理器没执行模块脚本。", safe: 1, cmd: "boot" },
+        { id: "act_theme_restore_f", name: "把主题字体还原成原件", desc: "Flyme 主题里选的字体被模块物理替换过的话，这里还原。", hint: "还原完重启。", safe: 2, cmd: "theme-restore" },
+        { id: "sw_skip_vf_f2", type: "switch", key: "ttc_replace", el: "sw_ttc_replace_2", name: "替换中文合集（.ttc）", desc: "Flyme 的中文有时也走合集。关掉后中文只靠主字体那部分。", hint: "关掉后中文只变一半但更稳。" },
+        { id: "sw_flyme_core", type: "switch", key: "flyme_core", el: "sw_flyme_core",
+          name: "只换主字体（保守模式）",
+          desc: "只替换英文/中文主字体那 30 来个（Roboto、FlymeSans、MeizuSans、FlymeFont 这些），"
+              + "其它几十种冷门文字字体一律不动 —— 这最接近旧版本（4.4.2 及更早）实际的效果。",
+          hint: "如果换完字体就闪退，先打开这个再试。" },
+        { id: "sw_flyme_scan", type: "switch", key: "flyme_scan", el: "sw_flyme_scan",
+          name: "允许在 Flyme 上扫描本机字体",
+          desc: "默认**不扫**（和 4.4.8 一致）：槽位只来自机型清单，约 30 来个。"
+              + "打开后会扫描本机全部字体，槽位涨到 96 个左右。",
+          hint: "真机上扫描后出现过「任何 WebUI 一点就闪退」，除非你要试，否则别开。" },
+        { id: "sw_theme_phys_flyme2", type: "switch", key: "theme_phys", el: "sw_theme_phys_flyme2", danger: 1,
+          name: "主题字体写真实文件（默认关）",
+          desc: "打开后，模块会把字体**真的复制**进 /data 主题字体目录"
+              + "（/data/customizecenter/font/flymeFont.ttf 这类）。"
+              + "魅族这类系统只认文件本身的修改时间，纯挂载它不认，所以要主题字体也变只能靠复制。",
+          hint: "代价：会覆盖你的主题字体文件（原件有备份，可还原）；真机上出现过「复制后任何 WebUI 闪退」，只在确实需要时开。" },
+    ]
+  },
+  {
+    id: "coloros", name: "ColorOS / realme 专区",
+    desc: "OPPO、一加、realme 用。重点是「主题字体目录」和 product 分区。",
+    children: [
+      { id: "sw_no_theme_phys_c", type: "switch", key: "no_theme_phys", el: "sw_no_theme_phys_1",
+        name: "别动主题里的字体文件",
+        desc: "ColorOS 的主题字体放在 /data/format_unclear/font 等目录，模块会物理替换。"
+            + "打开后不碰这些文件（更安全，但主题字不变）。",
+        hint: "只想换系统字体、不想动主题的，打开它。" },
+      { id: "sw_skip_product_c", type: "switch", key: "skip_product", el: "sw_skip_product_2",
+        name: "跳过 /product/fonts",
+        desc: "部分 ColorOS 机型把界面字放在 product。开了整目录不动。",
+        hint: "换完某些界面没变时试着打开。" },
+      { id: "info_coloros", name: "看有没有别的模块在抢",
+        desc: "检查还有没有别的模块也往 system/fonts 塞字体。",
+        hint: "有的话先停用另一个模块。", safe: 1, cmd: "conflicts" },
+        { id: "sw_keep_oppo", type: "switch", key: "keep_oppo", el: "sw_keep_oppo", name: "保留 OPPO Sans 系列", desc: "名字里带 OPPOSans / oplus 的字体不替换。", hint: "ColorOS 界面字异常时试着打开。" },
+        { id: "act_theme_restore_c", name: "把主题字体还原成原件", desc: "ColorOS 主题字体目录里的文件被替换过的话，这里还原。", hint: "还原完重启。", safe: 2, cmd: "theme-restore" },
+        { id: "sw_theme_phys_coloros2", type: "switch", key: "theme_phys", el: "sw_theme_phys_coloros2", danger: 1,
+          name: "主题字体写真实文件（默认关）",
+          desc: "打开后，模块会把字体**真的复制**进 /data 主题字体目录"
+              + "（/data/format_unclear/font、/data/oplus/uxres/theme）。"
+              + "魅族这类系统只认文件本身的修改时间，纯挂载它不认，所以要主题字体也变只能靠复制。",
+          hint: "代价：会覆盖你的主题字体文件（原件有备份，可还原）；真机上出现过「复制后任何 WebUI 闪退」，只在确实需要时开。" },
+    ]
+  },
+  {
+    id: "vivo", name: "vivo / iQOO 专区",
+    desc: "vivo、iQOO 用。重点是主题目录 /data/bbkcore/theme、/data/skin/fonts。",
+    children: [
+      { id: "sw_no_theme_phys_v", type: "switch", key: "no_theme_phys", el: "sw_no_theme_phys_2",
+        name: "别动主题里的字体文件",
+        desc: "vivo 的主题字体会被物理替换。打开后不碰（更安全，但主题字不变）。",
+        hint: "担心模块动你文件就打开。" },
+      { id: "sw_skip_vendor_v", type: "switch", key: "skip_vendor_fonts", el: "sw_skip_vendor_fonts_1",
+        name: "跳过 /vendor/fonts",
+        desc: "有些 vivo 机型 vendor 里有跟硬件相关的字体。",
+        hint: "换完出现奇怪的显示问题就打开。" },
+      { id: "info_vivo", name: "看主题字体备份还在不在",
+        desc: "列出被物理替换过、以及备份在不在。",
+        hint: "切「无字体」重启会自动还原。", safe: 1, cmd: "theme" },
+        { id: "sw_keep_vivo", type: "switch", key: "keep_vivo", el: "sw_keep_vivo", name: "保留 vivo 自家字体", desc: "名字里带 vivoFont 的字体不替换。", hint: "界面字异常时试着打开。" },
+        { id: "act_theme_restore_v", name: "把主题字体还原成原件", desc: "vivo 主题目录里的字体被替换过的话，这里还原。", hint: "还原完重启。", safe: 2, cmd: "theme-restore" },
+        { id: "sw_theme_phys_vivo2", type: "switch", key: "theme_phys", el: "sw_theme_phys_vivo2", danger: 1,
+          name: "主题字体写真实文件（默认关）",
+          desc: "打开后，模块会把字体**真的复制**进 /data 主题字体目录"
+              + "（/data/bbkcore/theme、/data/skin/fonts）。"
+              + "魅族这类系统只认文件本身的修改时间，纯挂载它不认，所以要主题字体也变只能靠复制。",
+          hint: "代价：会覆盖你的主题字体文件（原件有备份，可还原）；真机上出现过「复制后任何 WebUI 闪退」，只在确实需要时开。" },
+    ]
+  },
+  {
+    id: "honor", name: "荣耀 / 华为专区",
+    desc: "这两个系统默认就会保护自家主字体（HnFont / HarmonyOS Sans），这里只是给你看清状态。",
+    children: [
+      { id: "info_honor1", name: "看这台机器到底换了多少",
+        desc: "跑一次挂载概况。",
+        hint: "数量明显偏少 → 可能被保护名单挡了，正常。", safe: 1, cmd: "status" },
+      { id: "info_honor2", name: "看冲突模块",
+        desc: "荣耀/华为常见装着好几个字体相关模块。",
+        hint: "有冲突就先停用别的。", safe: 1, cmd: "conflicts" },
+        { id: "sw_keep_harmony", type: "switch", key: "keep_harmony", el: "sw_keep_harmony", name: "保留 HarmonyOS Sans / HnFont", desc: "名字里带 harmonyos / hnfont / hwsans 的字体不替换。", hint: "荣耀/华为界面字异常时用。" },
+        { id: "act_hits_honor", name: "看这台机器的槽位来源", desc: "看识别成哪个系统、清单命中多少。", hint: "识别错了会换错地方。", safe: 1, cmd: "targets-hits" },
+    ]
+  },
+  {
+    id: "aosp", name: "原生 / 类原生专区",
+    desc: "Pixel、LineageOS、类原生。没有厂商目录，基本都是标准 AOSP 字体。",
+    children: [
+      { id: "info_aosp1", name: "看槽位判定",
+        desc: "逐条核对：目标在不在、源在不在、挂上没挂上。",
+        hint: "未挂载数不是 0 就往上翻，看是哪几条。", safe: 1, cmd: "slots" },
+      { id: "info_aosp2", name: "看 WebView 版本",
+        desc: "类原生最常见的「切完字闪退」其实是 WebView 版本不匹配。",
+        hint: "版本很旧就先更新 WebView。", safe: 1, cmd: "webview" },
+        { id: "sw_keep_roboto", type: "switch", key: "keep_roboto", el: "sw_keep_roboto", name: "保留 Roboto 系列", desc: "原生系统的主字体是 Roboto。想保留英文原样就打开它。", hint: "打开后英文/数字不变，只换中文。" },
+        { id: "act_hits_aosp", name: "看这台机器的槽位来源", desc: "看有多少来自机型清单、多少是扫出来的。", hint: "类原生通常扫出来的很多。", safe: 1, cmd: "targets-hits" },
+    ]
+  },
+  {
+    id: "danger", name: "危险区（改完可能出问题）",
+    desc: "这里的开关**默认全关**，而且默认行为是最安全的。只有排查问题、而且知道后果时才打开；"
+        + "开完记得关回去。",
+    children: [
+      { id: "sw_allow_sym", type: "switch", key: "allow_sym", el: "sw_allow_sym", danger: 1,
+        name: "允许替换符号 / emoji 字体",
+        desc: "默认这些字体是**强制跳过**的。打开后它们也会被换成你的字体。",
+        hint: "后果：emoji 和图标会大面积变成方块/空白。只在「怀疑某个图标字体导致问题」时用。" },
+      { id: "sw_allow_vadj", type: "switch", key: "allow_vadj", el: "sw_allow_vadj", danger: 1,
+        name: "允许替换「粗细调节」族",
+        desc: "默认这些族是被强制跳过的（它们负责系统界面的粗细滑块）。打开后也会换。",
+        hint: "后果：系统的「字体粗细」滑块可能失效，或界面字变得不均匀。" },
+      { id: "sw_ttc_all_d", type: "switch", key: "ttc_all_faces", el: "sw_ttc_all_faces_2", danger: 1,
+        name: "合集里所有字体都换（连日语/韩语）",
+        desc: "默认只换中文那几号 face。打开后连日语、韩语那几号也换成你的字体。",
+        hint: "后果：你的字体没有假名/谚文字形时，日文/韩文界面全变方块。" },
+      { id: "sw_force_mgr", type: "switch", key: "force_manager", el: "sw_force_manager", danger: 1,
+        name: "强制交给管理器挂载",
+        desc: "等价于把「自带挂载」关掉、一律交给 Root 管理器或元模块挂。",
+        hint: "后果：没装元模块（Hybrid Mount 等）时，字体根本挂不上去。" },
+      { id: "sw_chcon", type: "switch", key: "chcon_fonts", el: "sw_chcon_fonts", danger: 1,
+        name: "给字体补 system_file 标签（chcon）",
+        desc: "默认**不补**（和 4.4.2 及更早一致）。补了以后 WebView 渲染进程能直接读你的字体，"
+            + "但真机上出现过「一补就任何 WebUI 闪退」。",
+        hint: "只有确认「WebView 里字体没变」时才试；崩了就关回去。" },
+    ]
+  },
+
+];
+
+let __advTaps = 0, __advTimer = null;
+let __advPath = [];          // 当前路径（节点 id 数组）
+
+function advFind(path) {
+  let list = ADV_TREE, node = null;
+  for (const id of path) {
+    node = (list || []).filter(Boolean).find(x => x && x.id === id);
+    if (!node) return null;
+    list = node.children;
+  }
+  return node ? node : { children: ADV_TREE };
+}
+
+/* ===========================================================================
+   ★ 2026-10-25 界面自定义（只改界面，不碰字体逻辑）
+   存在 localStorage；可导出/导入 JSON；背景图存到 webroot/bg.jpg
+   =========================================================================== */
+const UI_KEY = "cfs_ui";
+const UI_DEF = {
+  accent: "", theme: "", titleSize: "", radius: "", density: "", listStyle: "",
+  anim: "1", hideUpdate: "0", hideGoogle: "0", hideFeedback: "0", hideDebug: "0",
+  simple: "0", longPress: "1", dblclick: "1", noUpdateCheck: "0",
+  names: {}, bg: "", bgDim: "35", bgBlur: "6",
+};
+let UI = Object.assign({}, UI_DEF);
+try { Object.assign(UI, JSON.parse(localStorage.getItem(UI_KEY) || "{}")); } catch (e) {}
+
+/* ===========================================================================
+   ★ 2026-10-25 界面自定义 v2
+   · 背景图：画在 <html> 上，body 用半透明底色 + 暗化遮罩（不再整页透底）
+   · 循环项：右边显示「当前：xxx」
+   · 强调色：预设色循环 + 自定义输入
+   =========================================================================== */
+const UI_CYCLE = {
+  theme: {
+    label: "主题配色",
+    values: ["", "#f59e0b", "#a855f7", "#22c55e", "#e5e7eb"],
+    names: ["默认", "琥珀", "赛博紫", "护眼绿", "纸白"],
+  },
+  accent: {
+    label: "强调色",
+    values: ["", "#ef4444", "#f97316", "#22c55e", "#3b82f6", "#a855f7", "#9ca3af"],
+    names: ["跟随主题", "红", "橙", "绿", "蓝", "紫", "灰"],
+  },
+  radius: { label: "卡片圆角", values: ["", "m", "s"], names: ["大", "中", "小"] },
+  density: { label: "卡片紧凑度", values: ["", "dense"], names: ["宽松", "紧凑"] },
+  listStyle: { label: "字体卡片样式", values: ["", "compact"], names: ["大卡片", "紧凑列表"] },
+  preset: { label: "背景预设", values: ["1", "2", "3"], names: ["预设一", "预设二", "预设三"] },
+  textMode: { label: "文字对比", values: ["", "light", "dark"], names: ["自动", "强制浅色", "强制深色"] },
+  titleSize: { label: "标题字号", values: ["", "m", "l", "s"], names: ["默认", "中", "大", "小"] },
+};
+function uiCycleIndex(name) {
+  const def = UI_CYCLE[name];
+  if (!def) return 0;
+  const cur = (name === "accent" || name === "theme") ? (UI.accent || "") : (UI[name] || "");
+  const i = def.values.indexOf(cur);
+  return i < 0 ? 0 : i;
+}
+function uiCycleLabel(name) {
+  if (name === "preset" && !UI.preset) return "自定义";
+  const def = UI_CYCLE[name];
+  if (!def) return "";
+  return def.names[uiCycleIndex(name)] || def.names[0];
+}
+function uiSetAccent(v) {
+  UI.accent = String(v || "");
+  uiSave();
+}
+/* ★ 2026-10-25 背景预设：一键套用 暗化/模糊/卡片透明度 */
+const UI_PRESETS = {
+  "1": { bgDim: "70", bgBlur: "0", cardAlpha: "30", theme: "dark", name: "预设一（暗 70 / 透 30 / 深色）" },
+  "2": { bgDim: "0", bgBlur: "0", cardAlpha: "85", theme: "light", name: "预设二（亮 / 透 85 / 浅色）" },
+  "3": { bgDim: "0", bgBlur: "20", cardAlpha: "30", theme: "light", name: "预设三（糊 20 / 透 30 / 浅色）" },
+};
+function uiApplyPreset(key) {
+  const p = UI_PRESETS[key];
+  if (!p) return;
+  UI.bgDim = p.bgDim;
+  UI.bgBlur = p.bgBlur;
+  UI.cardAlpha = p.cardAlpha;
+  UI.preset = key;
+  try {
+    document.documentElement.setAttribute("data-theme", p.theme);
+    localStorage.setItem("cf_theme", p.theme);
+  } catch (e) {}
+  uiSave();
+  try { uiApplyBackground(); } catch (e) {}
+  try { uiApplyCardAlpha(); } catch (e) {}
+  try { uiApplyThemeColors(); } catch (e) {}
+  try { advRender(); } catch (e) {}
+}
+
+function uiCycleNext(name) {
+  const def = UI_CYCLE[name];
+  if (!def) return;
+  const i = (uiCycleIndex(name) + 1) % def.values.length;
+  const v = def.values[i];
+  if (name === "preset") { uiApplyPreset(v); showToast("已套用：" + uiCycleLabel("preset")); return; }
+  if (name === "accent" || name === "theme") UI.accent = v;   // 主题配色 = 强调色
+  else UI[name] = v;
+  uiSave();
+  showToast(def.label + "：" + def.names[i]);
+  advRender();
+}
+/* ★ 2026-10-25：滑块 / 透明度 / 文字对比 */
+var _numTimer = null;
+function uiSetNum(field, v) {
+  const n = parseInt(v, 10);
+  UI[field] = isNaN(n) ? "" : String(n);
+  if (field === "bgDim" || field === "bgBlur" || field === "cardAlpha") UI.preset = "";
+  const lab = document.getElementById("adv_lab_" + field);
+  if (lab) lab.textContent = UI[field] + (field === "bgBlur" ? "px" : "%");
+  // 只更新样式，不重绘整页 —— 否则拖动时一直闪
+  try { uiApplyBackground(); } catch (e) {}
+  try { uiApplyCardAlpha(); } catch (e) {}
+  try { uiApplyThemeColors(); } catch (e) {}
+  // 停手 300ms 后再存盘
+  if (_numTimer) clearTimeout(_numTimer);
+  _numTimer = setTimeout(() => { try { uiSave(); } catch (e) {} }, 300);
+}
+function uiHexToRgb(hex) {
+  let h = String(hex || "").trim().replace("#", "");
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return null;
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+function uiApplyCardAlpha() {
+  const a = Math.max(30, Math.min(100, parseInt(UI.cardAlpha || "100", 10))) / 100;
+  // 只控制透明度，底色交给主题（这样切深浅色卡片会跟着变）
+  document.documentElement.style.setProperty("--card-alpha", String(a));
+  // 彩色按钮也用同一个透明度（有壁纸时才用 --accent-a，没有时回落到 --accent）
+  let acc = UI.accent || "";
+  if (!acc) {
+    try { acc = (getComputedStyle(document.documentElement).getPropertyValue("--accent") || "").trim(); } catch (e) {}
+  }
+  const rgb = (typeof uiHexToRgb === "function") ? uiHexToRgb(acc) : null;
+  if (rgb) document.documentElement.style.setProperty("--accent-a", "rgba(" + rgb.join(",") + "," + a + ")");
+  else document.documentElement.style.removeProperty("--accent-a");
+}
+function uiApplyTextMode() {
+  const body = document.body;
+  const hasBg = !!UI.bg;
+  body.classList.toggle("cfs-onbg", hasBg);
+  const mode = UI.textMode || "";
+  let color = "";
+  if (hasBg) {
+    if (mode === "light") color = "#ffffff";
+    else if (mode === "dark") color = "#111111";
+    // 自动：不覆盖 --text，交给主题 —— 这样切深浅色文字也会跟着变
+  }
+  if (color) document.documentElement.style.setProperty("--text", color);
+  else document.documentElement.style.removeProperty("--text");
+}
+
+/* ★ 2026-10-25：按钮色（主题配色）与强调色分开 */
+function uiApplyThemeColors() {
+  const root = document.documentElement;
+  try {
+    const _light = document.documentElement.getAttribute("data-theme") === "light";
+    let _tc = _light ? "#111111" : "#ffffff";
+    if (UI.textMode === "light") _tc = "#ffffff";
+    else if (UI.textMode === "dark") _tc = "#111111";
+    root.style.setProperty("--btn-text", _tc);
+  } catch (e) {}
+  const btn = UI.btn || "";
+  const acc = UI.accent || "";
+  if (btn) root.style.setProperty("--btn", btn);
+  else root.style.removeProperty("--btn");
+  if (acc) root.style.setProperty("--accent", acc);
+  else root.style.removeProperty("--accent");
+
+  // 背景泛光：用主题配色淡淡地染一层
+  if (btn) {
+    const rgb = uiHexToRgb(btn);
+    root.style.setProperty("--glow", rgb ? ("rgba(" + rgb.join(",") + ",.18)") : btn);
+  } else {
+    root.style.removeProperty("--glow");
+  }
+
+  // 有壁纸时：按钮用同一个透明度（跟卡片一致）
+  if (UI.bg) {
+    const a = Math.max(30, Math.min(100, parseInt(UI.cardAlpha || "100", 10))) / 100;
+    const base = uiHexToRgb(btn || acc);
+    if (base) root.style.setProperty("--btn-a", "rgba(" + base.join(",") + "," + a + ")");
+    else root.style.removeProperty("--btn-a");
+  } else {
+    root.style.removeProperty("--btn-a");
+  }
+}
+function uiSetBtn(v) { UI.btn = String(v || ""); uiSave(); }
+function uiSetAccent(v) { UI.accent = String(v || ""); uiSave(); }
+function uiToggleLightDark() {
+  const cur = document.documentElement.getAttribute("data-theme") === "light";
+  const next = cur ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("cf_theme", next); } catch (e) {}
+  try { cfsSyncDimWithTheme(); } catch (e) {}
+  try { uiApplyThemeColors(); } catch (e) {}
+  try { advRender(); } catch (e) {}
+  showToast(next === "light" ? "已切到浅色" : "已切到深色");
+}
+
+
+
+
+
+/* ★ 2026-10-25 只在「真正旋转/改窗口」时重算壁纸尺寸，键盘弹出不参与 */
+(function cfsBgSizeLock() {
+  let lastW = 0, lastH = 0;
+  function sync(force) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    // 键盘弹出时高度会明显缩水，这种情况不更新
+    // 只在宽度变化（旋转/分屏）时重算；键盘只改高度，一律忽略
+    if (!force && Math.abs(w - lastW) < 4) return;
+    lastW = w; lastH = h;
+    document.documentElement.style.setProperty("--bg-w", w + "px");
+    document.documentElement.style.setProperty("--bg-h", h + "px");
+  }
+  sync(true);
+  window.addEventListener("orientationchange", () => setTimeout(() => sync(true), 260));
+  window.addEventListener("resize", () => sync(false));
+})();
+
+
+
+/* ★ 2026-10-25 输入法检测：聚焦输入框就算键盘弹出（不依赖视口变化） */
+(function cfsKeyboardDetect() {
+  const root = document.documentElement;
+  let timer = null;
+  function setKB(on) {
+    if (on) root.classList.add("cfs-kb");
+    else root.classList.remove("cfs-kb");
+  }
+  function isField(el) {
+    if (!el) return false;
+    const t = (el.tagName || "").toUpperCase();
+    return t === "INPUT" || t === "TEXTAREA" || el.isContentEditable;
+  }
+  document.addEventListener("focusin", function (e) {
+    if (isField(e.target)) { clearTimeout(timer); setKB(true); }
+  }, true);
+  document.addEventListener("focusout", function (e) {
+    if (isField(e.target)) { clearTimeout(timer); timer = setTimeout(() => {
+      if (!isField(document.activeElement)) setKB(false);
+    }, 260); }
+  }, true);
+  // 兜底：视口高度明显变矮也算键盘弹出
+  let baseH = window.innerHeight || 0;
+  function byViewport() {
+    const vv = window.visualViewport;
+    const h = vv ? vv.height : window.innerHeight;
+    if (h > 0 && h < baseH * 0.82) root.classList.add("cfs-kb");
+    else if (h > baseH * 0.9) { baseH = h; if (!isField(document.activeElement)) root.classList.remove("cfs-kb"); }
+  }
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", byViewport);
+  window.addEventListener("resize", byViewport);
+})();
+
+/* ★ 2026-10-25 头部：关闭键靠右、子页隐藏锁定 */
+(function cfsHeaderFix() {
+  function apply() {
+    ["advSheet", "advConSheet"].forEach(function (id) {
+      var s = document.getElementById(id);
+      if (!s) return;
+      var head = s.querySelector(".sheet-head");
+      if (!head) return;
+      var title = head.querySelector(".sheet-title");
+      if (title) title.style.flex = "0 0 auto";
+      var lock = head.querySelector("#advLockBtn");
+      var sub = (typeof __advPath !== "undefined" && __advPath && __advPath.length > 0);
+      if (lock) {
+        lock.style.flex = "0 0 auto";
+        lock.style.display = sub ? "none" : "";
+      }
+      var back = head.querySelector("#advBackBtn");
+      var close = head.querySelector("#advCloseBtn");
+      if (back) { back.style.marginLeft = "auto"; back.style.marginRight = "8px"; }
+      if (close) {
+        var backShown = back && getComputedStyle(back).display !== "none";
+        close.style.setProperty("margin-left", backShown ? "0" : "auto", "important");
+      }
+    });
+  }
+  window.cfsHeaderFix = apply;
+  setTimeout(() => { try { cfsCheckInstallId(); } catch (e) {} }, 1200);
+
+document.addEventListener("DOMContentLoaded", apply);
+  setTimeout(apply, 300);
+  setTimeout(apply, 1500);
+})();
+
+
+function uiApplyBackground() {
+  const body = document.body;
+  const dim = Math.max(0, Math.min(90, parseInt(UI.bgDim || "45", 10))) / 100;
+  const blurRaw = Math.max(0, Math.min(20, parseInt(UI.bgBlur || "0", 10)));
+  const dimOver = Math.max(0, dim - 0.5) / 0.4;
+  const blur = Math.round(blurRaw * (1 - Math.min(1, dimOver) * 0.7) * 10) / 10;
+  let img = document.getElementById("cfsBg");
+  const old = document.getElementById("cfsBgDim");
+  if (old) old.remove();                 // 不再用遮罩层
+  if (!UI.bg) {
+    if (img) img.remove();
+    body.classList.remove("cfs-hasbg");
+    try { document.documentElement.style.removeProperty("--bg-img"); } catch (e) {}
+    return;
+  }
+  if (!img) {
+    img = document.createElement("img");
+    img.id = "cfsBg";
+    img.alt = "";
+    body.insertBefore(img, body.firstChild);
+  }
+  const isData = String(UI.bg).indexOf("data:") === 0;
+  // 给二级界面用的壁纸变量（它自己铺一层，盖住主界面）
+  try {
+    const _u = isData ? UI.bg : (UI.bg + "?t=" + (UI.bgT || 1));
+    document.documentElement.style.setProperty("--bg-img", "url('" + _u + "')");
+    document.documentElement.style.setProperty("--bg-dim", String(dim));
+    document.documentElement.style.setProperty("--bg-blur-px", blur + "px");
+    document.documentElement.style.setProperty("--bg-bright", String(1 - dim));
+  } catch (e) {}
+  try {
+    const _w = window.__bgW || window.innerWidth;
+    const _h = window.__bgH || window.innerHeight;
+    document.documentElement.style.setProperty("--bg-w", _w + "px");
+    document.documentElement.style.setProperty("--bg-h", _h + "px");
+    img.style.width = _w + "px";
+    img.style.height = _h + "px";
+  } catch (e) {}
+  img.src = isData ? UI.bg
+                   : (UI.bg + (UI.bg.indexOf("?") >= 0 ? "&" : "?") + "t=" + (UI.bgT || 1));
+  // ★ 只改图片本身：变暗 + 模糊，其它元素一点都不碰
+  const parts = [];
+  if (dim > 0) parts.push("brightness(" + (1 - dim).toFixed(3) + ")");
+  if (blur > 0) parts.push("blur(" + blur + "px)");
+  img.style.filter = parts.join(" ");
+  img.style.transform = blur > 0 ? "scale(1.06)" : "";
+  body.classList.add("cfs-hasbg");
+}
+function advAccentHelp() {
+  showToast("强调色 = 按钮/开关/进度条的颜色；在上面输入框填色号，或点下面「预设强调色」");
+}
+
+
+
+
+
+/* ★ 2026-10-26 卸载残留修复：
+   壁纸/界面设置存在 WebView 的 localStorage，卸载模块不会清除，
+   于是"卸载重装后壁纸还在"。这里用安装时写入的 install_id 判断：
+   安装号变了 = 新安装 → 清掉本地界面设置（含壁纸），回到默认外观。 */
+async function cfsCheckInstallId() {
+  try {
+    const cur = String(await ksuExec(`cat ${LIB}/.install_id 2>/dev/null`) || "").trim();
+    if (!cur) return;
+    const old = localStorage.getItem("cf_install_id") || "";
+    if (old === cur) return;
+    localStorage.setItem("cf_install_id", cur);
+    if (old) {
+      // 不是首次运行，而是"重装/更新"：把界面与壁纸重置
+      try { localStorage.removeItem(UI_KEY); } catch (e) {}
+      try { localStorage.removeItem("cf_theme"); } catch (e) {}
+      try { localStorage.removeItem("cf_lib_collapsed"); } catch (e) {}
+      try { localStorage.removeItem("cfs_adv_unlocked"); } catch (e) {}
+      try { if (typeof UI !== "undefined" && UI) { for (const k of Object.keys(UI)) delete UI[k]; } } catch (e) {}
+      try { if (typeof uiApply === "function") uiApply(); } catch (e) {}
+      try { if (typeof uiApplyBackground === "function") uiApplyBackground(); } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+function uiSave() {
+  try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) {}
+  uiApply();
+}
+function uiSet(k, v) { UI[k] = v; uiSave(); }
+
+function uiApply() {
+  try { uiApplyThemeColors(); } catch (e) {}
+  const b = document.body;
+  if (!b) return;
+  // 强调色
+  const acc = UI.accent || "";
+  if (acc) document.documentElement.style.setProperty("--accent", acc);
+  else document.documentElement.style.removeProperty("--accent");
+  // 标题字号
+  const ts = { s: "14px", m: "16px", l: "18px" }[UI.titleSize] || "";
+  document.querySelectorAll(".section-title span, .sheet-title").forEach(el => {
+    el.style.fontSize = ts || "";
+  });
+  // 圆角
+  const rad = { l: "16px", m: "12px", s: "8px" }[UI.radius] || "";
+  const styleId = "cfs-ui-radius";
+  let st = document.getElementById(styleId);
+  if (!st) { st = document.createElement("style"); st.id = styleId; document.head.appendChild(st); }
+  st.textContent = rad ? (
+    ".switch-row,.status-box,.cardg,.g-btn,.option,.import-main,.batch-btn,.sheet-x,.modal,.fbk-body,.lib-box,.adv-out"
+    + "{border-radius:" + rad + " !important}") : "";
+  // 类切换
+  b.classList.toggle("cfs-noanim", UI.anim === "0");
+  b.classList.toggle("cfs-dense", UI.density === "dense");
+  b.classList.toggle("cfs-flat", UI.radius === "s");
+  b.classList.toggle("cfs-hide-update", UI.hideUpdate === "1");
+  b.classList.toggle("cfs-hide-google", UI.hideGoogle === "1");
+  b.classList.toggle("cfs-hide-feedback", UI.hideFeedback === "1");
+  b.classList.toggle("cfs-simple", UI.simple === "1");
+  b.classList.toggle("cfs-list-compact", UI.listStyle === "compact");
+  uiApplyBackground();
+  try { uiApplyCardAlpha(); } catch (e) {}
+  try { uiApplyTextMode(); } catch (e) {}
+  try { uiApplySections(); } catch (e) {}
+  try { advApplyEntry(); } catch (e) {}
+}
+
+function uiHideRange(titleKey, hide) {
+  document.querySelectorAll(".section-title").forEach(t => {
+    if (String(t.textContent || "").indexOf(titleKey) < 0) return;
+    let el = t, n = 0;
+    while (el && n < 120) {
+      el.style.display = hide ? "none" : "";
+      el = el.nextElementSibling;
+      n++;
+      if (el && el.classList && el.classList.contains("section-title")) break;
+    }
+  });
+}
+function uiApplySections() {
+  uiHideRange("模块更新（GitHub）", UI.hideUpdate === "1" || UI.simple === "1");
+  uiHideRange("Google 应用改用系统字体", UI.hideGoogle === "1" || UI.simple === "1");
+  uiHideRange("遇到问题？抓日志", UI.hideFeedback === "1" || UI.simple === "1");
+  uiHideRange("完整报告", UI.simple === "1");
+}
+
+
+/* ★ 2026-10-26 壁纸压缩：超过 4MB 的图先缩到最长边 2200、JPEG 0.85 再上传 */
+async function cfsShrinkImage(file, maxSide, quality) {
+  maxSide = maxSide || 2200;
+  quality = quality || 0.85;
+  try {
+    const bmp = await createImageBitmap(file);
+    const s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * s));
+    const h = Math.max(1, Math.round(bmp.height * s));
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const g = c.getContext("2d");
+    g.drawImage(bmp, 0, 0, w, h);
+    const blob = await new Promise(r => c.toBlob(r, "image/jpeg", quality));
+    if (!blob) return file;
+    return new File([blob], "bg.jpg", { type: "image/jpeg" });
+  } catch (e) {
+    return file;
+  }
+}
+
+async function uiPickBg() {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = "image/*";
+  inp.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0";
+  document.body.appendChild(inp);          // ★ 必须挂到 DOM，某些 WebView 不挂上不弹选择器
+  inp.onchange = async () => {
+    let f = inp.files && inp.files[0];
+    try { inp.remove(); } catch (e) {}
+    if (!f) return;
+    // ★ 2026-10-26 按作者要求：原图直接导入，不压缩
+    //   上限放宽到 24MB（再大分块写入会明显变慢，属于保护而非限制）
+    const BG_MAX = 24 * 1024 * 1024;
+    if (f.size > BG_MAX) { showToast("这张图超过 24MB，换一张吧"); return; }
+    showToast("读取图片中（" + Math.round(f.size / 1024) + " KB）…");
+    let b64 = "", dataUrl = "";
+    try {
+      dataUrl = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result || ""));
+        fr.onerror = () => rej(new Error("读取失败"));
+        fr.readAsDataURL(f);
+      });
+      b64 = dataUrl.split(",")[1] || "";
+    } catch (e) { showToast("读不出这张图：" + errText(e)); return; }
+    if (!b64) { showToast("读不出这张图（空数据）"); return; }
+
+    // 小图：直接存成 data URL，纯前端、立刻生效
+    if (f.size <= 1200 * 1024) {
+      UI.bg = dataUrl;
+      UI.bgT = Date.now();
+      uiSave();
+      try { advRender(); } catch (e) {}
+      try { refreshAll(); } catch (e) {}
+      showToast("背景已设置（" + Math.round(f.size / 1024) + " KB）");
+      return;
+    }
+
+    // 大图：分块写文件
+    const CH = 120000;
+    let ok = true, sz = 0;
+    try {
+      await ksuExec(": > " + MODDIR + "/webroot/bg.b64");
+      for (let off = 0; off < b64.length; off += CH) {
+        await ksuExec("printf '%s' '" + b64.slice(off, off + CH) + "' >> " + MODDIR + "/webroot/bg.b64");
+      }
+      await ksuExec("base64 -d " + MODDIR + "/webroot/bg.b64 > " + MODDIR + "/webroot/bg.jpg 2>/dev/null; rm -f " + MODDIR + "/webroot/bg.b64; chmod 644 " + MODDIR + "/webroot/bg.jpg");
+      sz = parseInt(String(await ksuExec("wc -c < " + MODDIR + "/webroot/bg.jpg")).trim(), 10) || 0;
+      if (sz < 1000) ok = false;
+    } catch (e) { ok = false; }
+    if (!ok) { showToast("大图写不进去（" + sz + " 字节），换 1MB 以内的图"); return; }
+    UI.bg = "./bg.jpg";
+    UI.bgT = Date.now();
+    try { if (!UI.bgBlur || UI.bgBlur === "0") UI.bgBlur = "12"; if (!UI.bgDim || UI.bgDim === "35") UI.bgDim = "45"; if (!UI.cardAlpha || UI.cardAlpha === "100") UI.cardAlpha = "78"; } catch (e) {}
+    uiSave();
+    showToast("背景已设置（" + Math.round(sz / 1024) + " KB）");
+  };
+  inp.click();
+}
+
+
+async function uiClearBg() {
+  try { setTimeout(() => { if (window.advRender) advRender(); }, 60); } catch (e) {}
+  UI.bg = ""; uiSave();
+  try { await ksuExec("rm -f " + MODDIR + "/webroot/bg.jpg"); } catch (e) {}
+  showToast("背景已清除");
+}
+
+function uiCycle(key, values, label) {
+  const cur = UI[key] || "";
+  const i = values.indexOf(cur);
+  const next = values[(i + 1) % values.length];
+  uiSet(key, next);
+  showToast(label + "：" + (next || "默认"));
+  advRender();
+}
+
+async function uiExport() {
+  const txt = JSON.stringify(UI, null, 2);
+  const path = "/sdcard/Download/界面设置_" + Date.now() + ".json";
+  try {
+    const b64 = btoa(unescape(encodeURIComponent(txt)));
+    await ksuExec("printf '%s' '" + b64 + "' | base64 -d > " + path);
+    showToast("已导出到 Download");
+  } catch (e) { showToast("导出失败：" + errText(e)); }
+}
+
+function uiImport() {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = "application/json,.json";
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    try {
+      const txt = await f.text();
+      const obj = JSON.parse(txt);
+      Object.assign(UI, obj);
+      uiSave();
+      advRender();
+      showToast("已导入界面设置");
+    } catch (e) { showToast("导入失败：" + errText(e)); }
+  };
+  inp.click();
+}
+
+function uiReset() {
+  UI = Object.assign({}, UI_DEF);
+  uiSave();
+  advRender();
+  showToast("已恢复默认界面");
+}
+
+async function uiSaveModuleDesc() {
+  const inp = document.getElementById("adv_in_mod_desc");
+  if (!inp) return;
+  const v = String(inp.value || "").replace(/[\r\n]/g, " ").trim();
+  try {
+    await ksuExec("sh " + MODDIR + "/adv.sh set-desc '" + v.replace(/'/g, "") + "'");
+    showToast("已写入模块描述（管理器里刷新可见）");
+  } catch (e) { showToast("写入失败：" + errText(e)); }
+}
+
+/* 三套内置配色自定义显示名 */
+function uiName(id) {
+  return (UI.names && UI.names[id]) ? UI.names[id] : "";
+}
+async function uiSaveName(id) {
+  const inp = document.getElementById("adv_in_name_" + id);
+  if (!inp) return;
+  UI.names = UI.names || {};
+  UI.names[id] = String(inp.value || "").trim();
+  uiSave();
+  showToast("已保存名称");
+  try { refreshStatus(); } catch (e) {}
+}
+
+/* 界面自定义的循环切换 + 特殊按钮（被 ADV_TREE 的 cmd 调用） */
+function uiCycleTheme() {
+  const vals = ["", "#f59e0b", "#a855f7", "#22c55e", "#e5e7eb"];
+  const i = vals.indexOf(UI.accent || "");
+  uiSet("accent", vals[(i + 1) % vals.length]);
+  advRender();
+  showToast("已切换配色");
+}
+function uiCycleRadius() { uiCycle("radius", ["", "m", "s"], "卡片圆角"); }
+function uiCycleDensity() { uiCycle("density", ["", "dense"], "卡片密度"); }
+function uiCycleList() { uiCycle("listStyle", ["", "compact"], "卡片样式"); }
+function uiCycleTitle() { uiCycle("titleSize", ["", "m", "l", "s"], "标题字号"); }
+
+/* 长按/双击功能已移除（绑定元素不存在，属于假功能） */
+
+
+function advSync() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.classList.toggle("on", String(v) === "1"); };
+  set("sw_skip_vf", settings.skip_vf);
+  set("sw_ttc_replace", settings.ttc_replace);
+  set("sw_keep_samsung", settings.keep_samsung);
+  set("sw_skip_product", settings.skip_product);
+}
+
+
+/* ★ 2026-10-25：渲染文本框时取值。之前直接调 UI.uiValue（未定义）→ 整层渲染崩掉，
+   表现就是「危险区 / 界面自定义点了没反应」。 */
+function advValue(key) {
+  key = String(key || "");
+  if (key.indexOf("__") === 0) {
+    const map = { "__accent": "accent", "__bgdim": "bgDim", "__bgblur": "bgBlur" };
+    if (key === "__name_none") return (UI.names || {}).builtin_none || "";
+    if (key === "__name_colon") return (UI.names || {}).builtin_colon || "";
+    if (key === "__name_flair") return (UI.names || {}).builtin_flair || "";
+    if (key === "__mod_desc") return "";
+    return map[key] ? (UI[map[key]] || "") : "";
+  }
+  return settings[key] || "";
+}
+
+/* ★ 2026-10-25 进入不匹配的专区：只读（能看，不能改） */
+function cfsZoneReadonly() {
+  if (!__advPath.length) return false;
+  const top = __advPath[0];
+  return !cfsZoneAllowed(top);
+}
+document.addEventListener("click", function (ev) {
+  try {
+    if (!cfsZoneReadonly()) return;
+    const box = document.getElementById("advContent");
+    if (!box || !box.contains(ev.target)) return;
+    const hit = ev.target.closest("button, .switch-row, .sw, select, input, .g-btn, [onclick]");
+    if (!hit) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    showToast("这是 " + cfsZoneName(__advPath[0]) + " 专区，本机不是这个系统");
+  } catch (e) {}
+}, true);
+
+
+/* ★ 2026-10-26 补：面板里会调用它同步开关状态，之前这个函数缺失
+   （无头点检发现 ReferenceError: advSyncFromDump is not defined） */
+async function advSyncFromDump() {
+  try {
+    await ksuExec(`sh ${MODDIR}/fontctl.sh quick 2>/dev/null`);
+  } catch (e) {}
+  try {
+    if (typeof advRender === "function") advRender();
+  } catch (e) {}
+  return true;
+}
+
+function advRender() {
+  const node = advFind(__advPath);
+  const title = document.getElementById("advTitle");
+  const back = document.getElementById("advBackBtn");
+  const box = document.getElementById("advContent");
+  if (!box) return;
+  if (back) back.style.display = __advPath.length ? "" : "none";
+  if (title) title.textContent = __advPath.length ? (node.name || "高级") : "高级（调试用）";
+  try {
+    const _lk = document.getElementById("advLockBtn");
+    if (_lk) _lk.style.display = __advPath.length ? "none" : "";
+    const _bk = document.getElementById("advBackBtn");
+    if (_bk) _bk.style.display = __advPath.length ? "" : "none";
+    try { cfsHeaderFix(); } catch (e) {}
+  } catch (e) {}
+
+  const kids = ((node && node.children) || []).filter(Boolean);
+  if (!kids.length) { box.innerHTML = '<div class="g-hint">（这一层还没有项目）</div>'; return; }
+
+  let h = "";
+  if (node && node.desc && __advPath.length) {
+    h += '<div class="g-hint adv-plain" style="margin:8px 0 12px">' + node.desc + '</div>';
+  }
+  if (cfsZoneReadonly()) {
+    h += '<div class="adv-locked-tip">本机不是 ' + cfsZoneName(__advPath[0]) + ' 系统</div>';
+  }
+  if (!__advPath.length) {
+    h += '<div class="g-hint adv-plain" style="margin:8px 0 12px">'
+       + '这些选项是给「排查问题」用的，默认隐藏。每一项下面都写了<b>它是干嘛的</b>和<b>怎么看结果</b>，'
+       + '看不懂的就别点。改完都要重启才生效。<br><span style="color:#f59e0b">开关状态：' + (SET_VERIFIED === "1" ? "刚读到的" : "上次记录的（点上面「刷新开关状态」重读）") + '</span></div>';
+  }
+  h += '<div class="divider"></div>';
+  kids.forEach(k => { try {          /* item-guard */
+    const risk = k.safe === 2 ? '<span style="color:#f59e0b">· 会改状态（可恢复）</span>'
+      : k.safe === 3 ? '<span style="color:#ef4444">· 会重算/重扫</span>' : '';
+    const tail = risk ? '<div class="d" style="opacity:.85">' + risk + '</div>' : '';
+    const dT = k.danger ? '<span style="color:#ef4444;font-size:11px;margin-left:6px">危险</span>' : '';
+    if (k.type === "switch") {
+      h += '<div class="switch-row fade" onclick="toggleSetting(\'' + k.key + '\')">'
+        + '<div><div class="t"' + (k.danger ? ' style="color:#ef4444"' : '') + '>' + k.name + dT + '</div>'
+        + '<div class="d">' + (k.desc || '') + '</div>'
+        + (k.hint ? '<div class="d" style="opacity:.7">怎么看：' + k.hint + '</div>' : '')
+        + '</div><div class="sw" id="' + k.el + '" data-key="' + k.key + '"></div></div>';
+    } else if (k.cmd) {
+      h += '<div class="switch-row fade" onclick="advRun(\'' + k.cmd + '\',\'' + encodeURIComponent(k.hint || '') + '\',\'' + k.name.replace(/'/g, "") + '\')">'
+        + '<div><div class="t">' + k.name + '</div>'
+        + '<div class="d">' + (k.desc || '') + '</div>' + tail
+        + (k.hint ? '<div class="d" style="opacity:.7">怎么看：' + k.hint + '</div>' : '')
+        + '</div><span class="adv-chip">运行</span></div>';
+    } else if (k.cycle === "preset" && !UI.bg) {
+      h += '<div class="switch-row fade" style="opacity:.5">'
+        + '<div><div class="t">' + k.name + '</div>'
+        + '<div class="d">没设背景图片，预设用不到。</div></div>'
+        + '<div style="color:var(--text-dim);font-size:13px">—</div></div>';
+    } else if (k.cycle === "theme" && UI.bg) {
+      h += '<div class="switch-row fade" style="opacity:.55">'
+        + '<div><div class="t">' + k.name + '</div>'
+        + '<div class="d">有壁纸时配色固定，避免和背景打架（想换配色先清除背景）。</div></div>'
+        + '<div style="display:flex;align-items:center;gap:8px">'
+        + '<span style="color:var(--text-dim);font-size:13px;white-space:nowrap">当前：' + uiCycleLabel(k.cycle) + '</span>'
+        + '<button class="g-btn" style="padding:5px 10px;font-size:12px" onclick="uiCycleNext(\'' + k.cycle + '\')">切换</button>'
+        + '</div></div>';
+    } else if (k.cycle) {
+      h += '<div class="switch-row fade" onclick="uiCycleNext(\'' + k.cycle + '\')">'
+        + '<div><div class="t">' + k.name + '</div><div class="d">' + (k.desc || '') + '</div>'
+        + (k.hint ? '<div class="d" style="opacity:.7">怎么看：' + k.hint + '</div>' : '') + '</div>'
+        + '<div style="color:var(--text-dim);font-size:13px;white-space:nowrap">当前：' + uiCycleLabel(k.cycle) + '</div></div>';
+    } else if (k.type === "range") {
+      const cv = (UI[k.uiKey] || (k.uiKey === "cardAlpha" ? "100" : (k.uiKey === "bgDim" ? "35" : "0")));
+      if (!UI.bg) {
+        h += '<div class="switch-row fade" style="opacity:.5">'
+          + '<div><div class="t">' + k.name + '</div>'
+          + '<div class="d">没设背景图片，这一项用不到（设了背景才能调）。</div></div>'
+          + '<div style="color:var(--text-dim);font-size:13px">—</div></div>';
+        return;
+      }
+      h += '<div class="switch-row fade" style="flex-direction:column;align-items:stretch;gap:8px">'
+        + '<div><div class="t">' + k.name + '<span id="adv_lab_' + k.uiKey + '" style="color:var(--text-dim);font-size:12px;margin-left:8px">'
+        + cv + (k.unit || '') + '</span></div>'
+        + '<div class="d">' + (k.desc || '') + '</div>'
+        + (k.hint ? '<div class="d" style="opacity:.7">怎么看：' + k.hint + '</div>' : '') + '</div>'
+        + '<div style="display:flex;align-items:center;gap:10px">'
+        + '<input type="range" min="' + k.min + '" max="' + k.max + '" step="' + k.step + '" value="' + cv + '" '
+        + 'oninput="uiSetNum(\'' + k.uiKey + '\', this.value)" '
+        + 'style="flex:1;accent-color:var(--accent)">'
+        + (k.withTheme ? '<button class="g-btn" style="padding:6px 10px;font-size:12px" '
+            + 'onclick="uiToggleLightDark()">' +
+            ((document.documentElement.getAttribute("data-theme") === "light") ? "切深色" : "切浅色") + '</button>' : '')
+        + '</div>'
+        + '</div>';
+    } else if (k.type === "color" && k.key === "btn" && UI.bg) {
+      h += '<div class="switch-row fade" style="opacity:.5">'
+        + '<div><div class="t">' + k.name + '</div>'
+        + '<div class="d">有壁纸时配色固定（按钮已改成无色半透明），想换配色请先清除背景。</div></div>'
+        + '<div style="color:var(--text-dim);font-size:13px">锁</div></div>';
+    } else if (k.type === "color") {
+      h += '<div class="switch-row fade" style="gap:10px">'
+        + '<div style="flex:1;min-width:0"><div class="t">' + k.name + '</div>'
+        + '<div class="d">' + (k.desc || '') + '</div>'
+        + (k.hint ? '<div class="d" style="opacity:.7">怎么看：' + k.hint + '</div>' : '') + '</div>'
+        + '<input type="color" id="adv_color_' + k.key + '" value="' + (k.key === "btn" ? (UI.btn || "#7c5cff") : (UI.accent || "#7c5cff")) + '" '
+        + 'oninput="' + (k.key === "btn" ? "uiSetBtn" : "uiSetAccent") + '(this.value)" '
+        + 'style="width:46px;height:34px;border:none;background:none;padding:0">'
+        + '</div>';
+    } else if (k.type === "text") {
+      h += '<div class="switch-row fade" style="align-items:flex-start;flex-direction:column;gap:8px">'
+        + '<div><div class="t">' + k.name + '</div><div class="d">' + (k.desc || '') + '</div>'
+        + (k.hint ? '<div class="d" style="opacity:.7">怎么看：' + k.hint + '</div>' : '') + '</div>'
+        + '<div style="display:flex;gap:8px;width:100%">'
+        + '<input id="adv_in_' + k.key + '" value="' + (advValue(k.key)) + '" '
+        + 'style="flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:13px" '
+        + 'placeholder="例如 my_product,mi_ext">'
+        + '<button class="g-btn" style="flex:0 0 auto" onclick="advSaveText(\'' + k.key + '\')">保存</button>'
+        + '</div></div>';
+    } else {
+      h += '<div class="switch-row fade" onclick="advEnter(\'' + k.id + '\')">'
+        + '<div><div class="t">' + k.name + '</div><div class="d">' + (k.desc || '') + '</div></div>'
+        + '<div class="row-arrow">›</div></div>';
+    }
+  } catch (e) { /* 单项失败不影响整层 */ }
+  });
+  box.innerHTML = h;
+  // ★ 2026-10-25：**打开菜单不再读 shell**。
+  //   原因：KSU 的 exec 是同步的，读一次设置就会把界面冻住（点「危险区 / 界面自定义」卡死）。
+  //   现在进页面时读一次，之后 all 用内存里的 settings。
+  // 界面自定义的开关初态
+  try {
+    const UIMAP = { "__anim": "anim", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
+                    "__hideGoogle": "hideGoogle", "__hideFeedback": "hideFeedback",
+                    "__simple": "simple", "__longPress": "longPress", "__dblclick": "dblclick" };
+    Object.keys(UIMAP).forEach(k => {
+      document.querySelectorAll('[data-key="' + k + '"]').forEach(el =>
+        el.classList.toggle("on", UI[UIMAP[k]] === "1"));
+    });
+  } catch (e) {}
+  advSync();
+}
+
+const UI_ACTIONS = {
+  uiPickBg, uiClearBg, uiToggleLightDark, uiExport, uiImport, uiReset,
+  uiCycleAccent: () => uiCycleNext("accent"),
+  advAccentHelp,
+  advRelock,
+};
+
+async function advRun(cmd, hintEnc, name) {
+  // 界面类命令直接调 JS，不经过 shell
+  if (typeof UI_ACTIONS[cmd] === "function") {
+    try { await UI_ACTIONS[cmd](); } catch (e) { showToast("操作失败：" + errText(e)); }
+    return;
+  }
+  let hint = "";
+  try { hint = hintEnc ? decodeURIComponent(hintEnc) : ""; } catch (e) {}
+  const sheet = document.getElementById("advConSheet");
+  const title = document.getElementById("advConTitle");
+  const hEl = document.getElementById("advConHint");
+  const out = document.getElementById("advConOut");
+  if (title) title.textContent = name || "运行结果";
+  if (hEl) {
+    if (hint) { hEl.style.display = "block"; hEl.innerHTML = "怎么看：" + hint; }
+    else { hEl.style.display = "none"; hEl.textContent = ""; }
+  }
+  if (out) out.textContent = "正在执行，请稍等…";
+  if (sheet) sheet.classList.add("show");
+
+  let text = "";
+  try {
+    text = String(await ksuExec("sh " + MODDIR + "/adv.sh " + cmd + " 2>&1") || "");
+  } catch (e) {
+    // ksuExec 在命令返回非零时会抛异常，但内容通常就是有意义的输出 —— 照常显示
+    text = errText(e) || "";
+    if (!text) text = "执行出错（没有输出）";
+  }
+  if (out) out.textContent = text.trim() || "（没有输出）";
+}
+
+function advConClose() {
+  const s = document.getElementById("advConSheet");
+  if (s) s.classList.remove("show");
+}
+
+/* ★ 2026-10-25 系统专区只对本机系统开放 */
+const CFS_ZONE_MATCH = {
+  oneui:   /三星|One ?UI|samsung/i,
+  hyperos: /澎湃|HyperOS|MIUI|小米|redmi|poco/i,
+  flyme:   /Flyme|魅族|meizu/i,
+  coloros: /ColorOS|OPPO|一加|realme|真我/i,
+  vivo:    /OriginOS|vivo|iQOO/i,
+  honor:   /荣耀|HONOR|MagicOS|华为|HUAWEI|鸿蒙|Harmony/i,
+  aosp:    /原生|类原生|Pixel|AOSP|Lineage|谷歌/i,
+};
+function cfsZoneAllowed(id) {
+  const re = CFS_ZONE_MATCH[id];
+  if (!re) return true;                       // 不是系统专区
+  const el = document.getElementById("romLabel");
+  const txt = (el && el.textContent) || "";
+  if (!txt || txt.indexOf("正在") === 0 || txt.indexOf("无法") === 0) return true;  // 还没识别出来：先放开
+  return re.test(txt);
+}
+function cfsZoneName(id) {
+  const t = { oneui: "三星 One UI", hyperos: "澎湃OS / MIUI", flyme: "Flyme",
+              coloros: "ColorOS / realme", vivo: "vivo / iQOO",
+              honor: "荣耀 / 华为", aosp: "原生 / 类原生" };
+  return t[id] || id;
+}
+
+function advEnter(id) {
+  __advPath.push(id);
+  try {
+    advRender();
+  } catch (e) {
+    __advPath.pop();
+    showToast("打开失败：" + ((e && e.message) || e));
+  }
+}
+
+function advBack() {
+  if (__advPath.length) __advPath.pop();
+  advRender();
+}
+
+function advClose() {
+  const s = document.getElementById("advSheet");
+  const c = document.getElementById("advConSheet");
+  if (c) c.classList.remove("show");
+  if (s) {
+    s.classList.remove("show");
+    // ★ advOpen 写过内联样式，必须一起清掉，否则"关了还在"
+    s.style.visibility = "";
+    s.style.transform = "";
+    s.style.display = "";
+  }
+  __advPath = [];
+}
+
+/* ★ 2026-10-25：高级入口 —— 输过一次口令就记住，主界面常驻一个卡片 */
+function advUnlocked() {
+  try { return localStorage.getItem("cfs_adv_unlocked") === "1"; } catch (e) { return false; }
+}
+function advApplyEntry() {
+  const b = document.getElementById("advEntryBtn");
+  const d = document.getElementById("advEntryDivider");
+  const show = advUnlocked();
+  if (b) b.style.display = show ? "" : "none";
+  if (d) d.style.display = show ? "" : "none";
+}
+function advUnlock() {
+  try { localStorage.setItem("cfs_adv_unlocked", "1"); } catch (e) {}
+  advApplyEntry();
+}
+/* ★ 2026-10-25 锁定前先确认，并提示怎么重新打开 */
+async function advLockConfirm() {
+  const ok = await dialog({
+    title: "重新锁定高级设置？",
+    msg: "锁定后主界面入口会隐藏。\n想重新打开：连点「当前版本」的版本号 7 次，再输口令。",
+    okText: "锁定",
+  });
+  if (ok) advRelock();
+}
+
+function advRelock() {
+  try { localStorage.removeItem("cfs_adv_unlocked"); } catch (e) {}
+  advApplyEntry();
+  try { advClose(); } catch (e) {}
+  showToast("已锁定高级设置（主界面入口已隐藏）");
+}
+
+function advOpen() {
+  const s = document.getElementById("advSheet");
+  if (!s) { showToast("找不到高级设置面板（安装包不完整，请重装模块）"); return; }
+  __advPath = [];
+  // ★ 2026-10-25 修（作者反馈：口令对了却"没反应"）：
+  //   原来只要 advRender() 抛一次异常，下面 add("show") 就执行不到 → 界面毫无反应。
+  //   现在渲染单独兜住，并把显示写成内联样式，CSS 出问题也能弹出来。
+  try {
+    advRender();
+  } catch (e) {
+    showToast("渲染出错：" + ((e && e.message) || e));
+  }
+  s.classList.add("show");
+  s.style.visibility = "visible";
+  s.style.transform = "none";
+  s.style.display = "flex";
+}
+
+async function advTap() {
+  __advTaps++;
+  clearTimeout(__advTimer);
+  __advTimer = setTimeout(() => { __advTaps = 0; }, 3000);
+  if (__advTaps < 7) {
+    if (__advTaps >= 4) showToast("再点 " + (7 - __advTaps) + " 次");
+    return;
+  }
+  __advTaps = 0;
+  let code = "";
+  try {
+    code = await dialog({
+      title: "高级设置",
+      msg: "输入口令后进入。\n（这里的东西偏底层，改完要重启）",
+      input: "",
+      okText: "进入",
+    });
+  } catch (e) { return; }
+  if (code === null || code === undefined) return;
+  const pw = String(code).replace(/[\s\u3000]/g, "").toLowerCase();
+  if (pw === "cfs2026" || pw === "2026cfs") {
+    advUnlock();
+    try {
+      advOpen();
+    } catch (e) {
+      showToast("打开失败：" + ((e && e.message) || e));
+    }
+    showToast("已进入高级设置");
+  } else {
+    showToast("口令不对（收到：" + (pw.slice(0, 12) || "空") + "）");
+  }
+}
+
+
+
 async function toggleSetting(key) {
   if (busy) return;
+  if (key.indexOf("__") === 0) {
+    const map = { "__anim": "anim", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
+                  "__hideGoogle": "hideGoogle", "__hideFeedback": "hideFeedback",
+                  "__simple": "simple", "__longPress": "longPress", "__dblclick": "dblclick" };
+    const k2 = map[key];
+    if (k2) { UI[k2] = UI[k2] === "1" ? "0" : "1"; uiSave(); advRender(); }
+    return;
+  }
   const row = document.querySelector(`.switch-row[onclick*="${key}"]`);
   const sw = row && row.querySelector('.sw');
   let nv;
@@ -8059,13 +10264,11 @@ function updProg(text, ratio, noBar) {
   box.classList.toggle("barless", !!noBar);
   setValue("updProgressText", text);
   if (!noBar) {
-    document.getElementById("updProgressBar").style.width =
-      Math.round(Math.max(0, Math.min(1, ratio || 0)) * 100) + "%";
+    { const _pb = document.getElementById("updProgressBar"); if (_pb) _pb.style.width = Math.round(Math.max(0, Math.min(1, ratio || 0)) * 100) + "%"; }
   }
 }
 function hideUpdProg() {
   updRunning = false;      // ★ 进度框一收起，就不再算"正在安装"
-  busy = false;            // ★ 所有失败路径都会走到这里 —— 顺手解锁，别让界面卡死
   busy = false;            // ★ 所有失败路径都会走到这里 —— 顺手解锁，别让界面卡死
   const box = document.getElementById("updProgress");
   if (box) box.classList.remove("show");
@@ -8195,8 +10398,11 @@ function renderUpdate(u) {
   //     · 没记录               → 无法证明      → **不提示**（宁可不催，也不让人白重启）
   const bootUnchanged = !!(bootId && doneBoot && bootId === doneBoot);
   // ★ 正在下载/安装时，一律不算"待重启" —— 否则会在装到一半就催用户重启。
-  const pendingReboot = !updRunning && (
-    (has && !!done && done === String(u.NEW_CODE)) ||
+  // ★ 2026-10-26 修「重启后仍提示待重启」：
+  //   has=false 说明本机版本已经等于线上版本 —— 那就是已经装好并生效了，
+  //   此时再拿 boot id 去猜"重启没有"只会误报。待重启必须以 has 为前提。
+  const pendingReboot = !updRunning && has && (
+    (!!done && done === String(u.NEW_CODE)) ||
     (runningNew && bootUnchanged));
   if (pendingReboot) setUpdateDone(u.NEW_CODE);   // 补记，刷新/重启后也稳
   else if (!has) { setUpdateDone(""); setUpdateDoneBoot(""); }   // 真跑上新版且没在等重启 → 清掉
@@ -8559,7 +10765,9 @@ async function resumeRunningUpdate() {
 // 初始化：先等状态读回来（要等版本号填好），再决定用哪份更新信息
 // 注意：以前是 refreshAll() 还没回来就去比对 curVerLabel，结果缓存永远对不上、用不上
 (async function init() {
-  loadSettings();
+  setCacheLoad();   // 先用上次记录渲染（同步、秒出）
+  loadSettings();  // 再从模块读真值覆盖
+  try { uiApply(); } catch (e) {}
   // ★ 2026-10-17 提速：refreshGoogle 原来跟首屏的 list/status 一起发。
   //   而 google_font.sh 在缓存失效时会跑 `dumpsys package com.google.android.gms`，
   //   在 HyperOS / Android 17 上可能要跑几分钟（代码注释里写着实测结论）。
@@ -8570,17 +10778,317 @@ async function resumeRunningUpdate() {
   setTimeout(() => { ensureFontData().catch(() => {}); }, 1200);
   setTimeout(() => { ensureScanCache().catch(() => {}); }, 900);
   setTimeout(() => { refreshGoogle().catch(() => {}); }, 400);
-  let cached = null;
-  try { cached = JSON.parse(localStorage.getItem(UPDATE_CACHE_KEY) || "null"); } catch (e) {}
-  const curVer = (document.getElementById("curVerLabel").textContent || "").trim();
-  if (cached && cached.NEW_CODE && cached.CUR_VER === curVer) renderUpdate(cached);
+  // ★ 2026-10-25：进页面读一次全部开关（之后就靠内存，不再每次开菜单都读）
+  setTimeout(() => { advSyncFromDump().catch(() => {}); }, 800);
+  /* 旧缓存渲染已移除（新版会自己查一次） */
   // 每次打开页面都联网核对一次
   setTimeout(() => checkUpdate(false), 600);
   // ★ 2026-10-19：页面一进来就问后端上一次安装还在不在跑，在跑就禁用按钮并恢复进度显示。
-  resumeRunningUpdate().catch(() => {});
+  /* 恢复逻辑改由 updResume 负责 */
 })();
+
+/* ===========================================================================
+   ★ 2026-10-25 更新区重写（作者要求：别在旧逻辑上修，整块换掉）
+
+   状态机：idle → checking → downloading（有进度条）→ installing（只有转圈/文字）
+           → done（按钮变「立即重启生效」）→ error
+
+   后端接口（沿用，不改）：
+     · sh $MODDIR/update.sh installbg     启动后台下载+安装，立刻返回
+     · cat $LIB/.update/state             stage=download|install cur= total=  （下载进度）
+     · sh $MODDIR/update.sh installstate  stage=finished|error msg=
+   =========================================================================== */
+const UPD2 = { phase: "idle", has: false, newVer: "", newCode: 0, curVer: "", timer: null, msg: "" };
+const UPD2_DONE_KEY = "cfs_upd_done_ver";
+
+function u2(id) { return document.getElementById(id); }
+
+function u2fmt(n) {
+  n = +n || 0;
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+  if (n >= 1024) return Math.round(n / 1024) + " KB";
+  return n + " B";
+}
+
+function u2paint() {
+  const main = u2("updMainBtn"), check = u2("updCheckBtn"), foot = u2("updFoot");
+  const panel = u2("updPanel"), wrap = u2("updBarWrap"), spin = u2("updSpin"), text = u2("updText");
+  if (!main) return;
+  // 默认态
+  let showPanel = false, showBar = false, showSpin = false;
+  let mainText = "下载并安装", mainCls = "g-btn primary-blue", mainDis = !UPD2.has;
+  let checkDis = false;
+  let footText = UPD2.has ? "有新版可以装，装完重启生效。" : "已是最新版本。";
+  switch (UPD2.phase) {
+    case "checking":
+      checkDis = true; mainDis = true; footText = "正在检查…"; break;
+    case "downloading":
+      showPanel = showBar = true; checkDis = true; mainDis = true;
+      mainText = "下载中…"; footText = "下载在后台进行，别关页面也行。"; break;
+    case "installing":
+      showPanel = showSpin = true; checkDis = true; mainDis = true;
+      mainText = "安装中…"; footText = "正在安装，这一步没有进度条，装完会提示重启。"; break;
+    case "done":
+      mainText = "立即重启生效"; mainCls = "g-btn urgent"; mainDis = false;
+      footText = "已安装完成，重启后生效。"; break;
+    case "error":
+      checkDis = false; mainDis = !UPD2.has;
+      mainText = UPD2.has ? "重试下载并安装" : "下载并安装";
+      footText = UPD2.msg || "出错了，可以重试。"; break;
+    default: // idle
+      break;
+  }
+  if (panel) panel.style.display = showPanel ? "block" : "none";
+  if (wrap) wrap.style.display = showBar ? "block" : "none";
+  if (spin) spin.style.display = showSpin ? "flex" : "none";
+  if (text && !showBar) text.textContent = "";
+  main.textContent = mainText;
+  main.className = mainCls;
+  main.disabled = mainDis;
+  check.disabled = checkDis;
+  if (foot) foot.textContent = footText;
+}
+
+function u2text(t) { const el = u2("updText"); if (el) el.textContent = t || ""; }
+function u2bar(ratio) {
+  const el = u2("updBar");
+  if (el) el.style.width = Math.round(Math.max(0, Math.min(1, ratio || 0)) * 100) + "%";
+}
+
+/* 读后端状态文件：stage / cur / total */
+async function u2readState() {
+  let s = "";
+  try { s = await ksuExec(`cat ${LIB}/.update/state 2>/dev/null`); } catch (e) { s = ""; }
+  const kv = {};
+  String(s || "").split("\n").forEach(l => {
+    const m = l.match(/^([\w]+)=(.*)$/);
+    if (m) kv[m[1]] = m[2].trim();
+  });
+  return kv;
+}
+
+/* 当前版本（本地 module.prop，不联网） */
+async function u2curVer() {
+  let v = "", code = 0;
+  try {
+    const t = await ksuExec(`sed -n 's/^version=//p' ${MODDIR}/module.prop 2>/dev/null; sed -n 's/^versionCode=//p' ${MODDIR}/module.prop 2>/dev/null`);
+    const arr = String(t || "").split("\n").filter(x => x.trim());
+    v = (arr[0] || "").trim();
+    code = parseInt((arr[1] || "0").trim(), 10) || 0;
+  } catch (e) {}
+  return { ver: v, code };
+}
+
+/* 检查更新（浏览器 fetch，不冻结界面） */
+async function updCheck(manual) {
+  if (UPD2.phase === "downloading" || UPD2.phase === "installing") return;
+  UPD2.phase = "checking"; u2paint();
+  const lbl = u2("newVerLabel");
+  if (manual && lbl) lbl.textContent = "检查中…";
+  const cur = await u2curVer();
+  UPD2.curVer = cur.ver; UPD2.curCode = cur.code;
+  let j = null;
+  for (const u of UPD_JSON_URLS) {
+    try {
+      const r = await fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) continue;
+      const tmp = await r.json();
+      if (tmp && tmp.versionCode) { j = tmp; break; }
+    } catch (e) {}
+  }
+  if (!j) {
+    UPD2.phase = "idle";
+    if (lbl) { lbl.textContent = "检查失败（可能要梯子）"; lbl.className = "value off"; }
+    u2paint();
+    if (manual) showToast("检查失败：连不上 GitHub，先连 VPN 再试");
+    return;
+  }
+  UPD2.newVer = String(j.version || "");
+  UPD2.newCode = parseInt(j.versionCode, 10) || 0;
+  UPD2.has = UPD2.newCode > UPD2.curCode;
+  if (lbl) {
+    lbl.textContent = UPD2.newVer + (UPD2.has ? "（可更新）" : "（已是最新）");
+    lbl.className = "value " + (UPD2.has ? "active" : "off");
+  }
+  // 上次装完还没重启 → 直接进 done
+  let doneVer = "";
+  try { doneVer = localStorage.getItem(UPD2_DONE_KEY) || ""; } catch (e) {}
+  if (doneVer && doneVer === String(UPD2.newCode)) {
+    UPD2.phase = "done";
+  } else {
+    UPD2.phase = "idle";
+  }
+  u2paint();
+  if (manual) showToast(UPD2.has ? ("发现新版 " + UPD2.newVer) : "已是最新版本");
+}
+
+/* 主按钮：三态（下载安装 / 重试 / 立即重启） */
+function updMainClick() {
+  if (UPD2.phase === "done") { doReboot(); return; }
+  if (UPD2.phase === "downloading" || UPD2.phase === "installing") return;
+  updInstall();
+}
+
+/* 开始下载+安装 */
+async function updInstall() {
+  if (!UPD2.has) { showToast("没有可安装的新版本"); return; }
+  const yes = await dialog({
+    title: "安装 " + UPD2.newVer + "？",
+    msg: "会从 GitHub 下载安装包，校验后用当前 Root 管理器安装。字体库、设置和当前字体都会保留，装完重启生效。",
+    okText: "下载并安装"
+  });
+  if (!yes) return;
+
+  UPD2.phase = "downloading";
+  UPD2.msg = "";
+  u2text("正在连接 GitHub…");
+  u2bar(0.02);
+  u2paint();
+
+  let out = "";
+  try {
+    out = String(await ksuExec(`sh ${MODDIR}/update.sh installbg`) || "");
+  } catch (e) {
+    UPD2.phase = "error"; UPD2.msg = "启动下载失败：" + errText(e); u2paint(); return;
+  }
+  const last = (out.trim().split("\n").pop() || "").trim();
+  if (last.indexOf("OK:") !== 0) {
+    UPD2.phase = "error";
+    UPD2.msg = last.replace(/^ERROR:/, "") || "无法开始下载（先连 VPN 再试）";
+    u2paint();
+    return;
+  }
+  u2pollStart();
+}
+
+/* 轮询：下载看字节数、安装只看阶段 */
+function u2pollStart() {
+  if (UPD2.timer) return;
+  UPD2.timer = setInterval(u2pollOnce, 800);
+  u2pollOnce();
+}
+
+function u2pollStop() {
+  if (UPD2.timer) { clearInterval(UPD2.timer); UPD2.timer = null; }
+}
+
+async function u2pollOnce() {
+  if (UPD2.phase !== "downloading" && UPD2.phase !== "installing") { u2pollStop(); return; }
+  const kv = await u2readState();
+  const stage = String(kv.stage || "").toLowerCase();
+  const cur = parseInt(kv.cur || "0", 10) || 0;
+  const total = parseInt(kv.total || "0", 10) || 0;
+
+  if (stage === "download") {
+    if (UPD2.phase !== "downloading") { UPD2.phase = "downloading"; u2paint(); }
+    if (total > 0) {
+      const r = Math.min(1, cur / total);
+      u2text("正在下载 " + u2fmt(cur) + " / " + u2fmt(total) + "（" + Math.round(r * 100) + "%）");
+      u2bar(r);
+    } else if (cur > 0) {
+      u2text("正在下载 " + u2fmt(cur) + "…");
+      u2bar(0.05);
+    } else {
+      u2text("正在连接 GitHub…");
+      u2bar(0.02);
+    }
+    return;
+  }
+
+  if (stage === "install" || stage === "installing") {
+    if (UPD2.phase !== "installing") { UPD2.phase = "installing"; u2paint(); }
+    const st = u2("updSpinText");
+    if (st) st.textContent = "正在安装…（没有进度条，装完会提示重启）";
+    return;
+  }
+
+  if (stage === "finished" || stage === "done" || stage === "ok") {
+    UPD2.phase = "done";
+    u2pollStop();
+    try { localStorage.setItem(UPD2_DONE_KEY, String(UPD2.newCode)); } catch (e) {}
+    u2paint();
+    showToast("安装完成，点「立即重启生效」");
+    return;
+  }
+
+  if (stage === "error" || stage === "fail") {
+    UPD2.phase = "error";
+    UPD2.msg = String(kv.msg || "安装失败");
+    u2pollStop();
+    u2paint();
+    return;
+  }
+
+  // 状态文件暂时读不到：可能还没写、也可能刚结束 —— 用 installstate 兜一次
+  if (stage === "" || stage === "none") {
+    let st = "";
+    try { st = String(await ksuExec(`sh ${MODDIR}/update.sh installstate 2>/dev/null`) || ""); } catch (e) {}
+    const m = st.match(/^stage=(.+)$/m);
+    const s2 = m ? m[1].trim().toLowerCase() : "";
+    if (s2 === "finished") {
+      UPD2.phase = "done";
+      u2pollStop();
+      try { localStorage.setItem(UPD2_DONE_KEY, String(UPD2.newCode)); } catch (e) {}
+      u2paint();
+    }
+  }
+}
+
+/* 进页面时：恢复"已装未重启"，并自动查一次 */
+async function updResume() {
+  try {
+    const doneVer = localStorage.getItem(UPD2_DONE_KEY) || "";
+    if (doneVer) { UPD2.phase = "done"; u2paint(); }
+  } catch (e) {}
+  try {
+    const kv = await u2readState();
+    const st = String(kv.stage || "").toLowerCase();
+    if (st === "download" || st === "install" || st === "installing") {
+      UPD2.phase = st === "download" ? "downloading" : "installing";
+      if (UPD2.phase === "downloading") u2text("继续下载…");
+      u2paint();
+      u2pollStart();
+    }
+  } catch (e) {}
+}
+
+(function u2boot() {
+  const run = () => {
+    try { u2paint(); } catch (e) {}
+    updResume().catch(() => {});
+    setTimeout(() => { updCheck(false).catch(() => {}); }, 1500);
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run);
+  else run();
+})();
+
 </script>
 
 
+
+  <!-- ★ 2026-10-24：高级（调试用）—— 三层菜单（大类 → 小类 → 项目） -->
+  <div class="sheet" id="advSheet">
+    <div class="sheet-head">
+      <div class="sheet-title" id="advTitle">高级（调试用）</div>
+      <button id="advLockBtn" onclick="advLockConfirm()">锁定</button>
+      <button class="sheet-x" id="advBackBtn" onclick="advBack()" style="display:none" aria-label="返回">‹</button>
+      <button class="sheet-x" id="advCloseBtn" onclick="advClose()" aria-label="关闭">✕</button>
+    </div>
+    <div class="fbk-body" style="padding:0 16px 24px">
+      <div id="advContent"></div>
+    </div>
+  </div>
+
+  <!-- ★ 2026-10-24：高级设置 —— 运行结果（独立页面，不跟列表挤在一起） -->
+  <div class="sheet" id="advConSheet" style="z-index:16">
+    <div class="sheet-head">
+      <div class="sheet-title" id="advConTitle">运行结果</div>
+      <button class="sheet-x" onclick="advConClose()" aria-label="关闭">✕</button>
+    </div>
+    <div class="fbk-body" style="padding:0 16px 24px">
+      <div class="g-hint" id="advConHint" style="display:none;margin:8px 0 10px"></div>
+      <div class="adv-out" id="advConOut">正在执行…</div>
+    </div>
+  </div>
 </body>
 </html>

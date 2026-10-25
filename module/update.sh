@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 保时捷字体（三合一） - GitHub 在线更新（在手机本地下载并安装，不用电脑）
+# 自定义字体切换模块 - GitHub 在线更新（在手机本地下载并安装，不用电脑）
 # 更新信息来自 module.prop 里的 updateJson（仓库里那份 UPDATE-<版本>.json），
 # Magisk / KernelSU / APatch 管理器也用同一个地址显示"有更新"。
 #
@@ -86,7 +86,7 @@ jnum() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9
 # 只要有一条返回了**更大的 versionCode**，就用它的整份数据。
 # ---------------------------------------------------------------------------
 UPD_WORKER="https://cfs-report.2188366745q.workers.dev"
-UPD_REPO="ayss2188/porsche-font"          # 在 case 里按仓库替换
+UPD_REPO="ayss2188/custom-font-switcher"          # 在 case 里按仓库替换
 
 _read_json() {   # $1=json 文件；把五个字段填进全局
   NEW_VER=$(jstr version "$1")
@@ -117,7 +117,7 @@ load_json() {
     https://*) ;;
     *) url="" ;;
   esac
-  case "$url" in *ayss2188/porsche-font*) url="" ;; esac
+  case "$url" in *ayss2188/custom-font-switcher*) url="" ;; esac
 
   # 本模块的仓库名（用于 Worker 和 raw 两个地址）
   repo="$UPD_REPO"
@@ -406,7 +406,15 @@ case "${1:-check}" in
       fi
       # 进度条按耗时稳着爬：0% → 97%（最多 300 秒爬满），
       #   宁可"慢慢爬"也不要"跳一下停住"——后者看着像死机。
-      _ipct=$(( _iwaited * 97 / 300 ))
+      # ★ 2026-10-18（作者反馈「进度条一秒到头」）：
+      #   原来是线性爬：`waited * 97 / 300` —— 300 秒才爬满。
+      #   而真机安装只要 20~60 秒，于是进度条才走到 6%~19% 就"突然完成"，
+      #   看着像"根本没动"。反过来网慢下载时又瞬间冲到 97% 然后不动。
+      #   现在用**渐近曲线** pct = 97 * t / (t + 40)：
+      #       10 秒 → 19%    30 秒 → 41%    60 秒 → 58%
+      #      120 秒 → 73%   300 秒 → 86%
+      #   前快后慢、越来越慢但不会停，跟真实解包（先小文件后大字体）更贴。
+      _ipct=$(( _iwaited * 97 / (_iwaited + 40) ))
       [ "$_ipct" -gt 97 ] && _ipct=97
       printf 'stage=install\ncur=%s\ntotal=%s\nmsg=正在安装（管理器解包中）\npid=%s\n' \
         "${_iby:-0}" "$_ipct" "$_IPID" > "$STATE" 2>/dev/null

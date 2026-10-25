@@ -18,4 +18,8 @@ HONORSansVFConItalic.ttf
 HONORSansVFArabic.ttf
 HONORSansVFArabicUI.ttf
 RobotoFlex-Regular.ttf
-
+# 三星（真机反馈 2026-10-25）：某些三星自家 app 的定位/图标字形在这两个字体里，
+# 换掉就会出现"没有图标 / 一个方框"。显式列入永不替换。
+SamsungColorEmoji.ttf
+NotoSansSymbols-Regular-Subsetted2.ttf
+NotoSansSymbols-Regular-Subsetted.ttf

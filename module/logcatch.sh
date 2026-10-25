@@ -116,11 +116,28 @@ _do_stop() {
     echo "设备    : $(getprop ro.product.brand 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
     echo "系统    : Android $(getprop ro.build.version.release 2>/dev/null)   构建 $(getprop ro.build.display.id 2>/dev/null)"
     echo "模块    : $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')"
-    echo "字体    : $(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")"
-    echo "槽位    : $(grep -c . "$MODDIR/slots.map" 2>/dev/null) 个"
+    _pf=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
+    case "$_pf" in
+      ""|none|无字体) _pf_txt="无字体（系统默认）" ;;
+      *)             _pf_txt="$_pf" ;;
+    esac
+    # 真实挂载条数：slots.map 只是"计划"，真挂了没要通过 /proc/mounts 数
+    _mnt_n=$(grep -c 'custom_font_lib' /proc/mounts 2>/dev/null | tr -d ' ')
+    [ -n "$_mnt_n" ] || _mnt_n=0
+    echo "字体    : $_pf_txt"
+    echo "槽位    : $(grep -c . "$MODDIR/slots.map" 2>/dev/null) 个（计划）"
+    echo "实际挂载 : ${_mnt_n} 条（/proc/mounts 里指向 font_lib 的）"
     echo "挂载方式 : $(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")"
     echo "抓取开始 : $_started    总行数: ${_lines:-?}"
-    echo "崩溃条数 : $(grep -cE 'FATAL EXCEPTION|ANR in ' "$F" 2>/dev/null)"
+    # ★ 崩溃条数要把 tombstone / ANR 文件也算上 —— 只数 logcat 会显示 0（真机踩过）
+    _tb_n=$(ls /data/tombstones/tombstone_* 2>/dev/null | wc -l | tr -d ' ')
+    _anr_n=$(ls /data/anr/* 2>/dev/null | wc -l | tr -d ' ')
+    echo "崩溃条数 : logcat $(grep -cE 'FATAL EXCEPTION|ANR in ' "$F" 2>/dev/null) 条 / tombstone ${_tb_n:-0} 个 / ANR ${_anr_n:-0} 个"
+    # ★ 摘要：把 tombstone 的进程名和 Abort message 直接提到前面（定性的关键）
+    for _tb in $(ls -t /data/tombstones/tombstone_* 2>/dev/null | head -2); do
+      case "$_tb" in *.pb) continue ;; esac
+      echo "  └─ ${_tb##*/}: $(sed -n 's/^Cmdline: //p' "$_tb" 2>/dev/null | head -n1) | $(sed -n 's/^Abort message: //p' "$_tb" 2>/dev/null | head -n1 | cut -c1-140)"
+    done
     echo
     echo "########## 崩溃点上下文（每个崩溃前后各 120 / 260 行） ##########"
     if [ -s "$D/.n.$$" ]; then
@@ -160,14 +177,57 @@ _do_stop() {
       echo "（没有可读的 dropbox 崩溃记录 —— 可能是没崩过，或路径不同）"
     fi
 
-    _tb=$(ls -t /data/tombstones/tombstone_* 2>/dev/null | head -2)
+    # ★ 2026-10-24（真机教训）：只抓 2 个，结果抓到的是"宿主 App 因为渲染进程崩了而 abort"，
+    #   真正崩的渲染进程 tombstone 没进来 → 看不到根因。现在抓 6 个，跳过 .pb。
+    _tb=$(ls -t /data/tombstones/tombstone_* 2>/dev/null | grep -v '\.pb$' | head -6)
     if [ -n "$_tb" ]; then
       for _f in $_tb; do
         echo
-        echo "---------- tombstone: ${_f##*/}（原生崩溃） ----------"
-        head -200 "$_f" 2>/dev/null
+        echo "---------- tombstone: ${_f##*/} ----------"
+        echo "  Cmdline: $(sed -n 's/^Cmdline: //p' "$_f" 2>/dev/null | head -n1)"
+        echo "  Signal : $(sed -n 's/^signal /signal /p' "$_f" 2>/dev/null | head -n1)"
+        echo "  Abort  : $(sed -n 's/^Abort message: //p' "$_f" 2>/dev/null | head -n1 | cut -c1-200)"
+        echo "  ---- 前 160 行 ----"
+        head -160 "$_f" 2>/dev/null
       done
     fi
+
+    # ★ 2026-10-24（作者要求）：把"标签"和"tombstone 列表"也收进来，
+    #   这样排查只需要抓一次日志，不用再让用户敲两条命令。
+    echo
+    echo "---------- SELinux 标签（挂载是否继承了 system_file） ----------"
+    echo "  getenforce: $(getenforce 2>/dev/null)"
+    _n=0
+    if [ -s "$MODDIR/slots.map" ]; then
+      while read -r _id _rel _src; do
+        [ -n "$_rel" ] || continue
+        case "$_rel" in /*) _t="$_rel" ;; *) _t="/$_rel" ;; esac
+        echo "  目标: $(ls -Z "$_t" 2>/dev/null | head -n1)"
+        [ -n "$_src" ] && echo "  源  : $(ls -Z "$_src" 2>/dev/null | head -n1)"
+        _n=$((_n + 1))
+        [ "$_n" -ge 3 ] && break
+      done < "$MODDIR/slots.map"
+    else
+      ls -Z "$LIB"/*.ttf 2>/dev/null | head -n3 | sed 's/^/  /'
+    fi
+    echo "  WebView 进程上下文:"
+    ps -Z 2>/dev/null | grep -iE 'webview|sandboxed_process' | head -n4 | sed 's/^/    /'
+
+    echo
+    echo "---------- tombstone 列表（最近 12 个） ----------"
+    ls -lt /data/tombstones 2>/dev/null | head -n 13 | sed 's/^/  /'
+
+    # 内核层：OOM / LMK / seccomp / 硬件异常
+    echo
+    echo "---------- dmesg 末尾 60 行（内核） ----------"
+    dmesg 2>/dev/null | tail -60 | sed 's/^/  /'
+
+    # SELinux 拒绝（渲染进程被拦也会崩）
+    echo
+    echo "---------- SELinux 拒绝（avc: denied，末 20 条） ----------"
+    _avc=$(dmesg 2>/dev/null | grep -c 'avc: *denied' 2>/dev/null)
+    echo "  合计 ${_avc:-0} 条"
+    dmesg 2>/dev/null | grep 'avc: *denied' | tail -20 | sed 's/^/  /'
 
     _ar=$(ls -t /data/anr/* 2>/dev/null | head -1)
     if [ -n "$_ar" ]; then

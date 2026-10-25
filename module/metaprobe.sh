@@ -93,6 +93,44 @@ probe_one() {   # probe_one <id>
     i=$(( i + 1 ))
   done
 
+  # upem（同族配对校验用：不同 upem 的字体混挂会错位）
+  local p_head=""
+  i=0
+  while [ "$i" -lt "$num" ]; do
+    _t=$(_tag "$f" $(( 12 + i * 16 )))
+    if [ "$_t" = "head" ]; then
+      _ob=$(_fb "$f" $(( 12 + i * 16 + 8 )) 4)
+      p_head=$(_u32 "$_ob" 0)
+      break
+    fi
+    i=$(( i + 1 ))
+  done
+  if [ -n "$p_head" ]; then
+    _up=$(_u16 "$(_fb "$f" $(( p_head + 18 )) 2)" 0)
+    case "$_up" in ''|*[!0-9]*) ;; *) _put "$mf" upem "$_up" ;; esac
+  fi
+
+  # 旧版升级迁移：老合成产物没有 merged=1，但族名/名字里带「合成」
+  #   （合成时名字会被改成 "XXX 合成"）。这里补上标记，避免它被当成同族参与配对。
+  _nm=$(head -c 200 "$LIBX/$id.name" 2>/dev/null | tr -d '\r\n')
+  case "$_nm" in *合成*) _put "$mf" merged 1 ;; esac
+  _fam=$(sed -n 's/^family=//p' "$mf" 2>/dev/null | tail -n1)
+  case "$_fam" in *合成*) _put "$mf" merged 1 ;; esac
+  # 已经有 merge=1（合成过程写的）也补 merged
+  if grep -q '^merge=1' "$mf" 2>/dev/null; then _put "$mf" merged 1; fi
+
+  # 清理非法字组引用：组长是合成字体 / 组长不存在 → 摘掉 group=
+  _grp=$(sed -n 's/^group=//p' "$mf" 2>/dev/null | tail -n1 | tr -d '\r')
+  if [ -n "$_grp" ] && [ "$_grp" != "$id" ]; then
+    _gbad=0
+    [ -f "$LIBX/$_grp.meta" ] || _gbad=1
+    if [ "$_gbad" = 0 ]; then
+      grep -q '^merged=1' "$LIBX/$_grp.meta" 2>/dev/null && _gbad=1
+      grep -q '^merge=1' "$LIBX/$_grp.meta" 2>/dev/null && _gbad=1
+    fi
+    [ "$_gbad" = 1 ] && sed -i '/^group=/d' "$mf" 2>/dev/null
+  fi
+
   # 轮廓类型
   local ot="?"
   [ -n "$p_glyf" ] && ot="glyf"

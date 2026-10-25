@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 保时捷字体（三合一） - 公共函数库
+# 自定义字体切换模块 - 公共函数库
 # 提供：系统识别 / 系统名称 / Root 管理器识别 / 持久化设置 / 挂载路径映射
 # 槽位发现见 slots.sh，自带挂载见 mount.sh；脚本中通过 source 引入
 
@@ -10,10 +10,8 @@ LIB=${LIB:-/data/adb/custom_font_lib}
 #   子项目还要认内置配色 builtin_*，各项目在这里各写各的规则，
 #   上层代码统一用 $(lib_font_ids)，就不会在同步时被互相覆盖。
 lib_font_ids() {
-  # ★ 2026-10-19 保时捷版改动：同时认用户导入的 f<数字>.ttf 和内置配色 builtin_*.ttf
-  #   （只认一种的话字体库会显示 0 个，用户以为模块装坏了）
   local f
-  for f in "$LIB"/f[0-9]*.ttf "$LIB"/builtin_*.ttf; do
+  for f in "$LIB"/f[0-9]*.ttf; do
     [ -f "$f" ] || continue
     basename "$f" .ttf
   done
@@ -380,18 +378,48 @@ skip_count() { printf '%s' "$DIAG_SKIPS" | grep -c . 2>/dev/null; }
 # 持久化设置：保存在字体库目录，更新模块不会丢（卸载时一并删除）
 # ---------------------------------------------------------------------------
 cfg_get() {
-  local v
-  v=$(sed -n "s/^$1=//p" "$SETTINGS" 2>/dev/null | tail -n1 | tr -d '[:space:]')
-  echo "${v:-$2}"
+  # ★ 2026-10-25 提速（作者反馈：刷入/应用太慢）：
+  #   原来每次调用都跑 `sed | tail | tr` 三个进程。生成计划时
+  #   「每个字体 × 每个开关」会调几千次 → 光起进程就几十秒到几分钟。
+  #   现在第一次把 settings.conf 整份读进内存（一次），之后纯 shell 查。
+  if [ "${CFG_CACHE_READY:-0}" != 1 ]; then
+    CFG_CACHE_READY=1
+    if [ -f "$SETTINGS" ]; then
+      while IFS='=' read -r _k _v; do
+        case "$_k" in ''|'#'*) continue ;; esac
+        case "$_k" in *[!A-Za-z0-9_]*) continue ;; esac
+        eval "CFGV_$_k=\$_v"
+      done < "$SETTINGS" 2>/dev/null
+    fi
+  fi
+  eval "_cv=\${CFGV_$1:-}"
+  if [ -n "${_cv:-}" ]; then
+    printf '%s\n' "$_cv"
+  else
+    printf '%s\n' "$2"
+  fi
+  return 0
 }
 cfg_set() {
   local tmp="$SETTINGS.tmp.$$"
   mkdir -p "$LIB" 2>/dev/null
   { grep -v "^$1=" "$SETTINGS" 2>/dev/null; echo "$1=$2"; } > "$tmp" && mv -f "$tmp" "$SETTINGS"
+  # 同步内存缓存（同一个进程里 set 完再 get 要能读到新值）
+  case "$1" in
+    ''|*[!A-Za-z0-9_]*) ;; *) eval "CFGV_$1=\$2" ;;
+  esac
+  # ★ 2026-10-25：角色判定的开关缓存也要作废，否则改完开关同一进程里不生效
+  _RF_READY=0
+  return 0
 }
 
 # 挂载方式：self = 模块自带挂载（默认，不依赖元模块）；manager = 交给 Root 管理器/元模块挂载
 mount_mode() {
+  # ★ 2026-10-25 危险区：force_manager=1 时一律按管理器挂载处理
+  if [ "$(cfg_get force_manager 0 2>/dev/null)" = 1 ]; then
+    echo manager
+    return 0
+  fi
   case "$(cfg_get mount_mode self)" in
     manager) echo manager ;;
     *)       echo self ;;

@@ -11,12 +11,20 @@ MODDIR=${0%/*}
 
 # ---------------------------------------------------------------------------
 # 自愈：扫描缓存被清过（或安装时 rescan 失败）→ 补建一次槽位清单
+#   只在这个小文件缺失时才动手，正常开机零开销。
+# ---------------------------------------------------------------------------
+_LIB="${LIB:-/data/adb/custom_font_lib}"
+if [ ! -s "$_LIB/scanned/slots.meta" ]; then
+  sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
+fi
 
 # 自愈：字体结构字段（轮廓类型 / 是否可变 / 轴范围）缺失 → 开机补一次。
-#   刷入时本该写好；万一没写成（老版本装的字体），在这里补，比等界面探测早得多。
+#   这些字段是"能不能合成"的判断依据，刷入时本该写好；
+#   万一没写成（老版本装的字体、档案被清过），在这里补，比等界面探测早得多，
+#   界面打开时就是现成的。只检查、只补缺的，正常开机零开销。
 if [ -f "$MODDIR/metaprobe.sh" ]; then
   _miss=0
-  for _f in "$_LIB"/f*.ttf "$_LIB"/builtin_*.ttf; do
+  for _f in "$_LIB"/f*.ttf; do
     [ -e "$_f" ] || continue
     _i=${_f##*/}; _i=${_i%.ttf}
     if [ -f "$_LIB/$_i.meta" ]; then
@@ -26,12 +34,6 @@ if [ -f "$MODDIR/metaprobe.sh" ]; then
     fi
   done
   [ "$_miss" = 1 ] && LIB="$_LIB" sh "$MODDIR/metaprobe.sh" >/dev/null 2>&1
-fi
-#   只在这个小文件缺失时才动手，正常开机零开销。
-# ---------------------------------------------------------------------------
-_LIB="${LIB:-/data/adb/custom_font_lib}"
-if [ ! -s "$_LIB/scanned/slots.meta" ]; then
-  sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
 fi
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
 
@@ -58,6 +60,16 @@ rm -f "$MODDIR/mount_missed"
 # 会把老设备的开机动画卡住（真机反馈过）。这里开机已经起来了，慢一点没人受影响。
 # 只补"确实没有计划"的情况：正常情况下计划在 apply 时就写好了，这里什么都不做。
 # ---------------------------------------------------------------------------
+# ★ 2026-10-24 B5：把挂载延后到开机完成（service 阶段）再做
+if [ "$(cfg_get mount_in_service 0 2>/dev/null)" = 1 ] && [ -f "$MODDIR/mount.sh" ]; then
+  _p3=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
+  case "$_p3" in ""|none) ;; *)
+    beat service "B5：改为开机完成后挂载（service 阶段）"
+    ( . "$MODDIR/mount.sh"; payload_mount "$MODDIR" service ) >> "$LIB/mount.log" 2>&1
+    ;;
+  esac
+fi
+
 if [ -f "$MODDIR/fontctl.sh" ] && [ ! -s "$MODDIR/slots.map" ]; then
   _p2=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
   case "$_p2" in
@@ -131,13 +143,19 @@ if [ -f "$LIB/.gms_journal.conf" ] && [ -f "$MODDIR/google_font.sh" ]; then
   command -v renice >/dev/null 2>&1 && renice 10 $$ >/dev/null 2>&1
   [ -x /system/bin/ionice ] && /system/bin/ionice -c2 -n7 $$ >/dev/null 2>&1
   if command -v timeout >/dev/null 2>&1; then
-    timeout 90 sh "$MODDIR/google_font.sh" reconcile
-# 2026-10-21：桥接功能已摘除（对 Play 商店无效，且会让部分 Google 应用异常）
-     >/dev/null 2>&1
+    timeout 90 sh "$MODDIR/google_font.sh" reconcile >/dev/null 2>&1
   else
     sh "$MODDIR/google_font.sh" reconcile >/dev/null 2>&1
   fi
 fi
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-21：商店缓存桥接整段摘除。
+#   原因：实测 Play 商店的字体打包在它自己的 APK 里（assets/ProductSans-*.ttf），
+#        替换 GMS 缓存文件对它完全无效；而 Chrome/Gemini 走的是「停用提供器」那条路。
+#        这条桥接既没用又会往 GMS 目录塞 44MB 克隆、force-stop GMS，
+#        是部分 Google 应用（Gemini 等）异常的可能来源，故移除。
+# ---------------------------------------------------------------------------
 
 # 自带挂载模式下选了字体，但本次开机没有挂载记录 -> 提示用户
 # （主挂载在 post-fs-data，所以这一般意味着"Root 管理器开机时没运行模块脚本"：
@@ -222,6 +240,91 @@ sh "$MODDIR/fontctl.sh" relink >/dev/null 2>&1
 MISSED=0
 [ -f "$MODDIR/mount_missed" ] && MISSED=1
 beat service "finish active=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font") missed=$MISSED"
+
+# ---------------------------------------------------------------------------
+# 热重启看门狗（2026-10-21，安全版）
+#
+#   为什么要它：换了字体但 framework 加载不了 → system_server 崩 → 热重启 → 再来一遍。
+#              热重启**不会重跑开机脚本**，所以"等 boot_completed 超时"的救援等不到机会。
+#
+#   安全设计（防止自己变成新的死循环）：
+#     · 最多 90 轮（约 15 分钟）→ 自己退出，不常驻
+#     · 锁文件保证单实例；$LIB/.no_watchdog 存在则完全不跑
+#     · 系统稳定 12 轮（约 3 分钟）→ 清零计数并退出
+#     · killall system_server 全程**只执行一次**（标记文件守护）
+#     · 循环里每条命令都 `|| true`，出错就安静退出，不自我重启
+# ---------------------------------------------------------------------------
+_wd_start() {
+  # ★ 2026-10-25 默认关闭（真凶定位）：
+  #   看门狗在「system_server 的 PID 变了两次」时会先 panic 回滚、再 killall system_server。
+  #   任何原因的热重启都会命中 —— 一 kill，所有 App 的 WebView 渲染进程跟着死，
+  #   crashpad 报「Render process crash wasn't handled」→ 宿主 App 直接 abort。
+  #   现场就是「任何模块的 WebUI 一点就闪退」+ 几十个 tombstone。
+  #   现在只有用户显式打开 hotboot_watchdog 才启用；开启时默认也是「干跑」。
+  [ "$(cfg_get hotboot_watchdog 0 2>/dev/null)" = 1 ] || return 0
+  [ -f "$_LIB/.no_watchdog" ] && return 0
+  [ -s "$_LIB/active_font" ] || return 0
+  [ "$(cat "$_LIB/active_font" 2>/dev/null)" = "none" ] && return 0
+  [ -f "$MODDIR/fontctl.sh" ] || return 0
+  # 单实例
+  mkdir "$_LIB/.wd.lock" 2>/dev/null || return 0
+  (
+    _HB="$_LIB/.hotboot"
+    _cnt=$(cat "$_HB" 2>/dev/null || echo 0)
+    case "$_cnt" in ''|*[!0-9]*) _cnt=0 ;; esac
+    # 已经反复失败过：这次开机不再尝试，让开机救援接手
+    [ "$_cnt" -ge 6 ] && { rmdir "$_LIB/.wd.lock" 2>/dev/null; exit 0; }
+
+    _last=$(pidof system_server 2>/dev/null || true)
+    _stable=0
+    _round=0
+    while [ "$_round" -lt 90 ]; do
+      _round=$(( _round + 1 ))
+      sleep 10 2>/dev/null || break
+      [ -f "$_LIB/.no_watchdog" ] && break
+      _now=$(pidof system_server 2>/dev/null || true)
+      if [ -n "$_now" ] && [ -n "$_last" ] && [ "$_now" != "$_last" ]; then
+        _cnt=$(( _cnt + 1 ))
+        echo "$_cnt" > "$_HB" 2>/dev/null || true
+        printf 'time=%s hotboot=%s pid=%s\n' \
+          "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "$_cnt" "$_now" \
+          >> "$_LIB/.panic.log" 2>/dev/null || true
+        if [ "$_cnt" -ge 2 ]; then
+          if [ -f "$_LIB/.wd_dry" ]; then
+            # 干跑：只记日志，什么都不做（上真机先这样验一轮）
+            printf 'dry would-panic hotboot=%s\n' "$_cnt" >> "$_LIB/.panic.log" 2>/dev/null || true
+          else
+            sh "$MODDIR/fontctl.sh" panic >/dev/null 2>&1 && _pan=1 || _pan=0
+            # 只有真的卸掉了挂载，才允许让 system_server 重启一次
+            # ★ 2026-10-25：默认只记录，不 kill（kill 会连带杀死所有 WebView 渲染进程）
+            if [ "$(cfg_get hotboot_kill 0 2>/dev/null)" = 1 ] && \
+               [ "$_pan" = 1 ] && [ "$_cnt" -lt 4 ] && [ ! -f "$_LIB/.reboot_fired" ]; then
+              : > "$_LIB/.reboot_fired" 2>/dev/null || true
+              killall system_server 2>/dev/null || true
+            else
+              printf 'would-kill hotboot=%s（hotboot_kill 未开启）\n' "$_cnt" >> "$_LIB/.panic.log" 2>/dev/null || true
+            fi
+          fi
+        fi
+        _last=$_now
+        _stable=0
+        # 已经回滚过就别再折腾：直接退出
+        [ "$_cnt" -ge 2 ] && break
+      fi
+      if [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ]; then
+        _stable=$(( _stable + 1 ))
+        if [ "$_stable" -ge 12 ]; then
+          echo 0 > "$_HB" 2>/dev/null || true
+          break
+        fi
+      fi
+    done
+    rmdir "$_LIB/.wd.lock" 2>/dev/null || true
+  ) >/dev/null 2>&1 &          # ★ 必须重定向：否则子 shell 持有父进程的 stdout，
+                                #   脚本"看起来"不结束（真机上会让开机阶段像卡住）
+}
+
+_wd_start
 
 # ★ 2026-10-24：上次开着抓日志（开机前没来得及关）→ 这次开机自动续抓
 if [ -f "${LIB:-/data/adb/custom_font_lib}/logs/.on" ] && [ -f "$MODDIR/logcatch.sh" ]; then

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 保时捷字体（三合一） - 字体库管理 / 应用脚本（供 WebUI、安装脚本调用）
+# 自定义字体切换模块 - 字体库管理 / 应用脚本（供 WebUI、安装脚本调用）
 # 用法：
 #   sh fontctl.sh status                      输出 A=<生效> P=<待生效> R=<系统> 等状态
 #   sh fontctl.sh list                        列出字体库：id|名称|字节数|元数据
@@ -39,7 +39,14 @@ STORAGE=${STORAGE:-/data/media/0}
 #   后果不是"少个功能"：fontctl.sh 是界面的唯一入口，它当场退出 = 卡片空白、切不了字体、
 #   诊断打不开、所有开关失效，而且用户拿不到任何线索。
 #   （2026-10-11 姊妹项目同步 v1.0.5 时抓到的，原来是 `. ... 2>/dev/null`）
+# ★ 2026-10-25 提速：settings 系列只需要 common.sh，不必解析 slots.sh / mount.sh
+#   （开关切换会调用它，之前每次都要把十几万字符的脚本读一遍）
+_need_heavy=1
+case "${1:-}" in
+  settings) _need_heavy=0 ;;
+esac
 for _mf in common.sh slots.sh mount.sh; do
+  [ "$_need_heavy" = 0 ] && [ "$_mf" != "common.sh" ] && continue
   [ -f "$MODDIR/$_mf" ] || { echo "ERROR:模块文件缺失（$_mf）—— 请重新安装模块"; exit 3; }
   . "$MODDIR/$_mf"
 done
@@ -53,16 +60,7 @@ export TMPDIR="$LIB"
 
 APPLIED="$MODDIR/slots.applied"
 MODID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
-# ★ 2026-10-19 保时捷版改动：id 不能写死主项目的。
-#   本项目 4 个包 id 是 porsche_font_multi / _718 / _911 / _gt3。
-if [ -z "$MODID" ]; then
-  for _d in /data/adb/modules/porsche_font_*; do
-    [ -f "$_d/module.prop" ] || continue
-    MODID=${_d##*/}
-    break
-  done
-fi
-[ -n "$MODID" ] || MODID=porsche_font_multi
+[ -n "$MODID" ] || MODID=custom_font_switcher
 
 # 旧版把设置放在模块目录（升级会被覆盖），迁移到字体库目录
 [ -f "$SETTINGS" ] || { [ -f "$MODDIR/settings.conf" ] && cp -f "$MODDIR/settings.conf" "$SETTINGS" 2>/dev/null; }
@@ -72,7 +70,11 @@ meta_get() { sed -n "s/^$2=//p" "$LIB/$1.meta" 2>/dev/null | tail -n1 | tr -d '\
 meta_set() {
   local tmp="$LIB/$1.meta.tmp.$$"
   case "$2" in ""|*[!A-Za-z0-9_]*) return 1 ;; esac
-  case "$3" in *[!A-Za-z0-9_.-]*) return 1 ;; esac
+  # ★ 2026-10-21 修：原来值只允许 [A-Za-z0-9_.-]，于是 family="方正悠黑 Google VF"
+  #   这种带空格/中文的值**静默写不进去** → 字组校验读不到族名原文，等于没校验。
+  #   现在只挡控制字符（换行/制表等）和超长，其余可打印字符都允许。
+  case "$3" in *[![:print:]]*) return 1 ;; esac
+  [ ${#3} -le 120 ] || return 1
   { grep -v "^$2=" "$LIB/$1.meta" 2>/dev/null; echo "$2=$3"; } > "$tmp" && mv -f "$tmp" "$LIB/$1.meta"
 }
 meta_compact() { tr '\n' ',' 2>/dev/null < "$LIB/$1.meta" | sed 's/,$//'; }
@@ -417,7 +419,11 @@ store_font() {
       echo "outline_sz=$_sf_sz"
     } > "$_sf_tmp" 2>/dev/null && mv -f "$_sf_tmp" "$LIB/$id.meta" 2>/dev/null
   else
-    printf 'outline=%s\noutline_sz=%s\n' "$_sf_ho" "$_sf_sz" > "$LIB/$id.meta" 2>/dev/null
+    # ★ 2026-10-18：顺便把文件大小也记进 meta —— list 直接读，不用再 stat
+    _sf_bytes=$(stat -c '%s' "$LIB/$id.ttf" 2>/dev/null | tr -dc '0-9')
+    { printf 'size=%s\n' "${_sf_bytes:-0}"
+      printf 'outline=%s\noutline_sz=%s\n' "$_sf_ho" "$_sf_sz"
+    } > "$LIB/$id.meta" 2>/dev/null
   fi
   echo "OK:$id"
 }
@@ -563,7 +569,6 @@ make_plan() {
       SCOPE_NOTE="中文字形覆盖率 ${_cjk_rate}% < 98%，中文槽位保持原厂（避免方块）"
     fi
   fi
-
   export CJK_GUARD
   if [ "$scope" = combo ]; then
     slot_plan "$MODDIR" all "$kl" "$ks" "$klk" > "$out"
@@ -631,23 +636,33 @@ slot_weight() {
 
 # 把某个字体所在族的全部字重读进来（一次 apply 最多两次：组合模式下中英各一次）
 # 结果放 GRP_PAIRS="id:字重 id:字重 …"，没配对时只有它自己
+#
+# ★ 2026-10-21（作者要求：怕混挂不同字体导致缺字 / 开不了机）：
+#   同族配对**默认关闭**（cfg pair_family=0）。每份字体各自独立，不自动组族。
+#   想用的人需要在设置里显式打开；打开后依然逐份校验，只配"确实像同一套字体的不同字重"：
+#     · 轮廓可用（outline=1）
+#     · 同一 upem
+#     · 语种覆盖类别一致（cjk / latin 标记相同）
+#     · 字形数量相差不超过 20%（防止把"只有拉丁的粗体"配进中文族）
+#   任何一条不满足 → 跳过该成员并写日志，绝不硬配。
 grp_load() {
-  local leader="$1" fam m id fam2 w
-  local pairs="$leader:$(meta_get "$leader" wght)"
-  GRP_PAIRS="$pairs"
-  fam=$(meta_get "$leader" fam)
-  case "$fam" in ""|none) return 0 ;; esac
-  # 统一用 lib_font_ids（各项目这个函数各写各的规则：
-  #   主项目只认 f*，子项目还认 builtin_*）—— 这样函数体在两边一模一样。
+  local leader="$1" id w
+  GRP_PAIRS="$leader:$(meta_get "$leader" wght)"
+  # ★ 2026-10-22：只认**手动字重组**（meta 里有 group=）。
+  #   原来还有一个"按族名自动配对"的分支（cfg pair_family），已删除：
+  #   族名相同的字体不一定是同一套，混挂会缺字/方块，甚至开不了机；
+  #   而字重组是用户明确勾选 + 五道校验，安全得多。
+  _grp=$(meta_get "$leader" group)
+  [ -n "$_grp" ] || return 0
+  case "$_grp" in ""|none) return 0 ;; esac
   for id in $(lib_font_ids); do
     [ "$id" = "$leader" ] && continue
     [ -f "$LIB/$id.meta" ] || continue
-    fam2=$(meta_get "$id" fam)
-    [ "$fam2" = "$fam" ] || continue
+    [ "$(meta_get "$id" group)" = "$_grp" ] || continue
     w=$(meta_get "$id" wght)
-    pairs="$pairs $id:$w"
+    GRP_PAIRS="$GRP_PAIRS $id:$w"
   done
-  GRP_PAIRS="$pairs"
+  return 0
 }
 
 # 从族里挑字重最接近 want 的那一份；族里只有一份就直接返回它
@@ -751,12 +766,9 @@ commit_payload() {
   rm -rf "$stage" 2>/dev/null
 
   if [ -f "$stage.list" ]; then mv -f "$stage.list" "$APPLIED"; else : > "$APPLIED"; fi
-  # ★ 2026-10-19 修复「切保留时钟开关后软重启不生效」：
-    #   覆盖之前先把上一份计划备份到 slots.map.prev。
-    #   因为切开关会让计划变少（151 → 119，少掉的 32 个正是时钟槽位），
-    #   而软重启的 do_unmount 只按现场挂载清单 $MNT_LIST 卸 ——
-    #   开机时挂的那些不在清单里，卸不到 → 时钟仍然被替换 → 看起来「没生效」。
-    #   有了 slots.map.prev，软重启就能把旧计划里的槽位全部卸掉。
+  # ★ 2026-10-19：覆盖前备份上一份计划。
+    #   切「保留锁屏时钟」会让计划变少（151 → 119），少掉的正是时钟槽位；
+    #   软重启时按差集撤掉这些槽位，才不会"显示成功但时钟还是被换掉"。
     if [ -s "$MODDIR/slots.map" ]; then
       cp -f "$MODDIR/slots.map" "$MODDIR/slots.map.prev" 2>/dev/null
     fi
@@ -798,6 +810,7 @@ prune_wrapped_ttc() {
   done
   return 0
 }
+
 
 # ---------------------------------------------------------------------------
 # ★ 2026-10-21：TTC 产物结构校验
@@ -865,15 +878,7 @@ do_apply() {
   # 判据（与 valid_font 同源，但这里只查最要命的一条）：**必须有一张轮廓表**。
   #   TrueType → `glyf`；OpenType/CFF → `CFF `(尾随空格) 或 `CFF2`；还有 `SVG ` 也算有轮廓来源。
   #   一个都没有 = 空壳，挂上去只会满屏方框 —— 宁可不动、也不要给用户造这个。
-  # ★ 2026-10-19 提速：has_outline 会把整个字体读一遍（内置配色 42MB），
-    #   而导入时已经在 .meta 里记过 outline=1 了 —— 有记录就直接信，不再重复读。
-    _ho_known=""
-    if [ -f "$LIB/$sel.meta" ]; then
-      case "$(sed -n 's/^outline=//p' "$LIB/$sel.meta" 2>/dev/null | head -n1 | tr -d '\r\n')" in
-        1) _ho_known=1 ;;
-      esac
-    fi
-    if [ -f "$LIB/$sel.ttf" ] && [ -z "$_ho_known" ] && ! has_outline "$LIB/$sel.ttf"; then
+  if [ -f "$LIB/$sel.ttf" ] && ! has_outline "$LIB/$sel.ttf"; then
     printf '%s %s %s\n' "$sel" "系统槽位" "scope=blocked via=nooutline detail=字体没有轮廓表(glyf/CFF)，挂上去只会显示方框" \
       >> "$LIB/ttc.log" 2>/dev/null
     echo "ERROR:这份字体里没有任何字形轮廓（缺 glyf/CFF）—— 挂上去会让中文全变成方框。请删掉它重新导入一份正常的字体"
@@ -996,10 +1001,24 @@ do_apply() {
           # 合集里装着好几种字（三星：0=日 1=韩 2=简中 3=繁中），**只换中文那几号**，
           # 日/韩保留原字形 —— 否则用户的中文字体没有假名/谚文字形，日韩就变方块。
           # 注意用重定向而不是 $(...)：那会开子 shell，TTC_CN_SRC / TTC_CN_DETAIL 就丢了。
-          ttc_cn_indices "${rel##*/}" "$nf" > "$LIB/.ttccn.$$" 2>/dev/null
-          cn=$(tr '\n' ' ' < "$LIB/.ttccn.$$" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')
-          cn_src="$TTC_CN_SRC"; cn_detail="$TTC_CN_DETAIL"
-          rm -f "$LIB/.ttccn.$$" 2>/dev/null
+          # ★ 2026-10-24 B4：合集策略（默认 = 只换中文那几号）
+          if [ "$(cfg_get ttc_no_mix 0 2>/dev/null)" = 1 ]; then
+            printf '%s %s faces=%s via=skip detail=B4 不生成混合合集（高级设置）\n' \
+              "$id" "$rel" "$nf" >> "$LIB/ttc.log" 2>/dev/null
+            continue
+          fi
+          if [ "$(cfg_get ttc_all_faces 0 2>/dev/null)" = 1 ]; then
+            cn=""
+            _i=0
+            while [ "$_i" -lt "$nf" ]; do cn="$cn $_i"; _i=$((_i + 1)); done
+            cn=$(printf '%s' "$cn" | sed 's/^ //')
+            cn_src="all-faces"; cn_detail="B4 全 face 替换（高级设置）"
+          else
+            ttc_cn_indices "${rel##*/}" "$nf" > "$LIB/.ttccn.$$" 2>/dev/null
+            cn=$(tr '\n' ' ' < "$LIB/.ttccn.$$" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')
+            cn_src="$TTC_CN_SRC"; cn_detail="$TTC_CN_DETAIL"
+            rm -f "$LIB/.ttccn.$$" 2>/dev/null
+          fi
           # 决策记录：报告里那份 fonts.xml 是被截断的，看不出代码到底怎么判的，
           # 所以这里把"换了哪几号、凭什么"写进 ttc.log，诊断报告会原样打印。
           printf '%s %s faces=%s replace=%s via=%s detail=%s\n' \
@@ -1034,8 +1053,29 @@ do_apply() {
             # ★ 2026-10-16：**别再吞报错**。真机上"合集没生成"导致挂载一直失败，
             #   而 ttc.log 里一个字都没有 —— 因为这里原来是 2>/dev/null || cand=""，
             #   失败原因彻底丢失。现在把 stderr 第一行 + 产物大小 + 剩余空间都记下来。
+            # ★ 2026-10-22（提速）：合集生成结果缓存。
+            #   键包含"用户字体 + 原合集 + face 集合"，任何一项变了都算未命中。
+            TTC_CACHE="$LIB/.ttc.cache"
+            _tc_sz=$(stat -c %s "$src" 2>/dev/null); _tc_mt=$(stat -c %Y "$src" 2>/dev/null)
+            _tc_osz=$(stat -c %s "/$rel" 2>/dev/null); _tc_omt=$(stat -c %Y "/$rel" 2>/dev/null)
+            _tc_cn=$(printf '%s' "$cn" | tr -d ' ')
+            _tc_key="${id}_${_tc_sz}_${_tc_mt}_${_tc_osz}_${_tc_omt}_${nf}_${_tc_cn}_g1"
+            _tc_hit=""
+            if [ -n "$_tc_key" ] && [ -s "$TTC_CACHE/$_tc_key.ttc" ]; then
+              _tc_hit="$TTC_CACHE/$_tc_key.ttc"
+            fi
+            if [ -n "$_tc_hit" ]; then
+              if cp -f "$_tc_hit" "$cand" 2>/dev/null && [ -s "$cand" ]; then
+                _twrc=0; _twerr=""
+              else
+                _twrc=1; _twerr="cache-copy-failed"; cand=""
+              fi
+              printf '%s %s faces=%s replace=%s via=ttc-cache-hit\n' \
+                "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" >> "$LIB/ttc.log" 2>/dev/null
+            else
             _twerr=$(ttc_wrap_mix "$src" "$nf" "$cand" "/$rel" "$cn" 2>&1)
             _twrc=$?
+            fi
             [ "$_twrc" = 0 ] || cand=""
             if [ -z "$cand" ] || [ ! -s "$cand" ]; then
               _twsz=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
@@ -1070,6 +1110,23 @@ do_apply() {
                 cand=""
               fi
             fi
+            # 产物合格 → 存进缓存（下次同条件直接复用）
+            if [ -n "$cand" ] && [ -n "${_tc_key:-}" ] && [ ! -s "$TTC_CACHE/$_tc_key.ttc" ]; then
+              # 空间保护：剩余不足 300MB 就不缓存（宁可下次慢，也不能把存储占满）
+              _tc_free=$(free_kb "$LIB" 2>/dev/null)
+              case "${_tc_free:-}" in ''|*[!0-9]*) _tc_free=0 ;; esac
+              if [ "$_tc_free" -gt 0 ] && [ "$_tc_free" -lt 307200 ]; then
+                printf '%s %s via=ttc-no-cache detail=剩余空间不足(%sKB)\n' \
+                  "$id" "$rel" "${_tc_free}" >> "$LIB/ttc.log" 2>/dev/null
+              else
+              mkdir -p "$TTC_CACHE" 2>/dev/null
+              cp -f "$cand" "$TTC_CACHE/$_tc_key.ttc" 2>/dev/null
+              # 只保留最近 3 份（当前字体 + 上一次），避免占太多空间
+              ls -1t "$TTC_CACHE"/*.ttc 2>/dev/null | tail -n +4 | while IFS= read -r _old; do
+                rm -f "$_old" 2>/dev/null
+              done
+              fi
+            fi
             if [ -n "$cand" ]; then
               _csz=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
               if ! isnum "$_csz" || [ "$_csz" -lt 1024 ] 2>/dev/null; then
@@ -1100,15 +1157,7 @@ do_apply() {
         mkdir -p "${dest%/*}" 2>/dev/null
         if ! ln -f "$src" "$dest" 2>/dev/null; then
           # 2. 校验：复制出来的文件必须完整
-          # ★ 2026-10-19 提速：目标已存在且大小与源相同时跳过复制。
-#   （内置配色 42MB，每次 apply 都重拷一遍会明显拖慢；内容没变就没必要重拷）
-    _need_cp=1
-    if [ -f "$dest" ] && [ -f "$src" ]; then
-      if [ "$(wc -c < "$dest" 2>/dev/null | tr -d ' ')" = "$(wc -c < "$src" 2>/dev/null | tr -d ' ')" ]; then
-        _need_cp=0
-      fi
-    fi
-    if [ "$_need_cp" = "1" ] && { ! cp -f "$src" "$dest" 2>/dev/null || [ "$(wc -c < "$dest" 2>/dev/null)" != "$(wc -c < "$src" 2>/dev/null)" ]; }; then
+          if ! cp -f "$src" "$dest" 2>/dev/null || [ "$(wc -c < "$dest")" != "$(wc -c < "$src")" ]; then
             fail=1; break
           fi
           chmod 644 "$dest" 2>/dev/null
@@ -1174,7 +1223,7 @@ do_report() {
   A=$(cur_active); P=$(cur_pending)
   # 一键体检的结论放最前面（见 diag.sh）
   [ -f "$MODDIR/diag.sh" ] && sh "$MODDIR/diag.sh" brief 2>/dev/null
-  echo "== 保时捷字体（三合一） 诊断报告 =="
+  echo "== 自定义字体切换模块 诊断报告 =="
   echo "模块版本: $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null) ($(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null))"
   echo "设备: $(getp ro.product.brand) $(getp ro.product.model) | Android $(getp ro.build.version.release) (SDK $(getp ro.build.version.sdk))"
   echo "系统: $(detect_rom) / $(rom_name "$(detect_rom)")"
@@ -1213,6 +1262,103 @@ do_report() {
   echo "/data 剩余: $(df -k /data 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4) KB"
   [ -f "$MODDIR/rescued" ] && echo "提示: 上次开机未完成，已触发自动恢复"
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-22（底层优化）：**永久索引**
+#   目的：把"当前真相"落盘一次，之后谁要用就直接读文件，不再现场 glob/解析。
+#   谁维护：所有会改字体库的子命令在结束时调用 index_build（见各分支末尾）。
+#   谁读取：界面（fastquery/index）、诊断报告、挂载脚本需要清单时。
+#   格式：纯文本 key=value + 若干 font= 行，便于 shell/grep 直接取。
+#   自愈：文件不存在或 schema 版本不符 → index_build 重建一次。
+# ---------------------------------------------------------------------------
+INDEX_SCHEMA=3
+
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-22（修「导入字体后界面不刷新」）：
+#   原来是在各个分支**末尾**调用 index_build —— 但那些分支几乎都是
+#   `echo "$out"; exit $rc` 的形式，exit 后面的代码永远不会执行，
+#   于是索引一直是旧的，界面读旧索引 ⇒ 看不到刚导入的字体。
+#
+#   现在改成"脏标记 + 退出时统一重建"：
+#     · 会改字体库的分支开头写 mark_dirty
+#     · 不管从哪条路径退出（exit / 正常结束 / 出错），trap 都会重建一次
+#     · 只读命令（status / list / quick / index …）不标记，不会多余重建
+# ---------------------------------------------------------------------------
+INDEX_DIRTY=0
+mark_dirty() { INDEX_DIRTY=1; return 0; }
+
+_index_on_exit() {
+  [ "${INDEX_DIRTY:-0}" = 1 ] || return 0
+  index_build 2>/dev/null
+  return 0
+}
+trap '_index_on_exit' EXIT
+
+index_path() { printf '%s/.index' "$LIB"; }
+
+index_build() {
+  local _p _tmp _id _lf _lnm _lsz _lmt _n
+  _p=$(index_path)
+  _tmp="$_p.tmp.$$"
+  mkdir -p "$LIB" 2>/dev/null
+  {
+    printf '#CFS-INDEX %s\n' "$INDEX_SCHEMA"
+    printf 'built=%s\n' "$(date +%s 2>/dev/null)"
+    printf 'ver=%s\n' "$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')"
+    printf 'active=%s\n' "$(cur_active 2>/dev/null)"
+    printf 'pending=%s\n' "$(cur_pending 2>/dev/null)"
+    printf 'rom=%s\n' "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")"
+    printf 'mode=%s\n' "$(mount_mode 2>/dev/null)"
+    printf 'slots=%s\n' "$(grep -c . "$MODDIR/slots.map" 2>/dev/null)"
+    _n=0
+    for _lf in "$LIB"/*.ttf; do
+      [ -e "$_lf" ] || continue
+      case "$_lf" in *'*'*) continue ;; esac
+      _id=${_lf##*/}
+      case "$_id" in f[0-9]*.ttf|builtin_*.ttf) ;; *) continue ;; esac
+      _id=${_id%.ttf}
+      _lnm=""
+      [ -f "$LIB/$_id.name" ] && IFS= read -r _lnm < "$LIB/$_id.name" 2>/dev/null
+      _lsz=0
+      _lmt=""
+      if [ -f "$LIB/$_id.meta" ]; then
+        while IFS= read -r _kv; do
+          [ -z "$_kv" ] && continue
+          case "$_kv" in \#*) continue ;; esac
+          _lmt="${_lmt}${_lmt:+,}${_kv}"
+          case "$_kv" in
+            size=*) _lsz=${_kv#size=} ;;
+            outline_sz=*) [ "$_lsz" = 0 ] && _lsz=${_kv#outline_sz=} ;;
+          esac
+        done < "$LIB/$_id.meta" 2>/dev/null
+      fi
+      case "${_lsz:-}" in ''|*[!0-9]*) _lsz=0 ;; esac
+      printf 'font=%s|%s|%s|%s\n' "$_id" "${_lnm:-$_id}" "$_lsz" "$_lmt"
+      _n=$((_n + 1))
+    done
+    printf 'fonts=%s\n' "$_n"
+  } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_p" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
+  return 0
+}
+
+index_ok() {
+  local _p _s _newer
+  _p=$(index_path)
+  [ -s "$_p" ] || return 1
+  _s=$(sed -n '1s/^#CFS-INDEX //p' "$_p" 2>/dev/null | tr -d '\r')
+  [ "$_s" = "$INDEX_SCHEMA" ] || return 1
+  # ★ 自愈：字体库里有比索引更新的字体文件（手工放进来的/外部改动）→ 视为过期
+  _newer=$(find "$LIB" -maxdepth 1 -name '*.ttf' -newer "$_p" -print -quit 2>/dev/null)
+  [ -z "$_newer" ] || return 1
+  return 0
+}
+
+# 输出索引内容（缺失/过期就重建一次）
+index_get() {
+  index_ok || index_build
+  cat "$(index_path)" 2>/dev/null
 }
 
 case "${1:-}" in
@@ -1268,6 +1414,13 @@ case "${1:-}" in
         #   界面靠它决定下次点击要写 0 还是 1；不回传的话，界面只能靠本地缓存，
         #   一旦某次没回写就会"交替失败"（用户实测过）。
         echo "KL=$(cfg_get keep_lockscreen 0)"
+        # ★ 2026-10-24：把「中文合集替换」的**生效值**也给界面（1/0），
+        #   界面新增的开关靠它回显；没有这一行，开关就只能靠猜。
+        echo "TR=$(ttc_effective 2>/dev/null)"
+        echo "SPF=$(cfg_get skip_product 0)"
+        # 三个新开关默认都是 0（关），只能人为打开
+        echo "KS=$(cfg_get keep_samsung 0)"
+        echo "SVF=$(cfg_get skip_vf 0)"
         echo "SP=x=${_xsx:-0},a=$(( ${_xss2:-0} + ${_xso:-0} + ${_xsd:-0} ))"
       else
         echo "SP="
@@ -1329,57 +1482,96 @@ case "${1:-}" in
       esac
     done
     ;;
+
+
+
+  index)
+    # 直接吐索引（缺失就现场建一次）
+    index_get
+    ;;
+
+  index-build)
+    index_build && echo OK
+    ;;
+
+  quick)
+    # ★ 2026-10-22（性能）：首屏一次性拿「状态 + 字体列表」。
+    #   为什么不直接调 status + list：KernelSU 的 exec 是同步的，两次调用 = 两次
+    #   shell 启动 + 两次解析（common.sh/slots.sh/mount.sh + fontctl 本身 ≈ 250KB）。
+    #   这里还额外跳过 slot_sources_report（要跑外部进程，是 status 里最重的一步），
+    #   SP/SP4 留空，界面那三行先隐藏，随后由后台 status 补齐。
+    A=$(cur_active); P=$(cur_pending)
+    echo "A=$A"
+    echo "P=$P"
+    echo "R=$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')"
+    if [ -f "$MODDIR/rescued" ]; then echo "X=1"; else echo "X=0"; fi
+    echo "N=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')"
+    echo "S=$(effective_scope "$P" 2>/dev/null)"
+    echo "M=$(mount_mode)"
+    echo "PM=$(cat "$MODDIR/payload.mode" 2>/dev/null | tr -d '[:space:]')"
+    echo "RM=$(root_manager)"
+    echo "V=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)"
+    echo "KL=$(cfg_get keep_lockscreen 0)"
+    _ttcn=$(awk '$2 ~ /\.ttc$/ { c++ } END { print c + 0 }' "$MODDIR/slots.map" 2>/dev/null)
+    case "${_ttcn:-}" in ''|*[!0-9]*) _ttcn=0 ;; esac
+    echo "TT=$_ttcn"
+    echo "@@L@@"
+    # ★ 2026-10-22（底层优化）：优先读永久索引 —— 单文件、单次读，不再现场 glob。
+    #   索引不存在或 schema 不符 → 现场建一次（只发生一次）。
+    if index_ok; then
+      sed -n 's/^font=//p' "$(index_path)" 2>/dev/null
+    else
+      sed -n 's/^font=//p' "$(index_path)" 2>/dev/null
+    fi
+
+    ;;
+
   list)
-    # ★ 2026-10-19：**不 stat 字体文件、不启动外部命令**：
-    #   尺寸取 .meta 里的 size= / outline_sz=（导入时写好的真实字节数），
-    #   两个都没有就输出 0（界面显示「—」，安装时会一次性补齐）。
-    #   原来用 `ls -ln` 读尺寸 —— 会对 $LIB 里每个文件 stat 一次，
-    #   内置配色是 42MB 实体文件，一旦某个是失效的 bind mount 就会进 D 状态，
-    #   命令永不返回 → 界面卡在「正在读取」。
+    # ★★ 2026-10-18 重写（修「界面卡在 ① 发送 list」）：
+    #   **不 stat 任何字体文件，不启动任何外部命令。**
     #
-    # ★ 顺序（作者要求）：内置配色固定 **无色(718) → 一点红(911) → 烈焰(GT3)**，
-    #   用户导入的字体排在内置配色后面。原来按文件名 glob，顺序是
-    #   colon → flair → none（一点红/烈焰/无色），跟想要的正好反着。
-    _emitf() {   # $1 = 字体 id
-      local _id="$1" _nm="" _sz="" _mt="" _kv
-      if [ -f "$LIB/$_id.name" ]; then
-        IFS= read -r _nm < "$LIB/$_id.name" 2>/dev/null
-      fi
-      if [ -f "$LIB/$_id.meta" ]; then
-        while IFS= read -r _kv; do
-          [ -z "$_kv" ] && continue
-          _mt="${_mt}${_mt:+,}${_kv}"
-          case "$_kv" in
-            size=*) _sz=${_kv#size=} ;;
-            outline_sz=*) [ -z "$_sz" ] && _sz=${_kv#outline_sz=} ;;
-          esac
-        done < "$LIB/$_id.meta" 2>/dev/null
-      fi
-      case "${_sz:-}" in ''|*[!0-9]*) _sz=0 ;; esac
-      _lout="${_lout}${_id}|${_nm:-$_id}|${_sz}|${_mt}
-"
-    }
+    #   上一版为了拿字体大小对 $LIB/<id>.ttf 做了 stat。
+    #   子项目的 $LIB 里有 3 个 42MB 内置字体，只要其中一个是失效的 bind mount，
+    #   stat 就会进入不可中断睡眠（D 状态），命令永不返回 →
+    #   KernelSU 的回调超时 → 界面永远停在「① 发送 list」。
+    #
+    #   现在只用 shell 内建读 *.name / *.meta 这两个小文本，
+    #   大小取 meta 里的 size= 或 outline_sz=，都没有就给 0（界面显示「—」）。
     _lout=""
-    # ① 内置配色：固定顺序
-    for _bid in builtin_none builtin_colon builtin_flair; do
-      [ -e "$LIB/$_bid.ttf" ] || continue
-      _emitf "$_bid"
-    done
-    # ② 其余字体（用户导入的 f<数字>），跳过内置
     for _lf in "$LIB"/*.ttf; do
       [ -e "$_lf" ] || continue
       case "$_lf" in *'*'*) continue ;; esac
       _lid=${_lf##*/}
       case "$_lid" in
-        builtin_*.ttf) continue ;;
-        f[0-9]*.ttf) ;;
+        f[0-9]*.ttf|builtin_*.ttf) ;;
         *) continue ;;
       esac
-      _emitf "${_lid%.ttf}"
+      _lid=${_lid%.ttf}
+      _lnm=""
+      if [ -f "$LIB/$_lid.name" ]; then
+        IFS= read -r _lnm < "$LIB/$_lid.name" 2>/dev/null
+      fi
+      _lsz=""
+      _lmt=""
+      if [ -f "$LIB/$_lid.meta" ]; then
+        while IFS= read -r _kv; do
+          [ -z "$_kv" ] && continue
+          _lmt="${_lmt}${_lmt:+,}${_kv}"
+          case "$_kv" in
+            size=*) _lsz=${_kv#size=} ;;
+            outline_sz=*) [ -z "$_lsz" ] && _lsz=${_kv#outline_sz=} ;;
+          esac
+        done < "$LIB/$_lid.meta" 2>/dev/null
+      fi
+      # 只保留数字，避免脏数据
+      case "${_lsz:-}" in ''|*[!0-9]*) _lsz=0 ;; esac
+      _lout="${_lout}${_lid}|${_lnm:-$_lid}|${_lsz}|${_lmt}
+"
     done
     printf '%s' "$_lout"
     ;;
   import)
+    mark_dirty
     bad_path "$2" && { echo "ERROR:路径不允许"; exit 1; }
     src=$(to_real "$2")
     [ -f "$src" ] || src="$2"
@@ -1392,6 +1584,7 @@ case "${1:-}" in
     echo "OK"
     ;;
   upload-finish)
+    mark_dirty
     [ -f "$PART" ] || { echo "ERROR:没有待处理的上传"; exit 1; }
     if [ -n "$2" ] && [ "$(wc -c < "$PART" | tr -d ' ')" != "$2" ]; then
       rm -f "$PART"
@@ -1402,6 +1595,7 @@ case "${1:-}" in
     echo "$out"; exit $rc
     ;;
   rename)
+    mark_dirty
     check_id "$2"
     [ -n "$3" ] || { echo "ERROR:名称不能为空"; exit 1; }
     printf '%s' "$(clean_name "$3")" > "$LIB/$2.name"
@@ -1409,6 +1603,7 @@ case "${1:-}" in
     echo "OK"
     ;;
   delete)
+    mark_dirty
     shift
     DEL=0; SKIP=0
     for id in "$@"; do
@@ -1423,9 +1618,11 @@ case "${1:-}" in
     echo "OK:$DEL:$SKIP"
     ;;
   apply)
+    mark_dirty
     do_apply "$2"
     ;;
   rescan)
+    mark_dirty
     # ★ 2026-10-17：重新扫描本机字体并覆盖设备清单。
     #   什么时候用：换了系统大版本、装了新字体但界面没显示、或诊断建议你重扫。
     #   平时**不需要**跑 —— apply/reapply 只读清单，不扫描。
@@ -1439,6 +1636,7 @@ case "${1:-}" in
     fi
     ;;
   reapply)
+    mark_dirty
     do_apply "$(cur_pending)"
     ;;
   plan)
@@ -1451,6 +1649,7 @@ case "${1:-}" in
     rm -f "$p"
     ;;
   setmeta)
+    mark_dirty
     check_id "$2"
     id="$2"; shift 2
     for kv in "$@"; do
@@ -1460,6 +1659,7 @@ case "${1:-}" in
     echo "OK"
     ;;
   setmeta-many)
+    mark_dirty
     # ★ 2026-10-17 新增（UI 首屏提速）：一次给多个字体写 meta。
     #   原来界面会给每个缺族键的字体单独调一次 `setmeta`，
     #   而 fontctl.sh 每次启动都要把 common.sh + slots.sh 全加载一遍 —
@@ -1470,10 +1670,11 @@ case "${1:-}" in
       [ -n "$_id" ] || continue
       case "$_id" in f[0-9]*|builtin_*) ;; *) continue ;; esac
       case "$_kv" in "") continue ;; esac
-      for kv in $_kv; do
-        case "$kv" in *=*) ;; *) continue ;; esac
-        meta_set "$_id" "${kv%%=*}" "${kv#*=}" 2>/dev/null && _n=$((_n+1))
-      done
+      # ★ 2026-10-22 修：一行只放一个 k=v（值里允许空格）。
+          #   原来按空格切分，`family=Source Han Sans TC` 会变成
+          #   family=Source / Han / Sans / TC → 族名原文永远写不进去。
+          case "$_kv" in *=*) ;; *) continue ;; esac
+          meta_set "$_id" "${_kv%%=*}" "${_kv#*=}" 2>/dev/null && _n=$((_n+1))
     done
     echo "OK:$_n"
     ;;
@@ -1511,11 +1712,57 @@ case "${1:-}" in
           ttc_replace)
             # auto = 交给自动判断（三星开、其它关）；界面上的开关写 0/1，写进去就是手动指定
             case "$4" in auto|0|1) ;; *) echo "ERROR:取值只能是 auto / 0 / 1"; exit 1 ;; esac ;;
+          skip_vf)
+            case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
+          skip_product|keep_samsung)
+            # ★ 2026-10-24 三星 One UI 专区（高级设置里，普通用户看不到）
+            case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
+          targets_only|skip_other_lang|keep_serif|keep_italic_mono|keep_bold|\
+          only_system_fonts|system_and_product|skip_vendor_fonts|main_only|\
+          ttc_cn_only|ttc_all_faces|ttc_no_mix|mount_system_only|mount_in_service|\
+          dry_run|no_auto_disable|no_rescue|no_auto_reapply|no_boot_selfcheck)
+            # ★ 2026-10-24 高级设置 B1/B2/B4/B5/B6：一律 0/1，默认关 = 行为不变
+            case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
+          skip_vendor_dirs|whitelist|blacklist|exclude_dirs|force_list)
+            # 文本型：逗号/分号分隔；空串表示不生效
+            ;;
+          mount_retry|mount_delay)
+            case "$4" in ''|*[!0-9]*) echo "ERROR:取值必须是数字"; exit 1 ;; esac ;;
+          keep_misans|keep_flyme|no_theme_phys|keep_mitype|keep_oppo|keep_vivo|keep_harmony|keep_roboto|flyme_core|chcon_fonts|flyme_scan|hotboot_watchdog|hotboot_kill|\
+          allow_sym|allow_vadj|force_manager)
+            case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
           mount_mode)
             case "$4" in self|manager) ;; *) echo "ERROR:取值只能是 self 或 manager"; exit 1 ;; esac ;;
           *) echo "ERROR:未知设置项"; exit 1 ;;
         esac
         cfg_set "$3" "$4"; echo "OK"
+        ;;
+      dump)
+        # ★ 2026-10-24：把高级设置里的所有开关一次性吐出来（界面回显用）
+        for _k in ttc_replace skip_vf keep_samsung skip_product skip_vendor_dirs \
+                  targets_only skip_other_lang keep_serif keep_italic_mono keep_bold \
+                  only_system_fonts system_and_product skip_vendor_fonts main_only \
+                  ttc_cn_only ttc_all_faces ttc_no_mix mount_system_only mount_in_service \
+                  dry_run no_auto_disable no_rescue no_auto_reapply no_boot_selfcheck \
+                  whitelist blacklist exclude_dirs force_list mount_retry mount_delay \
+                  keep_misans keep_flyme no_theme_phys \
+                  keep_mitype keep_oppo keep_vivo keep_harmony keep_roboto flyme_core chcon_fonts flyme_scan \
+                  hotboot_watchdog hotboot_kill theme_phys keep_secnum \
+                  allow_sym allow_vadj force_manager; do
+          case "$_k" in
+            # ★ 2026-10-25：回显不用「生效值」，避免 dump 去扫字体配置（手机上要几秒，
+            #   会把整个界面卡住）。界面只显示用户设置过的值即可。
+            ttc_replace) _v=$(cfg_get ttc_replace auto) ;;
+            skip_vf|keep_samsung|skip_product) _v=$(cfg_get "$_k" 0) ;;
+            skip_vendor_dirs|whitelist|blacklist|exclude_dirs) _v=$(cfg_get "$_k" "") ;;
+            mount_retry) _v=$(cfg_get "$_k" 3) ;;
+            mount_delay) _v=$(cfg_get "$_k" 0) ;;
+            ttc_cn_only) _v=$(cfg_get "$_k" 1) ;;
+            keep_lang|keep_special|theme_fonts|keep_lockscreen) _v=$(cfg_get "$_k" 0) ;;
+            *) _v=$(cfg_get "$_k" 0) ;;
+          esac
+          echo "$_k=$_v"
+        done
         ;;
       *)
         # ttc_replace 回显的是**生效值**：这类机型即使没手动设过，界面开关也该是亮的
@@ -1523,6 +1770,134 @@ case "${1:-}" in
         ;;
     esac
     ;;
+  panic)
+    # ---------------------------------------------------------------------
+    # 紧急回滚（由 service.sh 的热重启看门狗调用）
+    #   只做三件事：卸掉本模块挂载 / 置回「无字体」/ 记账。不做切换那套重活。
+    # ---------------------------------------------------------------------
+    _n=0
+    if [ -s "$LIB/.mounted" ]; then
+      while IFS= read -r _d; do
+        [ -n "$_d" ] || continue
+        umount -l "$_d" 2>/dev/null || umount "$_d" 2>/dev/null
+        _n=$(( _n + 1 ))
+      done < "$LIB/.mounted"
+    fi
+    : > "$LIB/.mounted" 2>/dev/null
+    printf 'none\n' > "$LIB/active_font" 2>/dev/null
+    printf 'time=%s umount=%s via=panic\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "$_n" \
+      >> "$LIB/.panic.log" 2>/dev/null
+    echo "OK:$_n"
+    ;;
+  group)
+    # ---------------------------------------------------------------------
+    # 字重组：用户手动把「同一套字体的多个字重」合成一张卡片
+    #   group create <id1> <id2> ...   → 校验后写 group=<组长id>
+    #   group remove <组长id>          → 解散
+    #   group list                     → 列出
+    # 只有通过校验的成员才会入组；组长 = 第一个参数。
+    # ---------------------------------------------------------------------
+    _gact="${2:-}"
+    case "$_gact" in
+      create)
+        shift 2
+        _first=""
+        for _id in "$@"; do [ -f "$LIB/$_id.meta" ] && { _first="$_id"; break; }; done
+        [ -n "$_first" ] || { echo "ERROR:选中的字体都不存在"; exit 1; }
+        _fam=$(meta_get "$_first" fam)
+        case "$_fam" in ""|none) echo "ERROR:这份字体没有可用的族名，无法组合"; exit 1 ;; esac
+        _famtext=$(meta_get "$_first" family)
+        _sub_first=$(meta_get "$_first" subfamily)
+        _r_latin=$(meta_get "$_first" rate_latin); _r_cjk=$(meta_get "$_first" rate_cjk)
+        _r_punct=$(meta_get "$_first" rate_punct); _r_sym=$(meta_get "$_first" rate_symbols)
+        _upem=$(meta_get "$_first" upem); _cjk=$(meta_get "$_first" cjk)
+        _lat=$(meta_get "$_first" latin); _gly=$(meta_get "$_first" glyphs)
+        _ok=0
+        for _id in "$@"; do
+          [ -f "$LIB/$_id.meta" ] || { printf '跳过 %s：不存在\n' "$_id"; continue; }
+          [ "$(meta_get "$_id" outline)" = 1 ] || { printf '跳过 %s：没有可用轮廓\n' "$_id"; continue; }
+          if [ "$(meta_get "$_id" merged)" = 1 ] || [ "$(meta_get "$_id" merge)" = 1 ]; then
+            printf '跳过 %s：这是合成字体，不能组字重组\n' "$_id"; continue
+          fi
+          _m_fam=$(meta_get "$_id" fam)
+          [ -n "$_m_fam" ] || { printf '跳过 %s：档案里没有族名（请刷新页面后重新导入该字体）\n' "$_id"; continue; }
+          [ "$_m_fam" = "$_fam" ] || { printf '跳过 %s：族名不同（%s ≠ %s）\n' "$_id" "$_m_fam" "$_fam"; continue; }
+          # 族名的**原文**也必须一致（归一化键可能撞车：pico 和 Roboto 被误判同族过）
+          if [ -n "$_famtext" ]; then
+            _f2=$(meta_get "$_id" family)
+            if [ -n "$_f2" ] && [ "$_f2" != "$_famtext" ]; then
+              printf '跳过 %s：族名原文不同（%s ≠ %s）\n' "$_id" "$_f2" "$_famtext"; continue
+            fi
+          fi
+          _u2=$(meta_get "$_id" upem)
+          if [ -n "$_upem" ] && [ -n "$_u2" ] && [ "$_upem" != "$_u2" ]; then
+            printf '跳过 %s：upem %s ≠ %s\n' "$_id" "$_u2" "$_upem"; continue
+          fi
+          if [ "$(meta_get "$_id" cjk)" != "$_cjk" ] || [ "$(meta_get "$_id" latin)" != "$_lat" ]; then
+            printf '跳过 %s：语种覆盖类别不同\n' "$_id"; continue
+          fi
+          # upem 必须相同（同一套字体不会换 upem）
+          _u_l=$(meta_get "$_first" upem); _u_m=$(meta_get "$_id" upem)
+          if [ -n "$_u_l" ] && [ -n "$_u_m" ] && [ "$_u_l" != "$_u_m" ]; then
+            printf '跳过 %s：upem %s ≠ %s\n' "$_id" "$_u_m" "$_u_l"; continue
+          fi
+          # 覆盖率逐项相差 ≤ 2
+          _bad=0
+          for _k in rate_latin rate_cjk rate_punct rate_symbols; do
+            _a=$(meta_get "$_first" "$_k"); _b=$(meta_get "$_id" "$_k")
+            case "$_a" in ''|*[!0-9]*) continue ;; esac
+            case "$_b" in ''|*[!0-9]*) continue ;; esac
+            _d=$(( _a - _b )); [ "$_d" -lt 0 ] && _d=$(( -_d ))
+            [ "$_d" -gt 2 ] && { _bad=1; printf '跳过 %s：覆盖率差异过大（%s %s%% vs %s%%）\n' "$_id" "$_k" "$_b" "$_a"; break; }
+          done
+          [ "$_bad" = 0 ] || continue
+          # 子族名必须不同（同一字重的两份拷贝不该组成一组）
+          _s1=$(meta_get "$_first" subfamily); _s2=$(meta_get "$_id" subfamily)
+          if [ -n "$_s1" ] && [ -n "$_s2" ] && [ "$_s1" = "$_s2" ]; then
+            printf '跳过 %s：字重标识与组长相同（%s）\n' "$_id" "$_s2"; continue
+          fi
+          case "$_gly:$(meta_get "$_id" glyphs)" in
+            *[!0-9]*|*:|"") ;;
+            *)
+              _lo=$(( _gly * 97 / 100 )); _hi=$(( _gly * 103 / 100 ))
+              _g2=$(meta_get "$_id" glyphs)
+              if [ "$_g2" -lt "$_lo" ] || [ "$_g2" -gt "$_hi" ]; then
+                printf '跳过 %s：字形数 %s 与组长 %s 相差过大\n' "$_id" "$_g2" "$_gly"; continue
+              fi ;;
+          esac
+          setmeta_pair "$_id" group "$_first" 2>/dev/null || \
+            { sed -i "/^group=/d" "$LIB/$_id.meta" 2>/dev/null; printf 'group=%s\n' "$_first" >> "$LIB/$_id.meta"; }
+          _ok=$(( _ok + 1 ))
+        done
+        [ "$_ok" -ge 2 ] || { echo "ERROR:至少需要 2 份可组合的字体（现在 $_ok 份）"; exit 1; }
+        echo "OK:已组合 $_ok 份字体为一个字重组（组长 $_first）"
+        ;;
+      remove)
+        _g="${3:-}"
+        [ -n "$_g" ] || { echo "ERROR:缺少组长 id"; exit 1; }
+        _n=0
+        for _f in "$LIB"/f*.meta "$LIB"/builtin_*.meta; do
+          [ -e "$_f" ] || continue
+          if [ "$(sed -n 's/^group=//p' "$_f" 2>/dev/null | tail -n1 | tr -d '\r')" = "$_g" ]; then
+            sed -i '/^group=/d' "$_f" 2>/dev/null
+            _n=$(( _n + 1 ))
+          fi
+        done
+        echo "OK:已解散字重组（$_n 份）"
+        ;;
+      list)
+        for _f in "$LIB"/f*.meta; do
+          [ -e "$_f" ] || continue
+          _g=$(sed -n 's/^group=//p' "$_f" 2>/dev/null | tail -n1 | tr -d '\r')
+          [ -n "$_g" ] || continue
+          _i=${_f##*/}; _i=${_i%.meta}
+          printf '%s %s\n' "$_g" "$_i"
+        done
+        ;;
+      *) echo "用法: group create|remove|list"; exit 2 ;;
+    esac
+    ;;
+
   verify)
     payload_verify "$MODDIR"
     ;;
@@ -1571,6 +1946,7 @@ case "${1:-}" in
     fi
     ;;
   sync)
+    mark_dirty
     [ -f "$MODDIR/pending_font" ] && cp -f "$MODDIR/pending_font" "$MODDIR/active_font"
     cp -f "$MODDIR/active_font" "$LIB/last_selection" 2>/dev/null
     refresh_prop

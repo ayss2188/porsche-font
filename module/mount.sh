@@ -67,6 +67,16 @@ if [ -n "$_MOUNT_BIN" ] && [ ! -x "$_MOUNT_BIN" ]; then
   _MOUNT_BIN=""
 fi
 _mount() {
+  # ★ 2026-10-25：**默认不做 chcon** —— 恢复到 4.4.2 的行为。
+  #   背景：4.4.2 及更早从不给挂载源补标签，真机（魅族 Flyme 12.6 / Android 16）
+  #   一切正常；后来加了"补成 system_file"，紧接着就出现"任何模块的 WebUI 一点就闪退"
+  #   （64 个 tombstone 全在 WebView 渲染进程）。
+  #   推断：补了标签后渲染进程才能 mmap 这个 43MB 的可变字体，而它在这台机器的
+  #   Chromium/FreeType 上会崩；不补标签时渲染进程读不到 → 走系统兜底 → 不崩。
+  #   需要 WebView 直接读字体时，可在高级设置把 chcon_fonts 打开。
+  if [ "$(cfg_get chcon_fonts 0 2>/dev/null)" = 1 ]; then
+    chcon u:object_r:system_file:s0 "$1" 2>/dev/null
+  fi
   if [ -n "$_MOUNT_BIN" ]; then
     _to "$_MOUNT_BIN" -o bind "$1" "$2"
   else
@@ -102,7 +112,9 @@ _df_sz() {
   case "${_v:-}" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$_v" ;; esac
 }
 
-datafont_swap() {   # $1=源(字体库文件) $2=目标(绝对路径) → 0=已替换 1=没做(调用方回退 bind)
+datafont_swap() {
+  # ★ 2026-10-24：各系统专区 —— 关掉「主题字体物理替换」（默认开）
+  [ "$(cfg_get no_theme_phys 0 2>/dev/null)" = 1 ] && return 1   # $1=源(字体库文件) $2=目标(绝对路径) → 0=已替换 1=没做(调用方回退 bind)
   local src="$1" dst="$2" key bakdir bak tmp dir
   [ -f "$src" ] && [ -f "$dst" ] || return 1
   _datafont_is_ours "$src" "$dst" && return 0      # 已经是我们的，不用再动
@@ -234,7 +246,13 @@ datafont_restore() {
 }
 
 payload_mount() {
-  local moddir="$1" id rel src dst err ok=0 fail=0 skip=0 same=0
+  local moddir="$1"
+  local id rel src dst err ok=0 fail=0 skip=0 same=0
+  # ★ 2026-10-25：递归补标签改成**默认关**（见 _mount 的说明）——
+  #   4.4.2 时代没有这一步，真机反馈"旧版不闪退、新版闪退"。
+  if [ "$(cfg_get chcon_fonts 0 2>/dev/null)" = 1 ]; then
+    chcon -R u:object_r:system_file:s0 "${LIB:-/data/adb/custom_font_lib}" 2>/dev/null
+  fi
   local map="$moddir/slots.map"
   # 没有挂载计划时**不要静默 return** —— 那会一个槽位都不挂、日志里什么都没有，
   # 诊断报告只能写"本次开机未挂载"，用户无从下手。先在挂载前把计划补回来，
@@ -316,7 +334,17 @@ payload_mount() {
   else
     _usemap="$map"
   fi
-  _rom_now=$(tr -d '[:space:]' 2>/dev/null < "$moddir/current_rom")
+  # ★ 2026-10-24 B5：演练模式（只打印计划，不真挂）
+  _dry=$(cfg_get dry_run 0 2>/dev/null)
+  # ★ B5：只挂 /system（跳过 product/vendor/system_ext）
+  _sysonly=$(cfg_get mount_system_only 0 2>/dev/null)
+  # ★ B5：挂载前等待 N 秒（给字体服务准备时间）
+  _delay=$(cfg_get mount_delay 0 2>/dev/null)
+  case "$_delay" in ''|*[!0-9]*) _delay=0 ;; esac
+  if [ "$_delay" -gt 0 ] 2>/dev/null; then
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 延迟 ${_delay}s 后再挂载（B5）" >> "$LIB/mount.log" 2>/dev/null
+    sleep "$_delay"
+  fi
   while read -r id rel src || [ -n "$rel" ]; do
     case "$id" in ""|*[!A-Za-z0-9_]*) continue ;; esac
     case "$rel" in ""|/*|*..*) continue ;; esac
@@ -324,6 +352,15 @@ payload_mount() {
     # 老格式只有两个字段，那就用字体库里的 $id.ttf
     [ -n "$src" ] || src="$LIB/$id.ttf"
     dst="/$rel"
+    # B5：只挂 /system 时跳过其它分区
+    if [ "${_sysonly:-0}" = 1 ]; then
+      case "$dst" in /system/*) ;; *) skip=$((skip+1)); continue ;; esac
+    fi
+    # B5：演练模式 —— 只记一行，不真挂
+    if [ "${_dry:-0}" = 1 ]; then
+      echo "[DRY] $src -> $dst" >> "$LIB/mount.log" 2>/dev/null
+      skip=$((skip+1)); continue
+    fi
     if [ ! -f "$src" ] || [ ! -f "$dst" ]; then
       skip=$((skip+1)); continue
     fi
@@ -339,31 +376,24 @@ payload_mount() {
     #   vivo     /data/bbkcore/theme、/data/skin/fonts
     #   通用主题 /data/theme/fonts、/data/themes
     # 荣耀的 /data/system/theme_magic 刻意不在其中（它连替换名单都没进）。
+    # ★ 2026-10-25：默认**不写盘**（theme_phys=0）→ 这些 /data 主题字体槽位整支跳过，
+    #   既不复制、也不挂载（4.4.3 及更早连这些槽位都不进计划）。
+    #   以前这里无条件 datafont_swap，会把 43MB 字体真写进用户主题目录。
+    if [ "$(cfg_get theme_phys 0 2>/dev/null)" != 1 ]; then
+      case "$dst" in
+        /data/*) skip=$((skip+1)); continue ;;
+      esac
+    fi
     case "$dst" in
       /data/customizecenter/*|/data/format_unclear/*|/data/oplus/uxres/*|\
       /data/bbkcore/*|/data/skin/fonts/*|/data/theme/fonts/*|/data/themes/*)
         if datafont_swap "$src" "$dst"; then
-          ok=$((ok+1)); continue
+          ok=$((ok+1))
+      # ★ 记下挂载目标：热重启看门狗要靠这份清单卸掉自己的挂载
+      printf '%s\n' "$dst" >> "$LIB/.mounted" 2>/dev/null; continue
         fi
         ;;
     esac
-    # ★ 2026-10-22（魅族闪退验证）：跳过厂商 UI 字体槽位。
-    #   现象：魅族用户「默认卸载模块」关掉（挂载对 App 可见）后，
-    #   WebUI 闪退、酷安不能跳外链、B 站看视频退回桌面 —— 像是字体被各应用读到后出问题。
-    #   最可疑的是 product/fonts 下魅族自己的 UI 字体（SFDIN-*/SFPRO-* 等）。
-    #   这里先跳过它们做验证；确认有效后再做成设置开关。
-    case "$_rom_now" in
-      flyme*)
-        case "$rel" in
-          product/fonts/SF*|product/fonts/sf*|product/fonts/*DIN*|product/fonts/*PRO*)
-            skip=$((skip+1))
-            echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 跳过厂商 UI 字体槽位（魅族验证）：$rel" >> "$LIB/mount.log" 2>/dev/null
-            continue
-            ;;
-        esac
-        ;;
-    esac
-
     # 幂等：已经指向我们的文件了就别再叠一层
     # （post-fs-data 和 post-mount 万一都跑到，或者被重复调用，会叠出多层挂载且再也数不清）
     if [ "$(stat -L -c '%d:%i' "$src" 2>/dev/null)" = "$(stat -L -c '%d:%i' "$dst" 2>/dev/null)" ]; then
@@ -371,7 +401,18 @@ payload_mount() {
     fi
     # 每个挂载加超时：万一某个槽位卡住，绝不能让整个开机阶段跟着卡死（post-fs-data 是阻塞阶段）
     # 成败看退出码，不看有没有输出 —— mount 成功时也可能打好几行警告
-    err=$(_mount "$src" "$dst" 2>&1); rc=$?
+    # ★ 2026-10-24 B5：失败重试（mount_retry，默认 3；0/1 = 不重试）
+    _max=$(cfg_get mount_retry 3 2>/dev/null)
+    case "$_max" in ''|*[!0-9]*) _max=3 ;; esac
+    [ "$_max" -ge 1 ] 2>/dev/null || _max=1
+    _try=1
+    while : ; do
+      err=$(_mount "$src" "$dst" 2>&1); rc=$?
+      [ "$rc" = 0 ] && break
+      [ "$_try" -ge "$_max" ] && break
+      _try=$((_try + 1))
+      sleep 1
+    done
     if [ "$rc" = 0 ]; then
       if [ -n "$_MOUNT_BIN" ]; then _to "$_MOUNT_BIN" -o remount,bind,ro "$dst"
       else _to mount -o remount,bind,ro "$dst"; fi 2>/dev/null
@@ -409,6 +450,16 @@ payload_mount() {
 #   所以这些槽位走"整份复制 + 备份原件"（datafont_swap），跟自带挂载时一样。
 # ---------------------------------------------------------------------------
 datafont_apply() {
+  # ★ 2026-10-25（报告实证后改回 4.4.3 行为）：
+  #   4.4.3 及更早根本没有这个函数 —— 也就是**不往 /data 写真实文件**。
+  #   4.4.5 起才开始把 43MB 字体物理写入 /data 主题字体目录
+  #   （customizecenter / format_unclear / oplus/uxres / bbkcore / skin/fonts …）。
+  #   两份真机报告对比：4.4.3 槽位 95 个照样能用、self 挂载成功；
+  #   所以差异不在槽位，而在「写盘」这一步。
+  #   默认关闭；要让主题商店里的字体也变，可在厂商专区打开 theme_phys。
+  if [ "$(cfg_get theme_phys 0 2>/dev/null)" != 1 ]; then
+    return 0
+  fi
   local moddir="$1" id rel src dst ok=0 skip=0
   local map="$moddir/slots.map"
   [ -s "$map" ] || return 0
@@ -424,6 +475,15 @@ datafont_apply() {
     case "$rel" in ""|/*|*..*) continue ;; esac
     [ -n "$src" ] || src="$LIB/$id.ttf"
     dst="/$rel"
+    # B5：只挂 /system（第二处循环）
+    if [ "$(cfg_get mount_system_only 0 2>/dev/null)" = 1 ]; then
+      case "$dst" in /system/*) ;; *) skip=$((skip+1)); continue ;; esac
+    fi
+    # B5：演练模式（第二处循环）
+    if [ "$(cfg_get dry_run 0 2>/dev/null)" = 1 ]; then
+      echo "[DRY] $src -> $dst" >> "$LIB/mount.log" 2>/dev/null
+      skip=$((skip+1)); continue
+    fi
     if [ ! -f "$src" ] || [ ! -f "$dst" ]; then skip=$((skip+1)); continue; fi
     if datafont_swap "$src" "$dst"; then ok=$((ok+1)); else skip=$((skip+1)); fi
   done < "$_da_map"

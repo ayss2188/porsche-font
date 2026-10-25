@@ -1,35 +1,54 @@
 #!/system/bin/sh
-# 保时捷字体（三合一） - 安装脚本（Magisk / KernelSU / APatch 通用）
+# ★ 2026-10-26 清掉上一版遗留的壁纸文件（管理器覆盖安装不会删旧文件）
+rm -f "$MODPATH/webroot/bg.jpg" "$MODPATH/webroot/bg.b64" 2>/dev/null
+# 自定义字体切换模块 - 安装脚本（Magisk / KernelSU / APatch 通用）
 # 刷机包里的文件已由管理器解压到 $MODPATH
 
 LIB=/data/adb/custom_font_lib
 MODID=$(sed -n 's/^id=//p' "$MODPATH/module.prop" | head -n1 | tr -d '\r')
 OLD="/data/adb/modules/$MODID"
 
-ui_print "========================================================"
-ui_print " 保时捷字体（三合一）  $(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')"
-ui_print " 内置配色：素装(无色) / 一点红 / 烈焰"
-ui_print "========================================================"
+ui_print "*********************************"
+ui_print "  自定义字体切换模块 $(sed -n 's/^version=//p' "$MODPATH/module.prop")"
+ui_print "  默认不替换字体"
+ui_print "  导入自己的字体一键切换"
+ui_print "*****************************"
 
 . "$MODPATH/common.sh"
-# ★ 字体校验工具必须**在 builtin.sh 之前**载入 —— builtin_import 要用它挡住坏字体。
-#   （不提前载入的话，那里的 `command -v valid_font` 判断为假 → 校验被静默跳过。）
-if [ -f "$MODPATH/fontcheck.sh" ]; then
-  . "$MODPATH/fontcheck.sh"
-fi
-if ! command -v valid_font >/dev/null 2>&1; then
-  ui_print "  ⚠ 缺少 fontcheck.sh"
-    ui_print "     内置字体的有效性校验被跳过"
-  valid_font() { [ -f "$1" ]; }
-fi
 mkdir -p "$LIB"
 
+# 1.0.9：识别机型要读全部系统属性、还要找厂商目录，会花一两秒。
+#   特意把话说在前面，免得用户看管理器"卡在那儿不动"以为死机了。
+#   这一阶段等一下完全没问题 —— 它不是开机流程，不影响开机时间。
+ui_print "- 正在检测你的机型与字体配置，请稍等…"
+ROM_ID=$(detect_rom)
+ROM_NAME=$(rom_name "$ROM_ID")
+RM=$(root_manager)
+echo "$ROM_ID" > "$MODPATH/current_rom"
+ui_print "- 已识别：$ROM_NAME"
+
+# ★ 2026-10-17（作者定的架构）：**扫描只在这里做一次，之后永远读文件**
+#
+# 作者原话：「扫描是在什么时候，就是安装的时候那一次扫描，
+#            把扫描到的东西全部加进文件里永久保存，除非卸载模块」
+#
+# 这一步把"这台设备上有哪些字体、各自什么角色、在哪个目录"全部写进
+# $LIB/.device_fonts。之后 apply / reapply **只读这个文件** ——
+# 不再解析 8 个字体配置 XML，也不再扫十几个字体目录。
+#
+# 什么时候需要重扫：
+#   · 换了一整套系统字体（或系统大版本更新）
+#   · 界面里字体少得不对劲
+#   → 跑 `fontctl.sh rescan`（见模块目录的说明）
+MODDIR="$MODPATH"
+export MODDIR
+. "$MODPATH/slots.sh" 2>/dev/null
 # ★ 2026-10-19（作者要求）：**从旧版本升上来，一律重新扫描 + 重新合成**。
 #   旧版留下的派生数据不能信：
 #     · 1.3.5~1.3.7 的 scanned/ttc.list 写的时候被自己截断成空，
 #       读取端把"空"当结论 → 中文合集永久不换（三星中文一直没变过）
 #     · 旧的合成 .ttc 可能是在"只换 2 号"的兜底逻辑下造的，照用就是错的
-#   所以版本号一变就整份作废：清单删掉（首次切换会重扫）、合成产物删掉（会重造）。
+#   所以版本号一变就整份作废，让 slot_build_slots 重新扫、让 apply 重新合成。
 #   字体文件 / .name / .meta / settings.conf / last_selection 都不动（用户数据）。
 _MK="$LIB/.scan_version"
 _CUR=$(sed -n 's/^versionCode=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
@@ -37,24 +56,10 @@ _OLD=$(cat "$_MK" 2>/dev/null | tr -d '\r\n')
 if [ -n "$_CUR" ] && [ "$_OLD" != "$_CUR" ]; then
   rm -rf "$LIB/scanned" 2>/dev/null
   rm -f "$LIB"/*.ttc[0-9]* 2>/dev/null
-  # ★ 2026-10-24：删完缓存**当场重扫一次**。
-  #   以前只删不扫，指望后面 apply 自己补 —— 真机上（魅族）出现过
-  #   "开机时 slots.map 为空、补计划失败" → 那一次开机没有任何字体。
-  #   装完就扫好，开机只读缓存，最稳。
-  if [ -f "$MODPATH/fontctl.sh" ]; then
-    if sh "$MODPATH/fontctl.sh" rescan >/dev/null 2>&1; then
-      ui_print "- 已按新版本逻辑重扫字体（首次开机不用再等）"
-    else
-      ui_print "  ⚠ 重扫没成功，开机时会再试一次"
-    fi
-  fi
   rm -f "$LIB/.verify.cache" "$LIB/.device_fonts" "$LIB/.cand.cache" \
         "$LIB/.plan.cache" "$LIB/.plan.marks" 2>/dev/null
-  if [ -n "$_OLD" ]; then
-    _ov=$(sed -n 's/^version=//p' "$OLD/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
-    _nv=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
-    ui_print "- 从 ${_ov:-旧版本} 升级到 ${_nv:-新版本}：重新扫描字体、重建中文合集"
-  fi
+  _FORCED_RESCAN=1
+  [ -n "$_OLD" ] && ui_print "- 从旧版本升级：重新扫描字体、重建中文合集"
   printf '%s' "$_CUR" > "$_MK" 2>/dev/null
 fi
 
@@ -74,65 +79,75 @@ for _mf in "$LIB"/*.meta; do
 done
 
 
-# ---------------------------------------------------------------------------
-# 内置字体：把模块自带的配色注入字体库（硬链接，同一分区不额外占空间），
-# 并把其它保时捷模块标记为重启后卸载（4 个包 id 各不相同，同时装会互相抢字体）
-# ---------------------------------------------------------------------------
-MODDIR="$MODPATH"                      # 注意：这是暂存目录！已安装目录是 $OLD
-if [ -f "$MODPATH/builtin.sh" ]; then
-  . "$MODPATH/builtin.sh"
-
-  # ---------------------------------------------------------------------------
-  # ★★ 第一件事：记下"用户上次用的是哪一套自带配色"（**必须最先做**）
-  #
-  #   为什么顺序这么关键（两个理由，都会让映射认错）：
-  #     ① 老版本升上来时**字体原文件换了**（旧 id 和新的 builtin_* 不是一回事），
-  #        所以 `apply $LAST` 必然失败 —— 这不是 bug，是必然。
-  #        但"失败后自动改用一套"不该闭眼挑排序第一的（那样每个老用户都被换成 911·一点红），
-  #        而该改用到**他原来那套**。
-  #     ② 判定要读**旧字体文件的大小**，而下面 builtin_import / builtin_clean_legacy
-  #        都可能动字体库（硬链接覆盖同名、清理孤儿）—— 一旦先跑，读到的就不是原文件了。
-  #        顺序错了映射会认错（沙箱里就是这么复现的：本该认成 718，结果认成 911）。
-  # ---------------------------------------------------------------------------
-  BUILTIN_PREV=""
-  # ① 最可靠：读**已安装模块**的描述 —— 里面写着"当前生效：xxxxx"
-  #    （老版本正常在用，所以这行是当时真正生效的那套，不依赖 id、也不用猜文件）
-  _mp=$(builtin_map_from_prop)
-  [ -n "$_mp" ] || {
-    # ② 退回：字体库 / 已安装模块的状态文件里记的选择
-    _pl=$(tr -d '[:space:]' 2>/dev/null < "$LIB/last_selection")
-    case "$_pl" in ""|none) _pl="" ;; esac
-    [ -n "$_pl" ] || { _pl=$(tr -d '[:space:]' 2>/dev/null < "$OLD/active_font");  case "$_pl" in ""|none) _pl="" ;; esac; }
-    [ -n "$_pl" ] || { _pl=$(tr -d '[:space:]' 2>/dev/null < "$OLD/pending_font"); case "$_pl" in ""|none) _pl="" ;; esac; }
-    [ -n "$_pl" ] && _mp=$(builtin_map_from_prev "$_pl")
-  }
-  if [ -n "$_mp" ]; then
-    BUILTIN_PREV="$_mp"
-    ui_print "- 认出你上次用的配色："
-    ui_print "     $(builtin_id_of "$(printf '%s' "$_mp" | sed 's/^builtin_//')" | cut -d'|' -f2)"
+if command -v slot_build_slots >/dev/null 2>&1; then
+  # ★ 2026-10-18：文案要如实 —— 首次安装才真扫描；升级时复用上次的扫描结果，
+  #   只重新做"和 targets 的合并"，所以很快。别让用户以为每次都在扫。
+  if [ -s "$LIB/scanned/device.list" ]; then
+    ui_print "- 正在更新槽位清单（复用上次扫描结果，不用重扫）…"
+  else
+    ui_print "- 正在扫描本机字体并生成槽位清单（只这一次，以后切换都不再扫描）…"
   fi
-  export BUILTIN_PREV
-
-  builtin_sibling_cleanup "$MODID"
-  builtin_import
-
-  # 清掉字体库里没人用的旧字体（在用的会保留；$OLD/$LIB 都参与"在用"判断）
-  builtin_clean_legacy
-
-  # ★ 2026-10-19：本模块只认内置配色 —— 把用户以前导入的字体清掉、
-  #   被删掉的内置配色由上面的 builtin_import 重新补回。
-  builtin_prune_imported
+  if slot_build_slots "$MODPATH" 2>/dev/null; then
+    # 口径：机型清单里的 = targets 里且设备上真实存在的；本机扫描补的 = 其余
+    _tn=$(sed -n 's/^targets=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
+    _en=$(sed -n 's/^extra=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
+    _an=$(sed -n 's/^total=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
+    ui_print "- 槽位总数 ${_an:-?} 个（机型清单 ${_tn:-0} 个 + 本机扫描补 ${_en:-0} 个）"
+  else
+    ui_print "- 清单生成未完成（第一次切换时会自动再试）"
+  fi
 fi
 
-# 1.0.9：识别机型要读全部系统属性、还要找厂商目录，会花一两秒。
-#   特意把话说在前面，免得用户看管理器"卡在那儿不动"以为死机了。
-#   这一阶段等一下完全没问题 —— 它不是开机流程，不影响开机时间。
-ui_print "- 正在检测你的机型与字体配置，请稍等…"
-ROM_ID=$(detect_rom)
-ROM_NAME=$(rom_name "$ROM_ID")
-RM=$(root_manager)
-echo "$ROM_ID" > "$MODPATH/current_rom"
-ui_print "- 已识别：$ROM_NAME"
+# ============================================================================
+# 升级迁移（2026-10-18，v1.3.1 架构改动）
+#
+# 这一版把"每次切换都扫描"改成了"刷入时扫一次、之后只读清单"，
+# 所以从旧版升级上来时要收拾一下旧残留，否则可能读到过时的东西。
+#
+# ⚠️ 原则：**只清"模块自己生成的中间文件"，绝对不碰用户的字体库**。
+#    字体库 = $LIB/f*.ttf + *.meta + *.name + builtin_* ← 一个字都不动。
+# ============================================================================
+_OLDVER=$(sed -n 's/^version=//p' "$OLD/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
+_NEWVER=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
+# ---------------------------------------------------------------------------
+# 判断该不该"迁移"：**看实际状态，不看版本号**
+#
+#   scanned/device.list 存在 = 这台机器已经有扫描结果（新架构装过，或之前扫过）
+#     → 只更新清单，**不迁移、不重扫**（哪怕版本号变了，v1.3.1 → v1.3.2 也走这条）
+#   不存在 = 旧架构装过 / 全新安装
+#     → 清掉旧架构的中间文件，然后扫一次（只有这一次）
+#
+# 为什么不用版本号判断：版本号每升一次都会变，但"要不要迁移"取决于
+# **上次是不是旧架构的产物**，而不是版本号本身。
+# ---------------------------------------------------------------------------
+# 扫描结果的可信度检查：太小就当没扫过（半成品不能用）
+_DCNT=$(grep -c . "$LIB/scanned/device.list" 2>/dev/null || echo 0)
+case "${_DCNT:-0}" in ''|*[!0-9]*) _DCNT=0 ;; esac
+if [ "${_DCNT}" -ge 10 ]; then
+  # ★ 2026-10-19：刚才是"版本变了→强制重扫"，就不能再说"直接复用"（真机日志会自相矛盾）
+  if [ "${_FORCED_RESCAN:-0}" = "1" ]; then
+    [ -n "$_OLDVER" ] && ui_print "- 从 $_OLDVER 升级到 $_NEWVER：已重新扫描（$_DCNT 条）并重建中文合集"
+  else
+    [ -n "$_OLDVER" ] && ui_print "- 从 $_OLDVER 升级到 $_NEWVER（已有扫描结果 $_DCNT 条，直接复用）"
+  fi
+else
+  [ "${_DCNT}" -gt 0 ] && ui_print "- 上次的扫描结果不完整（只有 $_DCNT 条），重新扫一次"
+  if [ -n "$_OLDVER" ]; then
+    ui_print "- 从 $_OLDVER 升级到 $_NEWVER：架构有变，需要重新扫描一次"
+    # ① 旧架构的缓存文件（新版完全不用它们了）
+    rm -f "$LIB/.cand.cache" "$LIB/.plan.cache" "$LIB/.plan.marks" \
+          "$LIB/.skipscan.cache" "$LIB/.extra.cache" "$LIB/.xmlnames.cache" \
+          "$LIB/.dirnames.cache" "$LIB/.oemnames.cache" "$LIB/.verify.cache" \
+          "$LIB/.conflicts.cache" 2>/dev/null
+    rm -rf "$LIB/.scan" 2>/dev/null
+    # ② 旧版的挂载状态 / 计划（让新版按新清单重新生成）
+    rm -f "$MODPATH/slots.map" "$MODPATH/slots.applied" "$MODPATH/slots.marks" \
+          "$MODPATH/slots.sources" "$MODPATH/mount.state" 2>/dev/null
+    # ③ 旧版把扫描结果存在过别的文件名里
+    rm -f "$LIB/.device_fonts" 2>/dev/null
+    ui_print "- 已清理旧版中间文件（字体库原样保留）"
+  fi
+fi
 
 # 旧版设置在模块目录里，迁移到字体库目录（以后更新不会丢）
 [ -f "$SETTINGS" ] || { [ -f "$OLD/settings.conf" ] && cp -f "$OLD/settings.conf" "$SETTINGS"; }
@@ -143,16 +158,16 @@ A=$(tr -d '[:space:]' 2>/dev/null < "$OLD/active_font")
 echo "$A" > "$MODPATH/active_font"
 echo none > "$MODPATH/pending_font"
 
-# 上次的选择：**尽量保住用户正在用的那套**（这是升级体验的关键）
+# 上次的选择：**尽量保住用户正在用的那套**（升级体验的关键）
 #
-# ⚠️ 原来的链有两个毛病，真机上直接导致"更新完字体变了/变回默认"：
-#   ① **`$OLD/active_font`（当前真正在用的）根本没被读** —— 它才是最该恢复的那个。
-#      `pending_font` 只在"选完还没重启"时有值，正常用着的时候它是不准的。
-#   ② `[ -n "$LAST" ] ||` 这个判断把 **"none" 也当成有效值** ——
-#      于是 pending_font 里写着 none（选完未重启就是这样）时，
-#      它挡住后面的来源，最后 apply none → 用户升级完字体没了。
+# ⚠️ 原来这条链有两个毛病：
+#   ① **`$OLD/active_font`（当前真正在用的）没被读** —— 它才是最该恢复的那个。
+#      `pending_font` 只在"选完还没重启"时有意义；正常用着的时候它常常是 none。
+#   ② `[ -n "$LAST" ] ||` 把 **"none" 也当成有效值** ——
+#      于是 pending_font 里写着 none 时它挡住后面的来源，最后 apply none
+#      → 用户升级完字体没了（真机反馈过"更新后变回默认"）。
 #   现在：**跳过空值和 none**，一路找到第一个真正可用的来源。
-#   顺序：字体库记录 → 当前生效 → 待生效（三者里第一个不是 none 的）
+#   顺序：字体库记录 → **当前生效** → 待生效
 _pick() {   # $1=文件；echo 出值（空/none 视为无值）
   local v
   v=$(tr -d '[:space:]' 2>/dev/null < "$1")
@@ -177,32 +192,15 @@ if [ -z "$LAST" ]; then
   done)
   if [ -n "$_cand" ]; then
     LAST="$_cand"
-    ui_print "  ⚠ 没找到"
-    ui_print "     "上次用哪套" 的记录"
+    ui_print "  ⚠ 没找到「上次用哪套」的记录"
     ui_print "     （可能是上一次切换失败留下的）"
     ui_print "     已按最近用过的恢复：$_cand"
   fi
 fi
 [ -n "$LAST" ] || LAST=none
 
-# ★★ 关键一步：如果上面已经**认出"用户上次用的是哪一套自带配色"**（BUILTIN_PREV），
-#   就直接拿它当恢复目标 —— 别再去 apply 那个旧的 id。
-#
-#   为什么：老版本升上来时字体 id 变了（旧的 f<数字>/内置旧名 vs 新的 builtin_*），
-#   旧 id 必然找不到；但我们已经知道"他原来用的是 718"，那就该恢复成 718。
-#   真机/沙箱都验证过：不换成 BUILTIN_PREV 的话，日志会出现
-#     「认出你上次用的配色：718素装版」+「已恢复：911经典版」
-#   这种"认出来了却没用它"的荒唐结果。
-if [ -n "${BUILTIN_PREV:-}" ]; then
-  ui_print "  → 按你原来的配色恢复到："
-  ui_print "     $(builtin_id_of "$(printf \'%s\' "$BUILTIN_PREV" | sed \'s/^builtin_//\')" | cut -d\'|\' -f2)"
-  LAST="$BUILTIN_PREV"
-fi
-# 把"本来想恢复什么"记下来 —— 恢复失败时日志里能看出是哪个，不用猜
-WANTED="$LAST"
-
 for f in common.sh slots.sh mount.sh fontctl.sh update.sh google_font.sh gms_cache.sh nameclone.sh action.sh \
-         diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh metaprobe.sh fdata.sh logcatch.sh ; do
+         metaprobe.sh fdata.sh diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh logcatch.sh; do
   chmod 755 "$MODPATH/$f" 2>/dev/null
 done
 # Magisk 用户没有「操作」按钮：这几个文件放在模块目录里，点「执行」就能用
@@ -223,293 +221,145 @@ fi
 RESTORED=0
 if [ "$LAST" != none ]; then
   ui_print "- 正在恢复上次的字体选择…"
-  # ★ 排障信息一定要留全。
-  #   真机上出过「恢复失败：」后面**一片空白** —— 用户和作者都不知道是哪一步不对，
-  #   只能靠猜（最后是靠"字体库里没有那个文件"才推断出来的）。
-  #   这里把三件事都打出来：
-  #     ① 上次选的到底是什么（$LAST 原文）
-  #     ② 这个 id 在字体库里有没有对应文件（最常见的原因就是"没有"）
-  #     ③ apply 的**完整**输出（不只最后一行 —— 报错可能不在最后一行）
-  _LAST_RAW="$LAST"
-  _HAVE=""; _MISS=""
-  for _i in $(printf '%s' "$LAST" | tr '+' ' '); do
-    if [ -f "$LIB/$_i.ttf" ]; then _HAVE="$_HAVE $_i"; else _MISS="$_MISS $_i"; fi
-  done
-  [ -n "$_HAVE" ] && ui_print "  上次选择：$_HAVE（字体库里有）"
-  [ -n "$_MISS" ] && ui_print "  上次选择：$_MISS（⚠ 字体库里**没有**这个文件 —— 通常是被清理过/换过字体库）"
-
-  # ★ 2026-10-14：加"要等一会儿"的提示（与主项目同步）。
-  #   为什么必须加：下一行 `fontctl.sh apply` 要**扫一遍机器上的字体配置 + 逐文件判定**，
-  #   字体多的机器上要十几秒到一分钟。而这段时间安装界面**一行输出都没有** ——
-  #   用户会以为卡死了、甚至去强杀管理器。真机反馈过（截图里就是停在"上次选择"这行不动）。
-  #   提示要写在 apply **之前**（写在后面就是马后炮了，用户已经等完了）。
-  #   ⚠️ 改这里时别删：它不参与任何逻辑，纯粹是给用户看的。
-  # ★ 2026-10-24（作者真机反馈）：这一步实测能到几分钟（槽位多 + 要合成合集）。
-  #   原来写"十几秒到一分钟"是不准的；现在按实情说，不给具体秒数。
+  # ★ 2026-10-24（作者真机反馈，打脸了上面那段注释）：
+  #   实测 152 个槽位时，这一步能有好几分钟 —— 因为 apply 不只是写 map，
+  #   还要逐槽位比对、必要时合成 .ttc 合集。原来写"很快"是错的。
+  #   现在按实情说，并且**不给具体秒数**（给了就会被下一张截图打脸）。
   ui_print "  ⏳ 正在生成挂载计划（槽位多或设备慢时要几十秒到几分钟）"
   ui_print "     这段时间没有任何输出是正常的，请耐心等，别退出管理器"
-
-  _APPLY_OUT=$(sh "$MODPATH/fontctl.sh" apply "$LAST" 2>&1)
-  OUT=$(printf '%s\n' "$_APPLY_OUT" | tail -n1)
+  # ★ 用 sed 取最后一个非空行 —— tail -n1 遇到末尾空行会拿到空串，
+  #   于是 OK:* 匹配不上，把一次成功的恢复误判成失败（会把用户字体清成 none）。
+  OUT=$(sh "$MODPATH/fontctl.sh" apply "$LAST" 2>&1 | sed '/^[[:space:]]*$/d' | tail -n1)
   case "$OUT" in
     OK:*)
       RESTORED=1
       ui_print "  已恢复：$(echo "$OUT" | cut -d: -f2)（$(echo "$OUT" | cut -d: -f3) 个槽位）"
       ;;
     *)
-      # ★ 文案：**不要说"失败"**。
-      #   原来这里是「恢复失败：」+ 紧接着「✓ 已自动改用 911」——
-      #   用户读到的是"坏了？又好了？"，完全懵（作者本人就吐槽过这个自相矛盾）。
-      #   真相是：上次那套找不到了 → 自动沿用了内置的一套，**结果是可用的**。
-      #   所以按"结果"说话，别按"过程"说话。
-      if [ -n "${OUT#ERROR:}" ]; then
-        ui_print "  没找到你上次选的「$_LAST_RAW」"
-        ui_print "     原因：${OUT#ERROR:}"
-      else
-        ui_print "  没找到你上次选的「$_LAST_RAW」"
-        printf '%s\n' "$_APPLY_OUT" | while IFS= read -r _l; do
-          [ -n "$_l" ] && ui_print "    | $_l"
-        done
-      fi
-      ui_print "  常见原因：那个字体文件已被清理，"
-ui_print "  或者换过字体库"
-ui_print "  （模块之间共用同一个库）"
-      # ⚠️ 不能只写 none 就完事 —— 那样模块会**静默空转**（装上了却什么都不换），
-      #    用户重启后看到"没生效"，还以为新包坏了。
-      #    这里兜底自动挑一套可用配色，保证模块一定处于"能用"的状态。
+      ui_print "  恢复失败：${OUT#ERROR:}"
+      ui_print "  已改为「无字体」"
+      ui_print "  请开机后在 WebUI 重新选择"
       FALLBACK=0
-      if command -v builtin_apply_first >/dev/null 2>&1; then
-        if builtin_apply_first; then
-          FALLBACK=1
-          # 告诉 builtin_menu：这次不是"沿用你上次的"，是"改用了内置配色"
-          BUILTIN_MENU_NOTE="已改用内置配色（不是沿用上次的选择）—— 想换请在 WebUI 里点"
-          export BUILTIN_MENU_NOTE
-          ui_print "  → 已改为内置配色，重启后即可用"
-ui_print "     （想换配色请在 WebUI 里点）"
-        else
-          echo none > "$MODPATH/pending_font"
-          ui_print "  → 也没有可用的内置配色"
-          ui_print "     已设为「无字体」"
-ui_print "     请开机后在 WebUI 选择"
-        fi
-      else
-        echo none > "$MODPATH/pending_font"
-        ui_print "  → 已设为「无字体」"
-ui_print "     请开机后在 WebUI 重新选择"
-      fi
       ;;
   esac
 fi
-# ★★ 只有「恢复失败 **且** 兜底也失败」时，才把选择清成 none。
-#
-#   以前这里是无条件的 `[ "$RESTORED" = 1 ] || apply none` —— 于是：
-#     ① 恢复失败 → ② 兜底 builtin_apply_first 挑了一套配色、写好 pending_font
-#     → ③ 紧接着这句 apply none 把 pending_font 覆盖回 none
-#     → ④ 用户重启后**回到系统默认**，界面显示"待生效 none"。
-#   真机上就是这么表现的（作者反馈"重启完回到默认状态，重新选一次才生效"）。
-#   ⚠️ 注意：`builtin_apply_first && FALLBACK=1 || ...` 这个写法是**故意**的 ——
-#      `a && b || c` 在 b 失败时会执行 c，而这里 b 只是赋值、不会失败，所以安全。
-if [ "$RESTORED" = 1 ] || [ "$FALLBACK" = 1 ]; then
-  :                                   # 已经有可用选择（恢复成功 / 兜底成功），别动它
+# ★ 只有「恢复失败 **且** 兜底也没成功」时才清成 none。
+#   这个 if 现在看起来是等价的（主项目没内置字体，兜底就是写 none），
+#   但它是**给换皮/内置字体变体留的正确形状**：保时捷内置配色版的兜底会挑一套
+#   可用配色（builtin_apply_first），而无条件的 `|| apply none` 会**紧接着把
+#   它的结果覆盖回 none** → 用户重启后回到默认、必须重新选一次（真机踩到过）。
+#   所以这里先算出 FALLBACK 再决定，别写死。
+if [ "$RESTORED" = 1 ] || [ "${FALLBACK:-0}" = 1 ]; then
+  :                                   # 已有可用选择，别动它
 else
   sh "$MODPATH/fontctl.sh" apply none >/dev/null 2>&1
 fi
+
+# ★ 2026-10-26 补：导入内置配色并让用户用音量键选择（子项目多配色包必需）
+#   之前 customize.sh 从未调用 builtin_import / builtin_menu，
+#   所以安装时不弹选择、字体库里也没有内置字体。
+if [ -f "$MODPATH/builtin.sh" ] && [ -d "$MODPATH/builtin" ]; then
+  ui_print "- 正在导入内置配色…"
+  MODDIR="$MODPATH"; export MODDIR
+  . "$MODPATH/common.sh" 2>/dev/null
+  . "$MODPATH/fontcheck.sh" 2>/dev/null
+  . "$MODPATH/builtin.sh" 2>/dev/null
+  if command -v builtin_import >/dev/null 2>&1; then
+    builtin_import >/dev/null 2>&1
+    _bc=$(builtin_count 2>/dev/null)
+    ui_print "- 内置配色已导入：${_bc:-0} 套"
+  fi
+  if command -v builtin_menu >/dev/null 2>&1; then
+    builtin_menu
+  fi
+  _pf=$(cat "$MODPATH/pending_font" 2>/dev/null | tr -d '[:space:]')
+  case "$_pf" in
+    ""|none) ;;
+    *)
+      _out=$(sh "$MODPATH/fontctl.sh" apply "$_pf" 2>&1 | sed '/^[[:space:]]*$/d' | tail -n1)
+      case "$_out" in
+        OK:*) ui_print "- 已应用：$(echo "$_out" | cut -d: -f2)" ;;
+        *)    ui_print "- 应用失败：${_out#ERROR:}" ;;
+      esac
+      ;;
+  esac
+fi
+
 sh "$MODPATH/fontctl.sh" prop >/dev/null 2>&1
 
-# ---------------------------------------------------------------------------
-# 选初始配色（音量键；只有一个配色时自动选中）
-#
-# ⚠️ 必须在写 pending_font **之前**调用：
-#    builtin_menu 靠"已安装目录里 pending_font 是否为空"判断要不要打扰用户
-#    （重刷同一版本时应该直接沿用原选择、不弹菜单）。如果先写了 none，那个判断
-#    永远为假 → 每次更新都弹菜单，老用户随手按一下音量[上]就把配色静默换成第一项。
-# ---------------------------------------------------------------------------
-if command -v builtin_menu >/dev/null 2>&1; then
-  builtin_menu
-fi
-
-# ---------------------------------------------------------------------------
-# 装完自检：选了配色就必须留下挂载计划（slots.map）
-#
-# 为什么要有这一段：真机上出过一次"选了配色、也报了 OK，但 slots.map 没落盘"，
-# 结果开机后一个槽位都挂不上，界面上只写「本次开机未挂载」，用户完全不知道哪一步坏了。
-# 这类失败必须在**刷入时**就喊出来，而不是等到开机后让用户猜。
-#
-# 这一段同时承担"菜单选完配色之后的第一次 apply" —— 全新安装时 slots.map 还不存在，
-# 自然就会走到下面的重新生成分支。
-# ---------------------------------------------------------------------------
-PEND=$(tr -d '[:space:]' 2>/dev/null < "$MODPATH/pending_font")
-if [ -n "$PEND" ] && [ "$PEND" != none ]; then
-  if [ ! -s "$MODPATH/slots.map" ]; then
-    ui_print " "
-    ui_print "- 正在为「$PEND」生成挂载计划…"
-    # ★ 2026-10-24（作者真机反馈）：这一步实测能到几分钟（槽位多 + 要合成合集），
-    #   原来"十几秒到一分钟"的承诺不准；改成为实情描述，不给具体秒数。
-    ui_print "  ⏳ 正在生成挂载计划（槽位多或设备慢时要几十秒到几分钟）"
-    ui_print "     这段时间没有任何输出是正常的，请耐心等，别退出管理器"
-    sh "$MODPATH/fontctl.sh" apply "$PEND" >/dev/null 2>&1 || true
-    if [ ! -s "$MODPATH/slots.map" ]; then
-      ui_print "⚠ 挂载计划没有生成（slots.map 为空）"
-      ui_print "  字体库里有 $(ls "$LIB"/builtin_*.ttf 2>/dev/null | wc -l | tr -d \' \') 套自带配色"
-      ui_print "  修复尝试：重新生成一次…"
-      OUT2=$(sh "$MODPATH/fontctl.sh" apply "$PEND" 2>&1 | tail -n1)
-      case "$OUT2" in
-        OK:*) ui_print "  ✓ 已生成（$OUT2）" ;;
-        *)    ui_print "  ✗ 仍然失败：${OUT2#ERROR:}"
-              ui_print "  开机后请在 WebUI 里重新选一次配色" ;;
-      esac
-    fi
-  fi
-fi
-
-LIB_COUNT=$(lib_font_ids 2>/dev/null | grep -c '^builtin_')
-# ★ 2026-10-14（与主项目同步）：`conflicts` 也要扫一遍机器上的字体配置，会停一会儿。
+LIB_COUNT=$(ls "$LIB"/f*.ttf 2>/dev/null | wc -l)
+# ★ 2026-10-18（文案跟上实情）：
+#   原来写的是"也会扫一遍字体配置，稍等" —— 其实 list_conflicts 扫的是
+#   **其它模块目录**（看谁也在改字体），而且从 2026-10-17 起带了缓存，
+#   第二次起几乎是瞬时。这行字既不准、又让人以为要等很久。
 ui_print "- 正在检查有没有其它字体模块…"
-ui_print "  （也会扫一遍字体配置，稍等）"
 CONFLICTS=$(sh "$MODPATH/fontctl.sh" conflicts 2>/dev/null | cut -d'|' -f2 | tr '\n' ' ')
 
-# ===========================================================================
-# 刷入日志（4 区 + 分割线；与主项目同一套排版，内容换成子项目的）
-# ===========================================================================
-GD="无"; [ -f "$OLD/disable" ] && GD="有"
-GU="无"; [ -f "$OLD/update" ] && GU="有（上一次安装没被激活）"
-GS="无"; case "$(getprop persist.sys.safemode)$(getprop ro.sys.safemode)" in *1*) GS="有" ;; esac
-GM="无"; { command -v magisk >/dev/null 2>&1 || [ -e /data/adb/magisk ]; } && GM="有"
-
-ui_print " "
-ui_print "========================================================"
-ui_print " 保时捷字体（三合一）  $(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')"
-ui_print "========================================================"
-ui_print " "
-ui_print "[1/4] 设备与系统"
-ui_print "- 设备：$(getprop ro.product.brand 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
-ui_print "- 系统：Android $(getprop ro.build.version.release 2>/dev/null)   内核 $(uname -r 2>/dev/null)"
-ui_print "- 系统识别：${ROM_NAME:-未知}"
-ui_print "- Root 管理器：$(root_manager_name "$RM" 2>/dev/null)"
-if [ "$(mount_mode 2>/dev/null)" = manager ]; then
-  ui_print "- 挂载方式：交给管理器 / 元模块"
-else
-  ui_print "- 挂载方式：模块自带挂载（无需元模块）"
-fi
-ui_print "- 门禁：已禁用=$GD   待激活=$GU   安全模式=$GS   Magisk共存=$GM"
-ui_print "--------------------------------------------------------"
-ui_print " "
-ui_print "[2/4] 内置配色"
-ui_print "- 自带配色：${LIB_COUNT:-0} 套（素装 / 一点红 / 烈焰）"
-ui_print "  位置：$LIB"
-if [ -n "${PEND:-}" ] && [ "$PEND" != "none" ]; then
-  ui_print "- 当前选择：$PEND"
-else
-  ui_print "- 当前选择：无字体（系统默认）"
-fi
-if [ -d "$LIB/.orig" ]; then
-  _okb=$(du -sk "$LIB/.orig" 2>/dev/null | awk '{print $1}')
-  ui_print "- 主题字体原件备份：${_okb:-0} KB（卸载时自动还原）"
-fi
-ui_print "- 更新模块不会丢失选择；卸载全部配色包才会删除字体库"
-ui_print "--------------------------------------------------------"
-ui_print " "
-ui_print "[3/4] 扫描与槽位"
-_slotn=$(grep -c . "$MODPATH/slots.map" 2>/dev/null | tr -d ' ')
-[ -n "$_slotn" ] || _slotn=0
-_tcn=$(awk '$2 ~ /\.ttc$/ {c++} END {print c+0}' "$MODPATH/slots.map" 2>/dev/null)
-ui_print "- 槽位计划：${_slotn} 个，其中中文合集槽位 ${_tcn:-0} 个"
-_sf=$(ls -1 /system/fonts 2>/dev/null | grep -c . )
-_pf=$(ls -1 /product/fonts 2>/dev/null | grep -c . )
-ui_print "- 系统字体：/system/fonts ${_sf:-0} 个，/product/fonts ${_pf:-0} 个"
-_cfg=$(ls -1 /system/etc/fonts.xml /system/etc/fonts_fallback.xml 2>/dev/null | head -n1)
-if [ -n "$_cfg" ]; then
-  _cfgkb=$(du -k "$_cfg" 2>/dev/null | awk '{print $1}')
-  ui_print "- 字体配置：$_cfg（${_cfgkb:-?} KB）"
-fi
-if [ -n "${CONFLICTS:-}" ]; then
-  ui_print "- ⚠ 冲突字体模块：$CONFLICTS   （建议先停用，避免互相覆盖）"
-else
-  ui_print "- 冲突字体模块：无"
-fi
-ui_print "--------------------------------------------------------"
-ui_print " "
-ui_print "[4/4] 完成"
-ui_print "- 模块版本：$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')   安装位置：$MODPATH"
-_um="不适用"
-if [ -d /data/adb/ksu ]; then
-  if [ -e /data/adb/ksu/umount_enabled ] || [ "$(cat /data/adb/ksu/.umount 2>/dev/null)" = "1" ]; then
-    _um="开启（部分 App 可能看不到挂载）"
-  else
-    _um="关闭（App 里也能看到字体）"
-  fi
-fi
-ui_print "- 管理器卸载机制：$_um"
-if [ -n "${PEND:-}" ] && [ "$PEND" != "none" ]; then
-  ui_print "- ⏳ 重启后生效（现在还是系统原字体）"
-fi
-ui_print " "
-ui_print "- 使用方法："
-ui_print "  1. 管理器里点本模块 → 打开（WebUI）"
-ui_print "  2. 点选配色卡片切换（内置三套，不用导入）"
-ui_print "  3. 重启生效；选「无字体」即恢复系统默认"
-if [ "$RM" = magisk ]; then
-  ui_print "  · Magisk 没有 WebUI 入口：先装 KsuWebUI，再点模块卡片的「操作」"
-fi
-ui_print " "
-ui_print "- 出问题时：界面「诊断报告」→ 生成（会自动存到 Download）"
-ui_print "- 保险：若选配色后没能开机，下次开机会自动恢复为「无字体」"
-ui_print "========================================================"
-
-if [ -f "$MODPATH/diag.sh" ]; then
-  cp -f "$MODPATH/diag.sh" /data/local/tmp/font_diag.sh 2>/dev/null
-  chmod 755 /data/local/tmp/font_diag.sh 2>/dev/null
-fi
-
-
-
 # ---------------------------------------------------------------------------
-# 字体档案：给已有字体补 .fdata（结构清单），诊断报告要用
-#   放在安装结束前跑，用户打开界面时档案已经在了
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# 扫描印记：只在"需要重扫"时才扫
-#   scanmarks.conf 声明要求版本（slot / font 分开），设备上 .scanmarks 记已扫到哪版
-#   设备记录 <= 要求版本 → 扫（含同版本覆盖安装，方便开发自测）
-#   设备记录 >  要求版本 → 跳过
+# 扫描印记：只在"需要重扫"时才扫（作者 2026-10-21 定的规则）
+#
+#   模块自带 scanmarks.conf（要求版本表）：
+#       slot=1406     ← 槽位扫描逻辑最后在 1.4.6 变过
+#       font=1406     ← 字体结构扫描逻辑最后在 1.4.6 变过
+#   设备上存 $LIB/.scanmarks（已扫到什么版本）：
+#       slot=1406
+#       font=1406
+#
+#   安装时逐个比：
+#       设备记录 <  要求版本 → 扫（他是从更早的版本升上来的，没扫过新内容）
+#       设备记录 == 要求版本 → 也扫（同版本覆盖安装也重扫，方便开发者自测）
+#       设备记录 >  要求版本 → 不扫（之前已经扫过了）
+#   扫完之后设备记录写成**当前模块版本**，于是后续版本自然"比要求高"，不再重扫。
+#
+#   槽位和字体分开记：只改字体相关逻辑时，槽位不用重扫，省时间。
 # ---------------------------------------------------------------------------
 LIB="${LIB:-/data/adb/custom_font_lib}"
 MARKS="$LIB/.scanmarks"
 MCUR=$(sed -n 's/^versionCode=//p' "$MODPATH/module.prop" 2>/dev/null | head -1 | tr -d '\r')
 case "$MCUR" in ''|*[!0-9]*) MCUR=0 ;; esac
 
-mk_req() {
+mk_req() {   # mk_req <key> → 要求版本（没配置就输出空）
   [ -f "$MODPATH/scanmarks.conf" ] || return 1
   sed -n "s/^$1=//p" "$MODPATH/scanmarks.conf" 2>/dev/null | head -1 | tr -d '\r'
 }
-mk_cur() {
+
+mk_cur() {   # mk_cur <key> → 设备已扫到的版本
   [ -f "$MARKS" ] || return 1
   sed -n "s/^$1=//p" "$MARKS" 2>/dev/null | head -1 | tr -d '\r'
 }
-mk_need() {
+
+mk_need() {  # mk_need <key> → 返回 0 表示需要扫
   _req=$(mk_req "$1")
-  case "$_req" in ''|*[!0-9]*) return 1 ;; esac
+  case "$_req" in ''|*[!0-9]*) return 1 ;; esac     # 没要求 → 不扫
   _cur=$(mk_cur "$1")
-  case "$_cur" in '') return 0 ;; esac
-  case "$_cur" in *[!0-9]*) return 0 ;; esac
-  [ "$_cur" -le "$_req" ] && return 0
+  case "$_cur" in '') return 0 ;; esac              # 没记录 → 扫
+  case "$_cur" in *[!0-9]*) return 0 ;; esac        # 记录坏了 → 扫
+  [ "$_cur" -le "$_req" ] && return 0                # 低于或等于要求 → 扫
   return 1
 }
-mk_set() {
+
+mk_set() {   # mk_set <key> <value>
   mkdir -p "$LIB" 2>/dev/null
+date +%s > "$LIB/.install_id" 2>/dev/null
   [ -f "$MARKS" ] || : > "$MARKS" 2>/dev/null
   grep -v "^$1=" "$MARKS" > "$MARKS.tmp" 2>/dev/null
   echo "$1=$2" >> "$MARKS.tmp"
   mv -f "$MARKS.tmp" "$MARKS" 2>/dev/null
 }
 
+# 手动强制重扫：碰一下这个文件，下次安装全部重扫
 if [ -f "$LIB/.force_rescan" ]; then
-  rm -f "$MARKS" "$LIB/.force_rescan" 2>/dev/null
+  rm -f "$MARKS" 2>/dev/null
+  rm -f "$LIB/.force_rescan" 2>/dev/null
   ui_print "- 检测到强制重扫标记，本次全部重扫"
 fi
 
+
+# ---------------------------------------------------------------------------
+# 槽位扫描（贵，只在槽位逻辑变过时扫）
+# ---------------------------------------------------------------------------
 if mk_need slot; then
+  # 清掉可能过期的原始清单，让 rescan 真正重扫
   rm -f "$LIB/scanned/device.list" "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" \
         "$LIB/scanned/skip.list" "$LIB/scanned/ttc.list" "$LIB/scanned/env.list" \
         "$LIB/scanned/.schema" 2>/dev/null
@@ -523,12 +373,16 @@ else
   ui_print "- 槽位清单已是最新（无需重扫）"
 fi
 
+
 # ---------------------------------------------------------------------------
 # 清空缓存后立刻重建（否则界面「槽位总数 / 机型清单 / 本机扫描」会显示为空）
 #   这一次扫描就发生在安装时，开机和应用路径上仍然是读缓存，速度不受影响。
 # ---------------------------------------------------------------------------
-
-
+# ---------------------------------------------------------------------------
+# 字体结构扫描（只扫字体库，比槽位快；同样只在"需要"时扫）
+#   fdata.sh    → 每份字体的结构清单 .fdata
+#   metaprobe.sh→ 写进 .meta：轮廓类型 / 是否可变 / 字重轴范围 / 轴标签
+# ---------------------------------------------------------------------------
 if mk_need font; then
   if [ -f "$MODPATH/fdata.sh" ]; then
     sh "$MODPATH/fdata.sh" 2>/dev/null | sed 's/^/  /' >/dev/null 2>&1
@@ -536,12 +390,17 @@ if mk_need font; then
   fi
   
 # ---------------------------------------------------------------------------
-# 清理旧版"GMS 缓存桥接"的残留（本版已移除该功能）
+# 清理旧版"GMS 缓存桥接"的残留（1.4.6 及更早已移除该功能）
+#   老用户可能还挂着 44MB 的克隆、留着启用标志 → 升级时顺手清干净
 # ---------------------------------------------------------------------------
 if [ -f "$LIB/gms_cache.sh" ]; then
   LIB="$LIB" sh "$LIB/gms_cache.sh" off >/dev/null 2>&1 || true
 fi
-rm -f "$LIB"/.clone.*.ttf "$LIB/.gms_cache_on" "$LIB"/.gms_bridge.list "$LIB"/.gms_bridge.log 2>/dev/null
+rm -f "$LIB"/.clone.*.ttf "$LIB/.gms_cache_on" 2>/dev/null
+for _p in com.google.android.gms com.google.android.gsf com.android.vending; do
+  umount -l "/data/data/$_p/files/fonts/opentype" 2>/dev/null || true
+done
+rm -f "$LIB"/.gms_bridge.list "$LIB"/.gms_bridge.log 2>/dev/null
 
 if [ -f "$MODPATH/metaprobe.sh" ]; then
     LIB="$LIB" sh "$MODPATH/metaprobe.sh" 2>/dev/null | sed 's/^/  /' >/dev/null 2>&1
@@ -552,8 +411,104 @@ else
   ui_print "- 字体档案已是最新（无需重扫）"
 fi
 
-set_perm_recursive "$MODPATH" 0 0 0755 0644
-for f in common.sh slots.sh mount.sh fontctl.sh update.sh google_font.sh gms_cache.sh nameclone.sh action.sh \
-         diag.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh; do
-  set_perm "$MODPATH/$f" 0 0 0755
-done
+ui_print "- 扫描与档案更新结束，正在写入文件权限…"
+
+# ===========================================================================
+# 刷入日志（作者要求：分区 + 分割线 + 内容尽量全）
+#   顺序：检测 → 扫描 → 汇总，扫描在汇总之前完成，不会出现"完成之后还在扫"
+# ===========================================================================
+ui_print "========================================================"
+ui_print " 自定义字体切换模块  $(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')"
+ui_print "========================================================"
+ui_print " "
+ui_print "[1/4] 设备与门禁"
+ui_print "- 设备：$(getprop ro.product.brand 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
+ui_print "- 系统：Android $(getprop ro.build.version.release 2>/dev/null)   内核 $(uname -r 2>/dev/null)"
+ui_print "- 系统识别：$(tr -d '[:space:]' < "$MODPATH/current_rom" 2>/dev/null | head -c 40)"
+_RM="KernelSU 系"
+command -v magisk >/dev/null 2>&1 && _RM="Magisk"
+[ -d /data/adb/ksu ] && _RM="KernelSU 系"
+ui_print "- Root 管理器：$_RM"
+ui_print "- 挂载方式：模块自带挂载（无需元模块）"
+GD="无"; [ -f "$OLD/disable" ] && GD="有"
+GU="无"; [ -f "$OLD/update" ] && GU="有（上次安装未被激活）"
+GS="无"; case "$(getprop persist.sys.safemode)$(getprop ro.sys.safemode)" in *1*) GS="有" ;; esac
+GM="无"; { command -v magisk >/dev/null 2>&1 || [ -e /data/adb/magisk ]; } && GM="有"
+ui_print "- 门禁：已禁用=$GD  待激活=$GU  安全模式=$GS  Magisk共存=$GM"
+ui_print "--------------------------------------------------------"
+ui_print " "
+ui_print "[2/4] 字体库与上次选择"
+_LIBN=$(ls -1 "$LIB"/*.ttf 2>/dev/null | wc -l | tr -d ' ')
+_LIBKB=$(du -sk "$LIB" 2>/dev/null | awk '{print $1}')
+ui_print "- 字体库：${_LIBN:-0} 个字体，占用 ${_LIBKB:-0} KB"
+ui_print "  路径：$LIB"
+_ACT=$(sed -n 's/^active=//p' "$LIB/.index" 2>/dev/null | head -n1 | tr -d '\r')
+_PEND=$(sed -n 's/^pending=//p' "$LIB/.index" 2>/dev/null | head -n1 | tr -d '\r')
+if [ -n "$_ACT" ] && [ "$_ACT" != "none" ]; then
+  _AN=$(head -n1 "$LIB/$_ACT.name" 2>/dev/null)
+  ui_print "- 上次选择：${_AN:-$_ACT}"
+else
+  ui_print "- 上次选择：无字体（系统默认）"
+fi
+_GRP=$(grep -l '^group=' "$LIB"/*.meta 2>/dev/null | wc -l | tr -d ' ')
+[ "${_GRP:-0}" -gt 0 ] 2>/dev/null && ui_print "- 字重组：${_GRP} 份字体参与分组（按字重自动配对）"
+if [ -d "$LIB/.orig" ]; then
+  _OKB=$(du -sk "$LIB/.orig" 2>/dev/null | awk '{print $1}')
+  ui_print "- 主题字体原件备份：${_OKB:-0} KB（卸载时自动还原）"
+fi
+ui_print "--------------------------------------------------------"
+ui_print " "
+ui_print "[3/4] 扫描与档案"
+ui_print "- 槽位总数 ${_an:-?} 个（机型清单 ${_tn:-0} 个 + 本机扫描补 ${_en:-0} 个）"
+_TCN=$(awk '$2 ~ /\.ttc$/ {c++} END {print c+0}' "$MODPATH/slots.map" 2>/dev/null)
+_SLOTN=$(grep -c . "$MODPATH/slots.map" 2>/dev/null | tr -d ' ')
+ui_print "- 槽位计划：${_SLOTN:-0} 个，其中中文合集槽位 ${_TCN:-0} 个"
+_SF=$(ls -1 /system/fonts 2>/dev/null | grep -c . )
+_PF=$(ls -1 /product/fonts 2>/dev/null | grep -c . )
+ui_print "- 系统字体：/system/fonts ${_SF:-0} 个，/product/fonts ${_PF:-0} 个"
+_CFG=$(ls -1 /system/etc/fonts.xml /system/etc/fonts_fallback.xml 2>/dev/null | head -n1)
+if [ -n "$_CFG" ]; then
+  _CFGKB=$(du -k "$_CFG" 2>/dev/null | awk '{print $1}')
+  ui_print "- 字体配置：$_CFG（${_CFGKB:-?} KB）"
+fi
+if [ -d /data/system/theme/fonts ]; then
+  _THN=$(ls -1 /data/system/theme/fonts 2>/dev/null | wc -l | tr -d ' ')
+  ui_print "- 主题字体（个性化）：${_THN:-0} 个文件（默认不替换）"
+fi
+ui_print "- 扫描印记：slot=$(mk_cur slot 2>/dev/null)   font=$(mk_cur font 2>/dev/null)"
+ui_print "--------------------------------------------------------"
+ui_print " "
+ui_print "[4/4] 完成"
+ui_print "- 模块版本：$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')   安装位置：$MODPATH"
+if [ -n "${CONFLICTS:-}" ]; then
+  ui_print "- ⚠ 冲突字体模块：$CONFLICTS   （建议先停用，避免互相覆盖）"
+else
+  ui_print "- 冲突字体模块：无"
+fi
+_UM="不适用"
+if [ -d /data/adb/ksu ]; then
+  if [ -e /data/adb/ksu/umount_enabled ] || [ "$(cat /data/adb/ksu/.umount 2>/dev/null)" = "1" ]; then
+    _UM="开启（部分 App 可能看不到挂载）"
+  else
+    _UM="关闭（App 里也能看到字体）"
+  fi
+fi
+ui_print "- 管理器卸载机制：$_UM"
+if [ -n "$_ACT" ] && [ "$_ACT" != "none" ]; then
+  ui_print "- ⏳ 重启后生效（现在还是系统原字体）"
+fi
+ui_print " "
+ui_print "- 使用方法："
+ui_print "  1. 管理器里点本模块 → 打开（WebUI）"
+ui_print "  2. 导入自己的 TTF/OTF（可多选），点卡片切换"
+ui_print "  3. 重启生效；选「无字体」即恢复系统默认"
+if [ "${_RM:-}" = "Magisk" ]; then
+  ui_print "  · Magisk 没有 WebUI 入口：先装 KsuWebUI，再点模块卡片的「操作」"
+fi
+ui_print " "
+ui_print "- 出问题时：界面「诊断报告」→ 生成（约 5~6 分钟）"
+ui_print "  生成完点「上传」可直接发我；报告也会存到 Download/完整体检报告.txt"
+ui_print " "
+ui_print "- 注意：更新模块不会丢字体库；卸载模块会一并删除字体库"
+ui_print "- 保险：若选字体后没能开机，下次开机会自动恢复为「无字体」"
+ui_print "========================================================"

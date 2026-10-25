@@ -723,6 +723,23 @@ slot_scan_cache_stamp() {   # $1=moddir → 扫描完成后写指纹
 
 slot_device_scan() {   # $1=moddir → 生成 device.list
   local moddir="${1:-${MODDIR:-}}"
+  # ★ 2026-10-25 恢复 4.4.8 的保护（真机定位）：
+  #   4.4.8 里这里有一句 `[ "$_rom_f" = flyme ] && return 1`，
+  #   4.4.8.1 把它当"特殊分支"删掉了 —— 结果 Flyme 开始扫描本机字体，
+  #   槽位从 ~30 个涨到 96 个（含叙利亚文/孟加拉文/奥里亚文…），
+  #   随后出现「任何模块的 WebUI 一点就闪退」（64 个 tombstone 全在 WebView 渲染进程）。
+  #   除非用户在 Flyme 专区手动打开 flyme_scan，否则 Flyme 不扫本机。
+  _rom_f=$(tr -d '[:space:]' 2>/dev/null < "$moddir/current_rom" 2>/dev/null)
+  if [ "$_rom_f" = "flyme" ] && [ "$(cfg_get flyme_scan 0 2>/dev/null)" != 1 ]; then
+    # ★ 2026-10-25：光 return 不够 —— 上一版扫出来的 device.list / slots.list
+    #   还会被沿用（slot_build_slots 直接读它们），96 个槽位照样在。
+    #   这里把扫描缓存清掉，让计划回到「只用机型清单」的状态（= 4.4.2 时代的范围）。
+    _sd_clr="${LIB:-/data/adb/custom_font_lib}/scanned"
+    rm -f "$_sd_clr/device.list" "$_sd_clr/slots.list" "$_sd_clr/slots.meta" \
+          "$_sd_clr/skip.list" "$_sd_clr/ttc.list" "$_sd_clr/env.list" \
+          "$_sd_clr/.schema" 2>/dev/null
+    return 1
+  fi
 
   local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
   local _dev="$_sd/device.list"
@@ -753,6 +770,40 @@ slot_device_scan() {   # $1=moddir → 生成 device.list
     case "$role" in sym|vadj) continue ;; esac
     for d in $dirs; do
       if [ -f "$FSROOT$d/$name" ]; then
+        # ★ 2026-10-24 三星专区：可选择跳过 /product/fonts（OneUI 把部分字体放这儿）
+        case "$d" in
+          */product/fonts|product/fonts)
+            [ "$(cfg_get skip_product 0 2>/dev/null)" = 1 ] && continue ;;
+        esac
+        # B2：目录级过滤（只换 system / system+product / 跳过 vendor / 跳过厂商目录）
+        _dd=${d#/}
+        if [ "$(cfg_get only_system_fonts 0 2>/dev/null)" = 1 ]; then
+          case "$_dd" in system/fonts) ;; *) continue ;; esac
+        elif [ "$(cfg_get system_and_product 0 2>/dev/null)" = 1 ]; then
+          case "$_dd" in system/fonts|product/fonts) ;; *) continue ;; esac
+        fi
+        if [ "$(cfg_get skip_vendor_fonts 0 2>/dev/null)" = 1 ]; then
+          case "$_dd" in vendor/*) continue ;; esac
+        fi
+        # B3-3：用户自填的排除目录（逗号分隔，匹配前缀）
+        _exd=$(cfg_get exclude_dirs "" 2>/dev/null)
+        if [ -n "$_exd" ]; then
+          _hitx=0
+          for _one in $(printf '%s' "$_exd" | tr ',;' '  '); do
+            [ -n "$_one" ] || continue
+            case "$_dd" in "$_one"/*|"$_one") _hitx=1 ;; esac
+          done
+          [ "$_hitx" = 1 ] && continue
+        fi
+        _svd=$(cfg_get skip_vendor_dirs "" 2>/dev/null)
+        if [ -n "$_svd" ]; then
+          _hit=0
+          for _one in $(printf '%s' "$_svd" | tr ',' ' '); do
+            [ -n "$_one" ] || continue
+            case "$_dd" in "$_one"/*) _hit=1 ;; esac
+          done
+          [ "$_hit" = 1 ] && continue
+        fi
         printf '%s %s %s\n' "$role" "$d" "$name" >> "$tmp"
         break
       fi
@@ -798,7 +849,21 @@ slot_build_slots() {   # $1=moddir
   [ -s "$tlist" ] || tlist="$moddir/targets/aosp.list"
 
   tmp="$_use.tmp.$$"
-  cp -f "$_sd/device.list" "$tmp" 2>/dev/null || : > "$tmp"
+  # B1-1：只换机型清单 → 不把「本机扫描补」的来源并进来
+  if [ "$(cfg_get targets_only 0 2>/dev/null)" = 1 ]; then
+    : > "$tmp"
+  else
+    cp -f "$_sd/device.list" "$tmp" 2>/dev/null || : > "$tmp"
+  fi
+  # ★ 2026-10-25：清单补第 4 列（小写文件名），生成计划时就不用再 tr 了
+  if [ -s "$tmp" ]; then
+    _tmp4="$tmp.4"
+    while IFS=' ' read -r _r _d _n; do
+      [ -n "$_n" ] || continue
+      _nl=$(_lc "$_n")
+      printf '%s %s %s %s\n' "$_r" "$_d" "$_n" "$_nl"
+    done < "$tmp" > "$_tmp4" 2>/dev/null && mv -f "$_tmp4" "$tmp" 2>/dev/null
+  fi
   dev_n=$(grep -c . "$tmp" 2>/dev/null || echo 0)
   _bs_have=" $(awk '$3 != "" { print $3 }' "$tmp" 2>/dev/null | tr '\n' ' ') "
 
@@ -815,7 +880,26 @@ slot_build_slots() {   # $1=moddir
       case "$role" in sym|vadj) continue ;; esac
       for d in $dirs; do
         if [ -f "$FSROOT$d/$name" ]; then
-          printf '%s %s %s\n' "$role" "$d" "$name" >> "$tmp"
+          # B2：目录级过滤（与上面那个循环保持一致）
+          _dd2=${d#/}
+          if [ "$(cfg_get only_system_fonts 0 2>/dev/null)" = 1 ]; then
+            case "$_dd2" in system/fonts) ;; *) continue ;; esac
+          elif [ "$(cfg_get system_and_product 0 2>/dev/null)" = 1 ]; then
+            case "$_dd2" in system/fonts|product/fonts) ;; *) continue ;; esac
+          fi
+          if [ "$(cfg_get skip_vendor_fonts 0 2>/dev/null)" = 1 ]; then
+            case "$_dd2" in vendor/*) continue ;; esac
+          fi
+          _svd2=$(cfg_get skip_vendor_dirs "" 2>/dev/null)
+          if [ -n "$_svd2" ]; then
+            _hit2=0
+            for _one2 in $(printf '%s' "$_svd2" | tr ',' ' '); do
+              [ -n "$_one2" ] || continue
+              case "$_dd2" in "$_one2"/*) _hit2=1 ;; esac
+            done
+            [ "$_hit2" = 1 ] && continue
+          fi
+          printf '%s %s %s %s\n' "$role" "$d" "$name" "$l" >> "$tmp"
           break
         fi
       done
@@ -1040,8 +1124,59 @@ slot_oem_names_raw() {
 # ---------------------------------------------------------------------------
 
 
-_role_set() {
+_rf_init() {
+  [ "${_RF_READY:-0}" = 1 ] && return 0
+  _RF_READY=1
+    _RF_READY=1
+    _RF_skip_vf=$(cfg_get skip_vf 0 2>/dev/null)
+    _RF_skip_other_lang=$(cfg_get skip_other_lang 0 2>/dev/null)
+    _RF_keep_serif=$(cfg_get keep_serif 0 2>/dev/null)
+    _RF_keep_italic_mono=$(cfg_get keep_italic_mono 0 2>/dev/null)
+    _RF_keep_bold=$(cfg_get keep_bold 0 2>/dev/null)
+    _RF_keep_misans=$(cfg_get keep_misans 0 2>/dev/null)
+    _RF_keep_flyme=$(cfg_get keep_flyme 0 2>/dev/null)
+    _RF_keep_mitype=$(cfg_get keep_mitype 0 2>/dev/null)
+    _RF_keep_oppo=$(cfg_get keep_oppo 0 2>/dev/null)
+    _RF_keep_vivo=$(cfg_get keep_vivo 0 2>/dev/null)
+    _RF_keep_harmony=$(cfg_get keep_harmony 0 2>/dev/null)
+    _RF_keep_roboto=$(cfg_get keep_roboto 0 2>/dev/null)
+    _RF_whitelist=$(cfg_get whitelist "" 2>/dev/null)
+    _RF_blacklist=$(cfg_get blacklist "" 2>/dev/null)
+    _RF_keep_samsung=$(cfg_get keep_samsung 0 2>/dev/null)
+    _RF_main_only=$(cfg_get main_only 0 2>/dev/null)
+    _RF_allow_sym=$(cfg_get allow_sym 0 2>/dev/null)
+    _RF_force_list=$(cfg_get force_list "" 2>/dev/null)
+    _RF_flyme_core=$(cfg_get flyme_core 0 2>/dev/null)
+    _RF_keep_secnum=$(cfg_get keep_secnum 0 2>/dev/null)
+  _RF_only_system=$(cfg_get only_system_fonts 0 2>/dev/null)
+  _RF_sys_and_product=$(cfg_get system_and_product 0 2>/dev/null)
+  _RF_skip_vendor_fonts=$(cfg_get skip_vendor_fonts 0 2>/dev/null)
+  _RF_skip_vendor_dirs=$(cfg_get skip_vendor_dirs "" 2>/dev/null)
+  _RF_exclude_dirs=$(cfg_get exclude_dirs "" 2>/dev/null)
+  return 0
+}
+
+_role_set_core() {  _rf_init
+
   local l="$1" lang="${2:-}"
+  # ★ 2026-10-25 作者要求：**强制替换名单**（用户自己填）优先级最高。
+  #   填进来的名字，不管它本来是"保护"还是"emoji/符号跳过"，一律替换。
+  _fl="$_RF_force_list"
+  if [ -n "$_fl" ]; then
+    for _one in $(printf '%s' "$_fl" | tr ',;' '  '); do
+      [ -n "$_one" ] || continue
+      _onel=$(printf '%s' "$_one" | tr 'A-Z' 'a-z')
+      case "$l" in *"$_onel"*) ROLE=main; return ;; esac
+    done
+  fi
+  # ★ 2026-10-25：高级设置里的「允许替换 emoji / 符号字体」优先级次之 ——
+  #   打开后连 protect.list 里的这几个也会被替换（用于验证"是不是它们导致图标消失"）。
+  #   默认关 → 走下面的保护逻辑。
+  if [ ""$_RF_allow_sym"" = 1 ]; then
+    case "$l" in
+      *emoji*|*symbol*) ROLE=main; return ;;
+    esac
+  fi
   # ★ 2026-10-20：「粗细调节」族引用的字体一律不替换（见 slot_vadj_files 的说明）
   # ★ 名单的算法放在 slot_skip_list 里（扫描阶段算一次、落成小文件）。
   #   这里只读文件 —— 子 shell 里反复调用 _role_set 才不会每次都去解析 XML。
@@ -1057,8 +1192,122 @@ _role_set() {
       [ -s "$_skf" ] && VADJ_SPACED=$(tr '\n' ' ' < "$_skf" 2>/dev/null)
     fi
   fi
-  case " ${VADJ_SPACED:-} " in
-    *" $l "*) ROLE=vadj; return ;;
+  # ★ 2026-10-25 危险区：allow_vadj=1 时允许替换「粗细调节」族（默认仍然跳过）
+  if [ "$(cfg_get allow_vadj 0 2>/dev/null)" != 1 ]; then
+    case " ${VADJ_SPACED:-} " in
+      *" $l "*) ROLE=vadj; return ;;
+    esac
+  fi
+  # ★ 2026-10-24：可变字体（VF）默认不替换（高级设置里可关）。
+  #   真机：换上之后"任何模块的 WebUI 一点就闪退"，tombstone 指向 WebView 渲染进程崩；
+  #   最可疑的就是把 Flyme 的 UI 可变字体（FlymeSansVF.ttf）换成了普通字体。
+  case "$l" in
+    *vf*)
+      # ★ 2026-10-24（作者要求）：**默认关** —— 只有用户在高级设置里手动打开才生效。
+      #   加开关不能改默认行为，否则排查问题时变量会混在一起。
+      [ ""$_RF_skip_vf"" = 1 ] && { ROLE=sym; return; }
+      ;;
+  esac
+  # ---------------------------------------------------------------------
+  # ★ 2026-10-24 高级设置 B1/B2：替换范围过滤（全部默认关 → 行为不变）
+  # ---------------------------------------------------------------------
+  # B1-3 其它语言：这些文字体系换了也没意义，还占资源
+  if [ ""$_RF_skip_other_lang"" = 1 ]; then
+    case "$l" in
+      *syriac*|*bengali*|*oriya*|*odia*|*devanagari*|*gujarati*|*gurmukhi*|\
+      *kannada*|*malayalam*|*tamil*|*telugu*|*sinhala*|*khmer*|*lao*|*thai*|\
+      *myanmar*|*tibetan*|*ethiopic*|*hebrew*|*arabic*|*armenian*|*georgian*|\
+      *cherokee*|*mongolian*|*javanese*|*balinese*|*sundanese*|*buginese*|\
+      *batak*|*lepcha*|*limbu*|*olchiki*|*meetei*|*tirhuta*|*modi*|*newa*|\
+      *sharada*|*takri*|*grantha*|*saurashtra*|*cham*|*vai*|*bamum*|*adlam*|\
+      *nko*|*tifinagh*|*cuneiform*|*hieroglyph*|*coptic*|*runic*|*ogham*|\
+      *yi-*|*nushu*|*tangut*|*miao*|*ahom*|*multani*)
+        ROLE=sym; return ;;
+    esac
+  fi
+  # ★ 2026-10-25 Flyme 保守模式：只换 v2.0 时代那 32 个主字体（默认关）
+  if [ ""$_RF_flyme_core"" = 1 ]; then
+    _core_hit=0
+    for _c in roboto-thin roboto-extralight roboto-light roboto-regular roboto-medium roboto-semibold roboto-bold roboto-extrabold roboto-black robotoflex-regular robotostatic-regular googlesans-regular googlesans-medium googlesans-semibold googlesans-bold googlesanstext-regular googlesanstext-medium googlesanstext-semibold googlesanstext-bold googlesansflex-regular notosans-regular flymesans-thin flymesans-light flymesans-regular flymesans-medium flymesans-bold flymesansvf flymesans-regular meizusans-regular meizusans-medium meizusans-bold flymefont; do
+      case "$l" in *"$_c"*) _core_hit=1 ;; esac
+    done
+    [ "$_core_hit" = 1 ] || { ROLE=sym; return; }
+  fi
+  # ★ 2026-10-25（三星真机：图标消失）：**兜底字体一律不换**
+  #   SECFallback 是 One UI 的最后一道兜底 —— 换掉它，前面字体都没有的字形
+  #   就没有下一层可回落，直接变空白（用户看到的就是"图标/符号不见了"）。
+  #   这条是硬规则，不做开关。
+  case "$l" in
+    *fallback*) ROLE=sym; return ;;
+    # ★ 2026-10-25：SECNum 改回"默认可以换"（它属于 sec-num 数字族，跟图标无关）；
+    #   需要保护时打开 keep_secnum。
+    *secnum*|*secnumfixed*)
+      [ ""$_RF_keep_secnum"" = 1 ] && { ROLE=sym; return; }
+      ;;
+  esac
+  # ★ 2026-10-24 各系统专区：按名字保留厂商字体（默认关）
+  if [ ""$_RF_keep_mitype"" = 1 ]; then
+    case "$l" in *mitype*) ROLE=sym; return ;; esac
+  fi
+  if [ ""$_RF_keep_oppo"" = 1 ]; then
+    case "$l" in *opposans*|*oplus*) ROLE=sym; return ;; esac
+  fi
+  if [ ""$_RF_keep_vivo"" = 1 ]; then
+    case "$l" in *vivofont*|*vivosans*) ROLE=sym; return ;; esac
+  fi
+  if [ ""$_RF_keep_harmony"" = 1 ]; then
+    case "$l" in *harmonyos*|*hnfont*|*hwsans*) ROLE=sym; return ;; esac
+  fi
+  if [ ""$_RF_keep_roboto"" = 1 ]; then
+    case "$l" in roboto*) ROLE=sym; return ;; esac
+  fi
+
+  if [ ""$_RF_keep_misans"" = 1 ]; then
+    case "$l" in *misans*) ROLE=sym; return ;; esac
+  fi
+  if [ ""$_RF_keep_flyme"" = 1 ]; then
+    case "$l" in *flyme*) ROLE=sym; return ;; esac
+  fi
+  # ---------------------------------------------------------------------
+  # ★ 2026-10-24 高级设置 B3：白名单 / 黑名单 / 排除目录（都默认空 = 不生效）
+  # ---------------------------------------------------------------------
+  _wl="$_RF_whitelist"
+  if [ -n "$_wl" ]; then
+    _hitw=0
+    for _one in $(printf '%s' "$_wl" | tr ',;' '  '); do
+      [ -n "$_one" ] || continue
+      _onel=$(printf '%s' "$_one" | tr 'A-Z' 'a-z')
+      case "$l" in *"$_onel"*) _hitw=1 ;; esac
+    done
+    [ "$_hitw" = 1 ] || { ROLE=sym; return; }
+  fi
+  _bl="$_RF_blacklist"
+  if [ -n "$_bl" ]; then
+    for _one in $(printf '%s' "$_bl" | tr ',;' '  '); do
+      [ -n "$_one" ] || continue
+      _onel=$(printf '%s' "$_one" | tr 'A-Z' 'a-z')
+      case "$l" in *"$_onel"*) ROLE=sym; return ;; esac
+    done
+  fi
+  # B1-4 保留衬线
+  if [ ""$_RF_keep_serif"" = 1 ]; then
+    case "$l" in *serif*) ROLE=sym; return ;; esac
+  fi
+  # B1-5 保留斜体 / 等宽
+  if [ ""$_RF_keep_italic_mono"" = 1 ]; then
+    case "$l" in *italic*|*oblique*|*mono*) ROLE=sym; return ;; esac
+  fi
+  # B1-6 保留粗体
+  if [ ""$_RF_keep_bold"" = 1 ]; then
+    case "$l" in *bold*|*-bd*|*black*|*heavy*) ROLE=sym; return ;; esac
+  fi
+  # ★ 2026-10-24：三星 One UI 专区开关 —— 名字里带 samsung 的一律不动（默认开）。
+  #   三星的自绘图标/UI 字体常以 Samsung* 命名，换掉会出现"图标变方框"。
+  case "$l" in
+    *samsung*)
+      # ★ 2026-10-24（作者要求）：**默认关**，只能手动打开。
+      [ ""$_RF_keep_samsung"" = 1 ] && { ROLE=sym; return; }
+      ;;
   esac
   case "$l" in
     # ★ 2026-10-13 修：`*cond*`（窄体/浓缩体）必须**排在符号规则之前**。
@@ -1070,7 +1319,13 @@ _role_set() {
     #   把窄体判定提上来就正常了 —— **顺序在这里就是语义，别随手调**。
     *condensed*|*cond[-_.]*) ROLE=display; return ;;
     *emoji*|*symbol*|*icon*|*material*|*color*|*flag*|*dingbat*|*lottie*|*braille*|*mathematical*|*music*)
-      ROLE=sym; return ;;
+      # ★ 2026-10-25 危险区：allow_sym=1 才允许替换（默认仍然跳过 → 行为不变）
+      if [ ""$_RF_allow_sym"" = 1 ]; then
+        ROLE=main
+      else
+        ROLE=sym
+      fi
+      return ;;
     # ★ 2026-10-14 修：日韩改成"**看语言标签**"，不再用 `*ko*`/`*ja*` 子串。
     #   有语言标签时以它为准（配置里的 lang 才是实锤）；
     #   没有标签时才退回文件名，且用更严的边界模式（`korean`/`japanese` 这类整词，
@@ -1125,6 +1380,20 @@ _role_set() {
   esac
   ROLE=main
 }
+
+# ★ 2026-10-24 B2-5：main_only 用包装函数实现
+#   原因：_role_set_core 里很多分支是 `ROLE=xxx; return`，写在函数末尾的过滤执行不到。
+_role_set() {
+  _role_set_core "$@"
+  if [ "$(cfg_get main_only 0 2>/dev/null)" = 1 ]; then
+    case "${ROLE:-}" in
+      main|cjk) ;;
+      *) ROLE=sym ;;
+    esac
+  fi
+  return 0
+}
+
 
 # 对外接口：输入原始文件名，输出角色
 #   $2 = 可选的**语言标签**（配置里那个 family 的 lang 属性）。
@@ -2391,18 +2660,45 @@ slot_plan() {   # $1=moddir $2=scope $3=keep_lang $4=keep_special $5=keep_lock
   # marks（来源统计用）：全部记成 s（机组清单）
   awk '$3 != "" { print "s " $3 }' "$_srclist" > "$moddir/.marks.$$" 2>/dev/null
 
-  # scope 过滤（唯一还需要算的一步）+ 按目标路径去重
-  awk -v scope="$scope" '
-    NF >= 3 {
-      role = $1; dir = $2; name = $3
-      if (role == "" || name == "") next
-      if (role == "sym" || role == "vadj") next
-      if (scope == "latin" && (role == "cjk" || role == "kana" || role == "hangul" || role == "hant")) next
-      if (scope == "cjk" && role != "cjk") next
-      dd = (substr(dir, 1, 1) == "/") ? substr(dir, 2) : dir
-      line = role " " dd "/" name
-      if (!(line in seen)) { seen[line] = 1; print line }
-    }' "$_srclist" 2>/dev/null
+    # ---------------------------------------------------------------------
+  # ★ 2026-10-25（作者要求）：生成计划 = 纯过滤，不再扫目录、不再 stat
+  #   清单里的角色是刷入时算死的；这里只做目录过滤 + 开关过滤，全部走内存里的开关值。
+  # ---------------------------------------------------------------------
+  _rf_init
+  __plan_seen=""
+  _src_clean="${TMPDIR:-/data/local/tmp}/.plan.src.$$"
+  if tr -d '\r' < "$_srclist" > "$_src_clean" 2>/dev/null && [ -s "$_src_clean" ]; then :; else _src_clean="$_srclist"; fi
+  while IFS=' ' read -r _pr _pd _pn _pl; do
+    [ -n "${_pn:-}" ] || continue
+    _dd="${_pd#/}"
+    [ "${_RF_only_system:-0}" = 1 ] && case "$_dd" in system/fonts) ;; *) continue ;; esac
+    [ "${_RF_sys_and_product:-0}" = 1 ] && case "$_dd" in system/fonts|product/fonts) ;; *) continue ;; esac
+    [ "${_RF_skip_vendor_fonts:-0}" = 1 ] && case "$_dd" in vendor/*) continue ;; esac
+    if [ -n "${_RF_skip_vendor_dirs:-}" ]; then
+      _hit=0
+      for _one in $(printf '%s' "$_RF_skip_vendor_dirs" | tr ',' ' '); do
+        [ -n "$_one" ] || continue
+        case "$_dd" in "$_one"/*) _hit=1 ;; esac
+      done
+      [ "$_hit" = 1 ] && continue
+    fi
+    if [ -n "${_RF_exclude_dirs:-}" ]; then
+      _hitx=0
+      for _one in $(printf '%s' "$_RF_exclude_dirs" | tr ',' ' '); do
+        [ -n "$_one" ] || continue
+        case "$_dd" in "$_one"/*|"$_one") _hitx=1 ;; esac
+      done
+      [ "$_hitx" = 1 ] && continue
+    fi
+    _role_set "${_pl:-$_pr}"
+    case "$ROLE" in sym|vadj) continue ;; esac
+    _role_wanted "$ROLE" "$scope" "$keep_lang" "$keep_special" "$_pn" "$keep_lock" || continue
+    line="$ROLE ${_dd}/${_pn}"
+    case " $__plan_seen " in *" $line "*) continue ;; esac
+    __plan_seen="$__plan_seen $line"
+    printf '%s\n' "$line"
+  done < "$_src_clean" 2>/dev/null
+  [ "$_src_clean" = "$_srclist" ] || rm -f "$_src_clean" 2>/dev/null
 
   # ★ 2026-10-19 修（真机 SM-S9380：中文一直是系统原字体）：**合集槽位要在这里补上**。
   #   2026-10-17 把"生成计划"改成只读预扫清单（scanned/slots.list）之后，.ttc 合集就漏了：

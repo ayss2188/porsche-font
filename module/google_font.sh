@@ -125,20 +125,38 @@ is_disabled() {
   #   会把段内的行判成段外。所以最后用**最不容易错**的写法：
   #     有 `disabledComponents:` 段头 + 段头之后出现过 provider 名 = 已停用。
   #   同一份 dump 只跑一次，取回内存里判（原来跑两次，更慢）。
-  local d
-  d=$(tmo 12 "$DUMP" package "$GMS" 2>/dev/null)
-  [ -n "$d" ] || return 1
+  # ★ 2026-10-21 修（真机 Android 17）：原来把整份 dumpsys 存进变量再 printf，
+  #   输出几十万字节 → /system/bin/printf: Argument list too long（单参数 128KB 上限）
+  #   → awk 拿不到输入 → 永远判成"没停用"（界面显示未开启，其实早就停用了）。
+  #   现在直接写临时文件，awk 读文件，不经过参数传递。
+  local _tf="$LIB/.gms_dump.$$"
+  tmo 12 "$DUMP" package "$GMS" 2>/dev/null > "$_tf"
+  if [ ! -s "$_tf" ]; then rm -f "$_tf" 2>/dev/null; return 1; fi
   # ★ 2026-10-18：只认 disabledComponents 段内的匹配。
   #   原来还有一条 `{ if (index($0, want) > 0) seen = 1 }` 的退路 ——
   #   那会在**整份 dumpsys 输出**里找组件名，而它必然出现在 enabledComponents 段
   #   （组件是启用的）→ 被判成"已停用" → status 把没开的显示成"已开启"。
   #   这正是"开关会自己开"的第二半原因。
-  printf '%s\n' "$d" | awk -v want="$PROVIDER" '
+  # ★ 2026-10-21 修（真机双用户现场）：必须在**当前用户**那一段里找。
+  #   设备有 User 0（机主）和 User 999（XSpace 分身）两个用户时，
+  #   dumpsys 会各自列出 enabled/disabledComponents；分身那边停用的组件
+  #   会让全局扫描误判"机主也停了" → 状态一会儿 on 一会儿 foreign。
+  _cu=$(cur_user 2>/dev/null); case "$_cu" in ''|*[!0-9]*) _cu=0 ;; esac
+  awk -v want="$PROVIDER" -v cu="$_cu" '
+    /^[[:space:]]*User [0-9]+:/ {
+      inu = ($0 ~ ("User " cu ":"))
+      hdr = 0
+      next
+    }
+    !inu { next }
     /^[[:space:]]*disabledComponents[[:space:]]*:/ { hdr = 1; next }
     /^[[:space:]]*[a-zA-Z]+Components[[:space:]]*:/ { hdr = 0 }
     hdr && index($0, want) > 0 { found = 1 }
     END { exit(found ? 0 : 1) }
-  '
+  ' "$_tf"
+  _rc=$?
+  rm -f "$_tf" 2>/dev/null
+  return $_rc
 }
 
 cached_status() {
@@ -169,7 +187,12 @@ write_journal() {   # $1=用户  $2=原状态(0/1/unknown)
 #   用户就说"我没开啊，怎么自己开了"。要求文件非空能挡掉其中大部分。
 #   （更严格的做法是比对账本内容与当前实际状态，但那要跑 dumpsys，
 #     而 status 明确要求"不跑 dumpsys"，所以先用 -s 这道防线。）
-owned() { [ -s "$JOURNAL" ]; }
+owned() {
+  # 兼容老机器：账本丢了但我们确实动过（日志里有 enable 记录）也算我们的
+  if [ ! -f "$JOURNAL" ] && [ -f "$GFLOG" ] && grep -qs 'action=enable' "$GFLOG" 2>/dev/null; then
+    return 0
+  fi
+  [ -s "$JOURNAL" ]; }
 
 # 原状态怎么读：只有 dumpsys 能看到"启用/默认"的区别，读不到就记 unknown（关闭时按「启用」还原）
 original_state() {
@@ -183,7 +206,10 @@ original_state() {
 }
 
 bridge() {
-  # 2026-10-21 停用：GMS 缓存桥接整体摘除（对 Play 商店无效，且会让部分 Google 应用异常）
+  # ★ 2026-10-21 停用：GMS 缓存桥接已整体摘除。
+  #   实测 Play 商店的字体在它自己 APK 里（assets/ProductSans-*.ttf），
+  #   替换 GMS 缓存文件对它无效；Chrome/Gemini 用的是「停用提供器」那条路。
+  #   保留这个空函数是为了兼容旧调用点（开兼容时会走到这里）。
   return 0
 }
 cur_user() {
@@ -218,10 +244,17 @@ kill_consumers() {
   printf 'count=%s\ntime=%s\nboot=%s\n' "$n" "$(date +%s 2>/dev/null)" "$(cat "$BOOTID_FILE" 2>/dev/null)" > "$stamp" 2>/dev/null
   tmo 10 "$AM" kill --user "$u" "$GMS"     >/dev/null 2>&1
   tmo 10 "$AM" kill --user "$u" "$VENDING" >/dev/null 2>&1
-  # 2026-10-21：am kill 只清后台；Chrome/Gemini 这类会把"用系统字体"缓存住，
-  # 组件恢复后也不会重新取字体 → 必须 force-stop 才能立刻生效。
-  for _pkg in com.android.chrome com.google.android.apps.bard \
-              com.google.android.googlequicksearchbox com.google.android.gm \
+
+  # ★ 2026-10-21：`am kill` 只能清后台。Chrome / Gemini 这类在前台或被保活的进程
+  #   会把"用系统字体"这个结果缓存住，组件恢复启用后也不会重新去 GMS 拿字体
+  #   → 用户看到的就是"关了兼容，字体还是不回来"。
+  #   这里对几个明确的字体消费者做 force-stop（force-stop 会把进程彻底结束，
+  #   下次启动必然重新走字体加载）。只在装了这个包时才动手。
+  for _pkg in com.android.chrome \
+              com.google.android.apps.bard \
+              com.google.android.googlequicksearchbox \
+              com.google.android.gm \
+              com.google.android.apps.maps \
               com.android.vending; do
     [ -d "/data/data/$_pkg" ] || continue
     tmo 10 "$AM" force-stop --user "$u" "$_pkg" >/dev/null 2>&1 || true
@@ -287,7 +320,15 @@ do_enable() {
   [ -n "$u" ] || { printf 'ERROR:读不到当前用户（am get-current-user 失败），为安全起见没有动手\n'; return 1; }
   if is_disabled; then
     if owned; then printf 'OK：谷歌字体兼容本来就是开启状态\n'
-    else printf '这个组件已经被停用了（不是本模块操作的）—— 已按你的要求接管为开启\n'; fi
+    else
+      printf '这个组件已经被停用了（不是本模块操作的）—— 已按你的要求接管为开启\n'
+      # ★ 2026-10-21 修：接管时必须补写账本。
+      #   否则 owned() 永远为假 → 状态一直显示 foreign（"已被其它工具停用"），
+      #   用户看到的就是"点了开启，状态还是不对"。
+      #   original=unknown：我们不知道它原本是启用还是停用，
+      #   关闭时按"启用"还原（与原注释里的策略一致）。
+      write_journal "$u" unknown 2>/dev/null || true
+    fi
     put_status on
     # ★ 2026-10-18（修「漏环境」）：用户**明确点了开启**，桥接就必须打开。
     #
@@ -345,10 +386,16 @@ do_restore() {
   #   否则开机脚本还会照挂，用户看到"关了还在挂"（真机反馈过）。
   rm -f "$CACHE_ON_FLAG" 2>/dev/null
   if [ "$ok" = 1 ]; then
+    # ★ 2026-10-21：pm 说成功不等于真的生效（真机上出现过"报 OK 但组件还停用"）。
+    #   这里复核一次；仍然停用就如实报错，别让用户以为关掉了。
+    if [ "$orig" = 1 ] && is_disabled; then
+      printf 'ERROR:pm 返回成功，但组件仍是停用状态（可能有别的工具在停用它）。\npm 的原话：\n  %s\n' \
+        "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)"
+      return 1
+    fi
     rm -f "$JOURNAL" 2>/dev/null
     put_status off
     kill_consumers "$u"
-    bridge off
     log_gf "已关闭谷歌字体兼容（用户 $u，按原状态 $orig 还原）"
     [ "$(journal_val original)" = unknown ] && printf 'OK：已关闭谷歌字体兼容（原来的状态没读到，按「启用」还原）\n' || printf 'OK：已关闭谷歌字体兼容\n'
     return 0
@@ -414,6 +461,43 @@ do_diag() {
 case "${1:-status}" in
   status)    do_status "$2" ;;
   enable)    do_enable ;;
+  # ★ 2026-10-21：另一条路 —— 不停用 provider，改为把 GMS 里的字体文件顶掉。
+  #   商店这类应用是"向 provider 要字体"的，停用 provider 必然把它搞坏；
+  #   桥接这条路 provider 照常工作，只是返回的文件被替换成我们的字体。
+  enable-bridge)
+             if [ -f "$MODDIR/gms_cache.sh" ]; then
+               # ★ force：跳过"必须先停用 provider"那道旧门槛 ——
+               #   桥接是独立的一条路，provider 保持启用才对商店友好。
+               sh "$MODDIR/gms_cache.sh" on force 2>&1
+               _rc=$?
+               # 写启用标志：开机脚本据此自动重挂（否则每次重启都要手动点）
+               [ "$_rc" = 0 ] && : > "$CACHE_ON_FLAG" 2>/dev/null
+               printf 'time=%s bridge=on rc=%s\n' \
+                 "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "$_rc" >> "$GFLOG" 2>/dev/null
+             else
+               echo "ERROR:缺少 gms_cache.sh（包不完整）"
+             fi
+             ;;
+  bridge-off)
+             if [ -f "$MODDIR/gms_cache.sh" ]; then
+               sh "$MODDIR/gms_cache.sh" off 2>&1
+               rm -f "$CACHE_ON_FLAG" 2>/dev/null
+               printf 'time=%s bridge=off\n' \
+                 "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" >> "$GFLOG" 2>/dev/null
+             else
+               echo "ERROR:缺少 gms_cache.sh（包不完整）"
+             fi
+             ;;
+  bridge-status)
+             if [ -f "$MODDIR/gms_cache.sh" ]; then
+               _flag=0; [ -f "$CACHE_ON_FLAG" ] && _flag=1
+               _st=$(sh "$MODDIR/gms_cache.sh" status 2>&1 | tr -d '\r' | head -n1)
+               # 统一成：flag=0/1 found=N mounted=M
+               printf 'flag=%s %s\n' "$_flag" "$_st"
+             else
+               echo "flag=0 found=0 mounted=0"
+             fi
+             ;;
   restore)   do_restore ;;
   reconcile) do_reconcile ;;
   diag)      do_diag ;;

@@ -21,7 +21,7 @@
 LIB=${LIB:-/data/adb/custom_font_lib}
 MODDIR=${MODDIR:-${0%/*}}
 # 目标目录（可覆盖）：GMS 私有下载字体目录 + 公共下载字体目录
-CACHE_DIRS=${GMS_CACHE_DIRS:-"/data/data/com.google.android.gms/files/fonts/opentype /data/fonts/files"}
+CACHE_DIRS=${GMS_CACHE_DIRS:-"/data/data/com.google.android.gms/files/fonts /data/user/0/com.google.android.gms/files/fonts /data/user_de/0/com.google.android.gms/files/fonts /data/fonts/files"}
 [ -n "$GMS_CACHE_DIR" ] && CACHE_DIRS="$GMS_CACHE_DIR"
 MOUNTS_FILE=${CFS_MOUNTS_FILE:-/proc/mounts}
 JOURNAL="$LIB/.gms_bridge.list"
@@ -199,7 +199,7 @@ do_on() {
   #   用户以前开过、后来组件被别的工具停用，账本不会自动消失，
   #   拿它当开关会导致"用户没开、却每次开机都被挂"。真机反馈过。
   if [ "${1:-}" != force ] && [ ! -f "$CACHE_ON_FLAG" ]; then
-    echo "谷歌字体兼容未启用，跳过（不会自动挂载）"
+    echo "缓存桥接未启用，跳过（标志 $CACHE_ON_FLAG 不存在）——在设置里点「开启桥接」即可"
     return 0
   fi
   src=$(source_font) || { echo "没有可用的字体文件，跳过（缓存桥接）"; return 0; }
@@ -223,18 +223,52 @@ do_on() {
     if [ ! -s "$cl" ] && [ -f "$MODDIR/nameclone.sh" ]; then
       tmo 120 sh "$MODDIR/nameclone.sh" clone "$src" "$t" "$cl" >/dev/null 2>&1
     fi
-    src_m="$src"
-    [ -s "$cl" ] && src_m="$cl"
-    if tmo 10 "$MNT" --bind "$src_m" "$t" 2>/dev/null; then
-      printf '%s|%s\n' "$t" "$src_m" >> "$JOURNAL" 2>/dev/null
-      n=$((n + 1))
-      blog "桥接：$t ← $src_m"
+    # ★ 稳定优先：克隆不在就**跳过这个目标**。
+    #   退回原件没有意义（家族名不对，GMS 直接无视），还可能让界面字体变得奇怪。
+    if [ -s "$cl" ]; then
+      src_m="$cl"; n_clone=$(( ${n_clone:-0} + 1 ))
     else
-      blog "桥接失败：$t"
+      n_skip=$(( ${n_skip:-0} + 1 ))
+      blog "跳过：$t（克隆没生成，族=$fam）"
+      continue
+    fi
+    # ★ 挂载前校验克隆身份：它必须自称目标那个家族，否则挂了也白挂
+    _cf=$(font_families "$cl" 2>/dev/null | head -n1)
+    case "$_cf" in
+      "$fam") ;;
+      *) blog "跳过：$t（克隆身份不符：$_cf ≠ $fam）"
+         rm -f "$cl" 2>/dev/null
+         n_skip=$(( ${n_skip:-0} + 1 )); continue ;;
+    esac
+    if tmo 10 "$MNT" --bind "$src_m" "$t" 2>/dev/null; then
+      # ★ 校验：bind 挂载后，目标读取到的大小应当等于克隆的大小。
+      #   只信返回码会出"记账成功、实际没挂上"的假象（真机上遇到过）。
+      _ts=$(tmo 5 stat -L -c %s "$t" 2>/dev/null)
+      _cs=$(tmo 5 stat -L -c %s "$src_m" 2>/dev/null)
+      if [ -n "$_ts" ] && [ "$_ts" = "$_cs" ]; then
+        # 去重：同一目标只留一条（老版本会重复追加，导致状态显示 32/14）
+        if [ -f "$JOURNAL" ]; then
+          grep -v "^$t|" "$JOURNAL" > "$JOURNAL.tmp.$$" 2>/dev/null
+          mv -f "$JOURNAL.tmp.$$" "$JOURNAL" 2>/dev/null
+        fi
+        printf '%s|%s\n' "$t" "$src_m" >> "$JOURNAL" 2>/dev/null
+        n=$((n + 1))
+        blog "桥接：$t ← $src_m（校验 ${_ts} 字节）"
+      else
+        n_fail=$(( ${n_fail:-0} + 1 ))
+        blog "桥接疑似失败：$t（挂载后大小 $_ts ≠ 克隆 $_cs）"
+        tmo 5 "$UMNT" "$t" >/dev/null 2>&1 || true
+      fi
+    else
+      n_fail=$(( ${n_fail:-0} + 1 ))
+      blog "桥接失败：$t（mount 返回非 0）"
     fi
   done < "$list"
   rm -f "$list" 2>/dev/null
-  printf 'OK：谷歌系字体已顶替 %s 个文件（用 %s）\n' "$n" "${src##*/}"
+  printf 'OK：桥接 %s 个（克隆 %s / 跳过 %s / 失败 %s）\n' \
+    "$n" "${n_clone:-0}" "${n_skip:-0}" "${n_fail:-0}"
+  [ "${n_skip:-0}" -gt 0 ] && printf '注意：跳过 %s 个（克隆没生成或身份不符，详见 .gms_bridge.log）\n' "${n_skip:-0}"
+  [ "${n_fail:-0}" -gt 0 ] && printf '注意：%s 个挂载后校验不通过，已撤回\n' "${n_fail:-0}"
   return 0
 }
 
@@ -248,11 +282,14 @@ do_off() {
     : > "$keep" 2>/dev/null
     while IFS='|' read -r t s; do
       [ -n "$t" ] || continue
-      if tmo 10 "$UMNT" "$t" 2>/dev/null; then
+      # ★ 先试 lazy 卸载：Google 进程常年在读这些字体文件，
+      #   普通 umount 会 EBUSY（真机上就是"关不掉、账本还留着"的原因）
+      if tmo 10 "$UMNT" -l "$t" 2>/dev/null || tmo 10 "$UMNT" "$t" 2>/dev/null; then
         n=$((n + 1)); blog "还原：$t"
       else
+        nleft=$(( ${nleft:-0} + 1 ))
         printf '%s|%s\n' "$t" "$s" >> "$keep" 2>/dev/null
-        blog "还原失败：$t"
+        blog "还原失败（仍被占用）：$t"
       fi
     done < "$rev"
     rm -f "$rev" 2>/dev/null
@@ -268,6 +305,46 @@ do_off() {
   #     是"这个模块做过谷歌字体桥接"的直接物证，
   #     任何人 ls 一下字体库目录就看得到。
   #   注意：只删 .clone.*，不碰用户的字体文件（f*.ttf）与库里的其它东西。
+  # ★ 第二轮：还有没卸掉的，就 force-stop 占用的 Google 进程，再卸一次
+  #   原因：toybox 的 umount 有的版本不认 -l，普通 umount 又必然 EBUSY；
+  #         唯一可靠的办法是让占用者先松手（用户点"关闭"时这个代价可以接受，
+  #         GMS 会自己重启）。
+  if [ -f "$JOURNAL" ] && [ "${nleft:-0}" -gt 0 ]; then
+    for _p in com.google.android.gms com.google.android.gms.persistent \
+              com.google.android.gsf com.android.vending; do
+      tmo 10 am force-stop "$_p" >/dev/null 2>&1 || true
+    done
+    sleep 1 2>/dev/null || true
+    _rev2="$LIB/.gms_bridge.rev2.$$"
+    cp -f "$JOURNAL" "$_rev2" 2>/dev/null
+    : > "$JOURNAL.keep2.$$" 2>/dev/null
+    while IFS='|' read -r t s2; do
+      [ -n "$t" ] || continue
+      if tmo 10 "$UMNT" -l "$t" 2>/dev/null || tmo 10 "$UMNT" "$t" 2>/dev/null; then
+        n=$((n + 1)); nleft=$(( ${nleft:-0} - 1 )); blog "还原（强制后）：$t"
+      else
+        printf '%s|%s\n' "$t" "$s2" >> "$JOURNAL.keep2.$$" 2>/dev/null
+        blog "还原仍失败：$t"
+      fi
+    done < "$_rev2"
+    rm -f "$_rev2" 2>/dev/null
+    if [ -s "$JOURNAL.keep2.$$" ]; then mv -f "$JOURNAL.keep2.$$" "$JOURNAL" 2>/dev/null
+    else rm -f "$JOURNAL.keep2.$$" "$JOURNAL" 2>/dev/null; fi
+    [ "${nleft:-0}" -lt 0 ] && nleft=0
+  fi
+
+  # ★ 兜底：账本可能不准（历史遗留/被覆盖），直接按挂载表再扫一遍
+  #   我们的挂载源一定是 $LIB/.clone.*.ttf，按这个特征找目标路径
+  if [ -r "$MOUNTS_FILE" ]; then
+    for _m in $(grep -F "$LIB/.clone." "$MOUNTS_FILE" 2>/dev/null | awk '{print $2}' | sort -u); do
+      [ -n "$_m" ] || continue
+      if tmo 10 "$UMNT" -l "$_m" 2>/dev/null || tmo 10 "$UMNT" "$_m" 2>/dev/null; then
+        n=$((n + 1)); blog "兜底还原：$_m"
+      else
+        nleft=$(( ${nleft:-0} + 1 )); blog "兜底还原失败（占用）：$_m"
+      fi
+    done
+  fi
   rm -f "$LIB"/.clone.*.ttf 2>/dev/null
   # 顺带把"启用标志"也删掉（正常路径是 google_font.sh restore 删的，
   # 但直接 `sh gms_cache.sh off` 时也得删 —— 否则开机脚本还会照挂）
@@ -276,7 +353,10 @@ do_off() {
   # 桥接日志：留着等于留了个"我做过什么"的日记（关掉就一起清）
   rm -f "$LIB/.gms_bridge.log" 2>/dev/null
 
-  if [ "$n" -gt 0 ]; then
+  if [ "${nleft:-0}" -gt 0 ]; then
+    printf 'OK：已还原 %s 个；还有 %s 个被 Google 应用占用，\n  已解除启用标志 —— 重启后不会再挂，占用也会消失\n' \
+      "$n" "${nleft:-0}"
+  elif [ "$n" -gt 0 ]; then
     printf 'OK：已还原 %s 个挂载（克隆文件与日志已清理）\n' "$n"
   else
     printf 'OK：没有需要还原的挂载（残留文件已清理）\n'
@@ -307,10 +387,30 @@ bridge_into_zygote() {
 }
 
 do_status() {
-  local found mnt
+  local found mnt t s alive
   found=$(scan_targets 2>/dev/null | grep -c . 2>/dev/null); found=${found:-0}
   mnt=0
-  [ -f "$JOURNAL" ] && { mnt=$(grep -c . "$JOURNAL" 2>/dev/null); mnt=${mnt:-0}; }
+  if [ -f "$JOURNAL" ]; then
+    # ★ 2026-10-21：**按实际挂载核对**，不信账本。
+    #   重启后挂载已经没了，但账本还留着旧行 —— 以前只数行数，
+    #   于是状态永远显示"还有 N 个残留挂载"（真机上就是这样）。
+    alive="$LIB/.gms_status.alive.$$"
+    : > "$alive" 2>/dev/null
+    while IFS='|' read -r t s; do
+      [ -n "$t" ] || continue
+      # /proc/mounts 里目标路径是第二个字段，前后带空格
+      if [ -r "$MOUNTS_FILE" ] && grep -qsF " $t " "$MOUNTS_FILE"; then
+        printf '%s|%s\n' "$t" "$s" >> "$alive" 2>/dev/null
+      fi
+    done < "$JOURNAL"
+    mnt=$(grep -c . "$alive" 2>/dev/null); mnt=${mnt:-0}
+    # 用"还活着"的条目重写账本：陈旧行直接消失（自愈）
+    if [ "$mnt" -gt 0 ]; then
+      mv -f "$alive" "$JOURNAL" 2>/dev/null || rm -f "$alive" 2>/dev/null
+    else
+      rm -f "$alive" "$JOURNAL" 2>/dev/null
+    fi
+  fi
   printf 'found=%s mounted=%s\n' "$found" "$mnt"
 }
 
