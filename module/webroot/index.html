@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0615</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0625</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -10923,7 +10923,13 @@ async function u2curVer() {
 }
 
 /* 检查更新（浏览器 fetch，不冻结界面） */
-async function updCheck(manual) {
+async const UPD_JSON_URLS = [
+  "https://raw.githubusercontent.com/ayss2188/porsche-font/main/update.json",
+  "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/update.json",
+  "https://raw.githubusercontent.com/ayss2188/porsche-font/main/update-718.json"
+];
+
+function updCheck(manual) {
   if (UPD2.phase === "downloading" || UPD2.phase === "installing") return;
   const lbl = u2("newVerLabel");
   UPD2.phase = "checking"; u2paint();
