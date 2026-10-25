@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0555</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0605</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -7839,6 +7839,19 @@ function cfsUpdHardReset() {
 }
 [900, 2500, 6000].forEach(function (ms) { setTimeout(cfsUpdHardReset, ms); });
 
+var cfsCheckWatchdog = setInterval(function () {
+  try {
+    if (UPD2 && UPD2.phase === 'checking') {
+      cfsCheckWatchdog._n = (cfsCheckWatchdog._n || 0) + 1;
+      if (cfsCheckWatchdog._n > 12) {
+        UPD2.phase = 'idle'; UPD2.msg = '检查超时';
+        try { u2paint(); } catch (e) {}
+        try { cfsUpdHardReset(); } catch (e) {}
+        cfsCheckWatchdog._n = 0;
+      }
+    } else { cfsCheckWatchdog._n = 0; }
+  } catch (e) {}
+}, 1000);
 document.addEventListener("DOMContentLoaded", apply);
   setTimeout(apply, 300);
   setTimeout(apply, 1500);
@@ -10821,6 +10834,21 @@ function u2fmt(n) {
   if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
   if (n >= 1024) return Math.round(n / 1024) + " KB";
   return n + " B";
+}
+
+function cfsTimeout(p, ms, msg) {
+  return new Promise(function (resolve, reject) {
+    var done = false;
+    var t = setTimeout(function () {
+      if (done) return; done = true;
+      reject(new Error(msg || '超时'));
+    }, ms);
+    Promise.resolve(p).then(function (v) {
+      if (done) return; done = true; clearTimeout(t); resolve(v);
+    }, function (e) {
+      if (done) return; done = true; clearTimeout(t); reject(e);
+    });
+  });
 }
 
 function u2paint() {
