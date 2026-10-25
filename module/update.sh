@@ -86,7 +86,17 @@ jnum() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9
 # 只要有一条返回了**更大的 versionCode**，就用它的整份数据。
 # ---------------------------------------------------------------------------
 UPD_WORKER="https://cfs-report.2188366745q.workers.dev"
-UPD_REPO="ayss2188/custom-font-switcher"          # 在 case 里按仓库替换
+UPD_REPO="ayss2188/custom-font-switcher"
+# ★ 2026-10-26 按模块 id 选仓库（子项目 ≠ 主项目）
+#   子项目沿用这份 update.sh，之前写死主项目仓库，
+#   结果子项目检查/下载到的是主项目的包。
+case "${MODID:-}" in
+  porsche_font_718)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-718.json" ;;
+  porsche_font_911)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-911.json" ;;
+  porsche_font_gt3)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-gt3.json" ;;
+  porsche_font_*)    UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update.json" ;;
+esac
+UPD_JSON="${UPD_JSON:-update.json}"          # 在 case 里按仓库替换
 
 _read_json() {   # $1=json 文件；把五个字段填进全局
   NEW_VER=$(jstr version "$1")
@@ -129,8 +139,8 @@ load_json() {
   for base in \
       "${url:-}" \
       "$([ -n "$repo" ] && printf '%s/update?repo=%s' "$UPD_WORKER" "$repo")" \
-      "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/update.json' "$repo")" \
-      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/update.json' "$repo")" ; do
+      "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/${UPD_JSON}' "$repo")" \
+      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/${UPD_JSON}' "$repo")" ; do
     [ -n "$base" ] || continue
     if _try_update_url "$base" "$TMP/update.json"; then
       if [ -z "$_BEST" ] || [ "$_TRY_CODE" -gt "$_BEST" ] 2>/dev/null; then
