@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0605</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0615</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -10925,44 +10925,64 @@ async function u2curVer() {
 /* 检查更新（浏览器 fetch，不冻结界面） */
 async function updCheck(manual) {
   if (UPD2.phase === "downloading" || UPD2.phase === "installing") return;
-  UPD2.phase = "checking"; u2paint();
   const lbl = u2("newVerLabel");
+  UPD2.phase = "checking"; u2paint();
   if (manual && lbl) lbl.textContent = "检查中…";
-  const cur = await u2curVer();
-  UPD2.curVer = cur.ver; UPD2.curCode = cur.code;
-  let j = null;
-  for (const u of UPD_JSON_URLS) {
+
+  const done = (txt, cls) => {
+    UPD2.phase = "idle";
+    if (lbl) { lbl.textContent = txt; lbl.className = "value " + cls; }
+    try { u2paint(); } catch (e) {}
+    try { cfsUpdHardReset(); } catch (e) {}
+  };
+
+  (async () => {
     try {
-      const r = await fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
-      if (!r.ok) continue;
-      const tmp = await r.json();
-      if (tmp && tmp.versionCode) { j = tmp; break; }
-    } catch (e) {}
-  }
-  if (!j) {
-    UPD2.phase = "idle";
-    if (lbl) { lbl.textContent = "检查失败（可能要梯子）"; lbl.className = "value off"; }
-    u2paint();
-    if (manual) showToast("检查失败：连不上 GitHub，先连 VPN 再试");
-    return;
-  }
-  UPD2.newVer = String(j.version || "");
-  UPD2.newCode = parseInt(j.versionCode, 10) || 0;
-  UPD2.has = UPD2.newCode > UPD2.curCode;
-  if (lbl) {
-    lbl.textContent = UPD2.newVer + (UPD2.has ? "（可更新）" : "（已是最新）");
-    lbl.className = "value " + (UPD2.has ? "active" : "off");
-  }
-  // 上次装完还没重启 → 直接进 done
-  let doneVer = "";
-  try { doneVer = localStorage.getItem(UPD2_DONE_KEY) || ""; } catch (e) {}
-  if (doneVer && doneVer === String(UPD2.newCode)) {
-    UPD2.phase = "done";
-  } else {
-    UPD2.phase = "idle";
-  }
-  u2paint();
-  if (manual) showToast(UPD2.has ? ("发现新版 " + UPD2.newVer) : "已是最新版本");
+      let cur = { ver: "", code: 0 };
+      try { cur = await u2curVer(); } catch (e) {}
+      UPD2.curVer = cur.ver; UPD2.curCode = cur.code || 0;
+
+      let j = null;
+      for (const u of UPD_JSON_URLS) {
+        try {
+          const ctl = new AbortController();
+          const tm = setTimeout(() => { try { ctl.abort(); } catch (e) {} }, 5000);
+          const rr = await fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(),
+                                 { cache: "no-store", signal: ctl.signal });
+          clearTimeout(tm);
+          if (rr && rr.ok) {
+            const tmp = await rr.json();
+            if (tmp && tmp.versionCode) { j = tmp; break; }
+          }
+        } catch (e) { /* 换下一个源 */ }
+      }
+
+      if (!j) { done("检查失败（先连 VPN 再试）", "off"); if (manual) showToast("连不上 GitHub，先连 VPN"); return; }
+
+      UPD2.newVer = String(j.version || "");
+      UPD2.newCode = parseInt(j.versionCode, 10) || 0;
+      UPD2.has = UPD2.newCode > UPD2.curCode;
+
+      // 只在"本次页面点过安装"时才看 done 记录
+      if (window.__updActive) {
+        let doneVer = "";
+        try { doneVer = localStorage.getItem(UPD2_DONE_KEY) || ""; } catch (e) {}
+        if (doneVer && UPD2.newCode && parseInt(doneVer, 10) === UPD2.newCode) {
+          UPD2.phase = "done"; window.__updJustFinished = true;
+        }
+      }
+
+      if (UPD2.phase === "done") {
+        if (lbl) { lbl.textContent = UPD2.newVer + "（已安装，待重启）"; lbl.className = "value active"; }
+      } else {
+        if (lbl) { lbl.textContent = UPD2.newVer + (UPD2.has ? "（可更新）" : "（已是最新）"); lbl.className = "value " + (UPD2.has ? "active" : "off"); }
+      }
+      UPD2.phase = UPD2.phase === "done" ? "done" : "idle";
+      try { u2paint(); } catch (e) {}
+    } catch (e) {
+      done("检查失败：" + String(e && e.message || e).slice(0, 20), "off");
+    }
+  })();
 }
 
 /* 主按钮：三态（下载安装 / 重试 / 立即重启） */
