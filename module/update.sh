@@ -90,7 +90,8 @@ UPD_REPO="ayss2188/custom-font-switcher"
 # ★ 2026-10-26 按模块 id 选仓库（子项目 ≠ 主项目）
 #   子项目沿用这份 update.sh，之前写死主项目仓库，
 #   结果子项目检查/下载到的是主项目的包。
-case "${MODID:-}" in
+_MID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
+case "$_MID" in
   porsche_font_718)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-718.json" ;;
   porsche_font_911)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-911.json" ;;
   porsche_font_gt3)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-gt3.json" ;;
