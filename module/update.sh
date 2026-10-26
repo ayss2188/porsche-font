@@ -30,36 +30,55 @@ http_size() {
     n=$(curl -sIL --connect-timeout 10 -m 30 "$1" 2>/dev/null | tr -d '\r' \
         | grep -i '^content-length:' | tail -n1 | tr -dc '0-9')
   fi
+  # 小于 1MB 的一律当"未知"：GitHub 的重定向链上常出现 9 字节之类的假长度
+  case "${n:-}" in
+    ''|*[!0-9]*) n=0 ;;
+    *) [ "$n" -ge 1048576 ] 2>/dev/null || n=0 ;;
+  esac
   echo "${n:-0}"
 }
 
 # fetch <地址> <输出文件> [最长秒数]
 # 注意超时：检查更新/更新日志用短超时（否则网络差时会把 WebUI 卡住好几分钟），
 # 下载刷机包才用长超时。
-fetch() {
-  local url bb mt
+fetch() {   # $1=url $2=目标文件 $3=总超时秒
+  local url bb mt rc
   url="$1"; mt="${3:-60}"
   rm -f "$2"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --connect-timeout 8 -m "$mt" -o "$2" "$url" 2>/dev/null && [ -s "$2" ] && return 0
+    curl -fsSL --connect-timeout 8 -m "$mt" -o "$2" "$url" 2>/dev/null; rc=$?
+    [ "$rc" = 0 ] && [ -s "$2" ] && return 0
+    echo "[fetch] curl 失败 rc=$rc url=${url%%\?*}" >> "$TMP/worker.log" 2>/dev/null
+  else
+    echo "[fetch] 没有 curl" >> "$TMP/worker.log" 2>/dev/null
   fi
   bb=$(find_busybox)
-  # wget 只有"-T 单次读超时"，没有总时长上限：网络卡在半路时它会一直挂着，
-  # 这个进程又是在后台跑的（父脚本早退了）→ 会一直活到关机窗口里。
-  # 所以有 timeout 就套一层总超时，没有就用 -T（至少别无限等）。
   if [ -n "$bb" ]; then
     if command -v timeout >/dev/null 2>&1; then
-      timeout "$mt" "$bb" wget -q -T 12 -O "$2" "$url" 2>/dev/null && [ -s "$2" ] && return 0
+      timeout "$mt" "$bb" wget -q -T 12 -O "$2" "$url" 2>/dev/null; rc=$?
     else
-      "$bb" wget -q -T 12 -O "$2" "$url" 2>/dev/null && [ -s "$2" ] && return 0
+      "$bb" wget -q -T 12 -O "$2" "$url" 2>/dev/null; rc=$?
     fi
+    [ "$rc" = 0 ] && [ -s "$2" ] && return 0
+    echo "[fetch] busybox wget 失败 rc=$rc" >> "$TMP/worker.log" 2>/dev/null
   fi
   if command -v wget >/dev/null 2>&1; then
     if command -v timeout >/dev/null 2>&1; then
-      timeout "$mt" wget -q -T 12 -O "$2" "$url" 2>/dev/null && [ -s "$2" ] && return 0
+      timeout "$mt" wget -q -T 12 -O "$2" "$url" 2>/dev/null; rc=$?
     else
-      wget -q -T 12 -O "$2" "$url" 2>/dev/null && [ -s "$2" ] && return 0
+      wget -q -T 12 -O "$2" "$url" 2>/dev/null; rc=$?
     fi
+    [ "$rc" = 0 ] && [ -s "$2" ] && return 0
+    echo "[fetch] wget 失败 rc=$rc" >> "$TMP/worker.log" 2>/dev/null
+  fi
+  if command -v toybox >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+      timeout "$mt" toybox wget -q -O "$2" "$url" 2>/dev/null; rc=$?
+    else
+      toybox wget -q -O "$2" "$url" 2>/dev/null; rc=$?
+    fi
+    [ "$rc" = 0 ] && [ -s "$2" ] && return 0
+    echo "[fetch] toybox wget 失败 rc=$rc" >> "$TMP/worker.log" 2>/dev/null
   fi
   rm -f "$2"
   return 1
