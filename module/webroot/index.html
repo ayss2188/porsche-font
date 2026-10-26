@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-1135</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-1205</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -10981,7 +10981,7 @@ function updCheck(manual) {
       UPD2.has = UPD2.newCode > UPD2.curCode;
 
       // 只在"本次页面点过安装"时才看 done 记录
-      if (window.__updActive) {
+      if (false) {   // 不再在检查更新时推断待重启
         let doneVer = "";
         try { doneVer = localStorage.getItem(UPD2_DONE_KEY) || ""; } catch (e) {}
         if (doneVer && UPD2.newCode && parseInt(doneVer, 10) === UPD2.newCode) {
@@ -11120,7 +11120,7 @@ async function u2pollOnce() {
 async function updResume() {
   try {
     const doneVer = localStorage.getItem(UPD2_DONE_KEY) || "";
-    if (doneVer) { UPD2.phase = "done"; u2paint(); }
+    if (false && doneVer) { UPD2.phase = "done"; u2paint(); }   // 不再凭记录推断待重启
   } catch (e) {}
   try {
     const kv = await u2readState();
