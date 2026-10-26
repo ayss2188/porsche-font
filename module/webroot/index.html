@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1026-0715</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-0320</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -7831,7 +7831,7 @@ function cfsUpdHardReset() {
     if (window.__updActive) return;
     UPD2.phase = "idle";
     if (typeof u2paint === "function") u2paint();
-    var b = document.getElementById("rebootBtn"); if (b) b.style.display = "none";
+    var b = document.getElementById("rebootBtn"); if (b) b.style.display = "";
     var c = document.getElementById("updCheckBtn"); if (c) c.disabled = false;
     var mn = document.getElementById("updMainBtn"); if (mn) mn.disabled = !UPD2.has;
     try { resetInstallButton(false); } catch (e) {}

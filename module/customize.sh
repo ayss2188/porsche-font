@@ -269,6 +269,48 @@ if [ -f "$MODPATH/builtin.sh" ] && [ -d "$MODPATH/builtin" ]; then
     _bc=$(builtin_count 2>/dev/null)
     ui_print "- 内置配色已导入：${_bc:-0} 套"
   fi
+
+  # ★ 2026-10-27 OTA：内置字体换新（升级后必须真正替换旧字形）
+  #   ① 强制刷新 .name / .meta（size、vf 跟着新文件走，界面不再显示旧体积）
+  for _bf in "$MODPATH"/builtin/*.ttf "$MODPATH"/builtin/*.TTF; do
+    [ -f "$_bf" ] || continue
+    _bn=${_bf##*/}; _bn=${_bn%.*}
+    _bi=$(builtin_id_of "$_bn" 2>/dev/null); _bi=${_bi%%|*}
+    [ -n "$_bi" ] || continue
+    _bnm=$(builtin_id_of "$_bn" 2>/dev/null); _bnm=${_bnm#*|}
+    if [ -s "$LIB/$_bi.ttf" ]; then
+      printf '%s' "$_bnm" > "$LIB/$_bi.name" 2>/dev/null
+      _bsz=$(wc -c < "$LIB/$_bi.ttf" 2>/dev/null | tr -d ' \t\r\n')
+      case "${_bsz:-}" in ''|*[!0-9]*) _bsz=0 ;; esac
+      if builtin_is_vf "$_bf" 2>/dev/null; then _bvf=1; else _bvf=0; fi
+      printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\nsize=%s\n' "$_bvf" "$_bsz" > "$LIB/$_bi.meta" 2>/dev/null
+      ui_print "- 内置配色已更新：$_bnm（$(awk "BEGIN{printf \"%.1f\", $_bsz/1048576}" 2>/dev/null) MB）"
+    fi
+  done
+
+  #   ② 清掉「包内已经没有」的内置字体残留（旧版本多出来的配色）
+  for _old in "$LIB"/builtin_*.ttf "$LIB"/builtin_*.TTF; do
+    [ -f "$_old" ] || continue
+    _obn=${_old##*/}; _obn=${_obn%.*}; _oid=${_obn#builtin_}
+    if [ -n "$_oid" ] && [ ! -e "$MODPATH/builtin/$_oid.ttf" ] && [ ! -e "$MODPATH/builtin/$_oid.TTF" ]; then
+      rm -f "$LIB/$_oid.ttf" "$LIB/$_oid.name" "$LIB/$_oid.meta" 2>/dev/null
+      ui_print "- 已清理旧配色：$_oid"
+    fi
+  done
+
+  #   ③ 当前用的是内置配色 → 重新 apply 一次，让 pending 指向新文件
+  _act=$(cat "$LIB/active_font" 2>/dev/null | tr -d '[:space:]')
+  _pen=$(cat "$MODPATH/pending_font" 2>/dev/null | tr -d '[:space:]')
+  _useb=""
+  case "$_act" in builtin_*) _useb=${_act#builtin_} ;; esac
+  case "$_pen" in builtin_*) [ -z "$_useb" ] && _useb=${_pen#builtin_} ;; esac
+  if [ -n "$_useb" ] && [ -s "$LIB/$_useb.ttf" ]; then
+    _ra=$(sh "$MODPATH/fontctl.sh" apply "builtin_$_useb" 2>&1 | sed '/^[[:space:]]*$/d' | tail -n1)
+    case "$_ra" in
+      OK:*) ui_print "- 当前配色已按新素材重新应用（重启后生效）" ;;
+      *)    ui_print "- 重新应用失败：${_ra#ERROR:}" ;;
+    esac
+  fi
   if command -v builtin_menu >/dev/null 2>&1; then
     builtin_menu
   fi
