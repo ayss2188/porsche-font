@@ -227,7 +227,7 @@ case "${1:-check}" in
   # 结果写到 $TMP/check.out，界面用下面的 checkstate 轮询（每次只是一个 cat）
   bgcheck)
     rm -f "$TMP/check.out" "$TMP/check.rc" 2>/dev/null
-    ( sh "$MODDIR/update.sh" check > "$TMP/check.out" 2>&1; echo $? > "$TMP/check.rc" ) &
+    ( sh "$MODDIR/update.sh" check > "$TMP/check.out" 2>&1; echo $? > "$TMP/check.rc" ) >/dev/null 2>&1 &
     echo "OK:started"
     ;;
   checkstate)
@@ -264,7 +264,7 @@ case "${1:-check}" in
     printf 'stage=download\ncur=0\ntotal=0\nmsg=正在准备下载\npid=0\n' > "$STATE" 2>/dev/null
     # setsid：让 worker 脱离当前会话，WebUI 那边断开也不会把它带走
     _ss=""; command -v setsid >/dev/null 2>&1 && _ss=setsid
-    ( $_ss sh "$MODDIR/update.sh" install >/dev/null 2>&1 < /dev/null; echo $? > "$TMP/worker.rc" ) &
+    ( $_ss sh "$MODDIR/update.sh" install >/dev/null 2>&1 < /dev/null; echo $? > "$TMP/worker.rc" ) >/dev/null 2>&1 &
     # ★ 立刻把 **worker 自己的 pid** 写进 state。
     #   不能写 installbg 自己的 $$：那个进程马上就退出了，installstate 里的
     #   `kill -0 $pid` 判活会立刻判成"worker 死了" → 进度条刚出来就报错。
