@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-1205</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-1245</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -10591,7 +10591,7 @@ async function installUpdate() {
     //   这样 JS 线程立刻空出来，上面那个 startUpdateProgress() 的轮询才画得动进度条。
     //   （以前这里直接 `await update.sh install` —— 同步 exec 阻塞整个页面，
     //     几十 MB 的下载过程中界面完全不动，正是"进度条是摆设"的原因。）
-    const out = (await ksuExec(`sh -c 'sh ${MODDIR}/update.sh installbg force >/dev/null 2>&1 &'`) || "").trim();
+    const out = (await ksuExec(`sh ${MODDIR}/update.sh installbg force`) || "").trim();
     // 命令已丢到后台，正常拿不到输出；是否真的开始下载交给下面的轮询判断（22 秒兜底）
     const last = out.split("\n").pop() || "";
     if (last.indexOf("ERROR:") === 0) {
@@ -11027,8 +11027,11 @@ async function updInstall() {
   u2paint();
 
   let out = "";
+  // ★ 2026-10-27 先清掉上一次残留的 state（否则一进来就读到 finished → 立刻亮重启）
+  try { await ksuExec(`rm -f ${LIB}/.update/state ${LIB}/.update/worker.rc`); } catch (e) {}
+  window.__u2SawActive = false;
   try {
-    out = String(await ksuExec(`sh -c 'sh ${MODDIR}/update.sh installbg force >/dev/null 2>&1 &'`) || "");
+    out = String(await ksuExec(`sh ${MODDIR}/update.sh installbg force`) || "");
   // 命令已丢到后台，立刻返回；下面按 state 轮询判断是否真的在下载
   } catch (e) {
     UPD2.phase = "error"; UPD2.msg = "启动下载失败：" + errText(e); u2paint(); return;
@@ -11058,6 +11061,7 @@ async function u2pollOnce() {
   if (UPD2.phase !== "downloading" && UPD2.phase !== "installing") { u2pollStop(); return; }
   const kv = await u2readState();
   const stage = String(kv.stage || "").toLowerCase();
+  if (stage === "download" || stage === "install" || stage === "installing") window.__u2SawActive = true;
   const cur = parseInt(kv.cur || "0", 10) || 0;
   const total = parseInt(kv.total || "0", 10) || 0;
 
@@ -11085,6 +11089,8 @@ async function u2pollOnce() {
   }
 
   if (stage === "finished" || stage === "done" || stage === "ok") {
+    // ★ 2026-10-27 没见过 download/install 就收到 finished = 上一次的残留状态，忽略
+    if (!window.__u2SawActive) { return; }
     UPD2.phase = "done";
     u2pollStop();
     try { localStorage.setItem(UPD2_DONE_KEY, String(UPD2.newCode)); } catch (e) {}
