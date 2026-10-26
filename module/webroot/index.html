@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-0535</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-0645</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -10350,6 +10350,15 @@ function startUpdateProgress() {
         }
         // 卡住判定：连续 30 次（约 15 秒）字节数没变，就说一句 —— 但**不中断**，
         // 网络抖动一下很常见，乱报错比慢更烦人。
+        if (cur === 0) { zeroTicks = (zeroTicks || 0) + 1; } else { zeroTicks = 0; }
+        if (zeroTicks === 45) {
+          // 45 次 × 0.5 秒 = 22 秒还没开始下载 → 很可能有旧 worker 卡着，强制清理一次
+          try { await ksuExec(`sh ${MODDIR}/update.sh installkill`); } catch (e) {}
+          updProg("下载没有开始，已清理卡住的旧任务，请再点一次「下载并安装」", 0.02);
+          UPD2.phase = "error"; UPD2.msg = "已清理卡住的旧任务，请重试";
+          try { u2paint(); } catch (e) {}
+          return;
+        }
         if (cur > 0 && cur === lastCur) {
           stuck++;
           if (stuck === 30) updProg("下载好像卡住了（" + fmtSize(cur) + "）… 还在重试。一直不动就挂个梯子 —— 更新包在 GitHub 上", Math.min(0.95, total ? cur / total : 0.5));
@@ -10582,7 +10591,7 @@ async function installUpdate() {
     //   这样 JS 线程立刻空出来，上面那个 startUpdateProgress() 的轮询才画得动进度条。
     //   （以前这里直接 `await update.sh install` —— 同步 exec 阻塞整个页面，
     //     几十 MB 的下载过程中界面完全不动，正是"进度条是摆设"的原因。）
-    const out = (await ksuExec(`sh ${MODDIR}/update.sh installbg`)).trim();
+    const out = (await ksuExec(`sh -c 'sh ${MODDIR}/update.sh installbg >/dev/null 2>&1 &'`) || "").trim();
     const last = out.split("\n").pop() || "";
     if (last.indexOf("OK:") !== 0) {
       done = true;
@@ -11018,7 +11027,8 @@ async function updInstall() {
 
   let out = "";
   try {
-    out = String(await ksuExec(`sh ${MODDIR}/update.sh installbg`) || "");
+    out = String(await ksuExec(`sh -c 'sh ${MODDIR}/update.sh installbg >/dev/null 2>&1 &'`) || "");
+  // 命令已丢到后台，立刻返回；下面按 state 轮询判断是否真的在下载
   } catch (e) {
     UPD2.phase = "error"; UPD2.msg = "启动下载失败：" + errText(e); u2paint(); return;
   }

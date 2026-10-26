@@ -21,7 +21,7 @@ STATE="$TMP/state"      # 进度状态文件，WebUI 会轮询它画进度条
 prop() { sed -n "s/^$1=//p" "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r'; }
 
 # 写进度：prog <阶段> <已下载字节> <总字节> <提示>
-prog() { printf 'stage=%s\ncur=%s\ntotal=%s\nmsg=%s\n' "$1" "${2:-0}" "${3:-0}" "${4:-}" > "$STATE" 2>/dev/null; }
+prog() { printf 'ts='"$(date +%s)"'\nstage=%s\ncur=%s\ntotal=%s\nmsg=%s\n' "$1" "${2:-0}" "${3:-0}" "${4:-}" > "$STATE" 2>/dev/null; }
 
 # 试探下载地址的总字节数（拿不到就返回 0，WebUI 会退化成"已下载 xx MB"）
 http_size() {
@@ -254,6 +254,21 @@ case "${1:-check}" in
     # 已经有 worker 在跑就别再来一个（用户连点两下按钮的情况）
     _ps=$(sed -n 's/^pid=//p' "$STATE" 2>/dev/null)
     _st=$(sed -n 's/^stage=//p' "$STATE" 2>/dev/null)
+    # ★ 2026-10-27 陈旧 worker 判断：
+    #   上一次的 worker 可能卡死（老版本管道 bug / 网络断在半路），pid 还活着，
+    #   于是每次点下载都被判成"已在运行"，界面永远停在"正在连接 GitHub…"。
+    #   规则：state 超过 300 秒没更新 → 认为陈旧，杀掉旧 pid 并清状态。
+    if [ -f "$STATE" ]; then
+      _mt=$(date +%s 2>/dev/null)
+      _st_mt=$(stat -c %Y "$STATE" 2>/dev/null)
+      case "${_mt:-}" in ''|*[!0-9]*) _mt=0 ;; esac
+      case "${_st_mt:-}" in ''|*[!0-9]*) _st_mt=0 ;; esac
+      if [ "$_mt" -gt 0 ] && [ "$_st_mt" -gt 0 ] && [ $((_mt - _st_mt)) -gt 300 ]; then
+        case "$_ps" in ''|*[!0-9]*) ;; *) kill -9 "$_ps" 2>/dev/null ;; esac
+        rm -f "$STATE" "$TMP/dl.rc" "$TMP/worker.rc" "$TMP/install.log" 2>/dev/null
+        echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 清理陈旧 worker（state 已 ${_mt}-${_st_mt} 秒未更新）" >> "$LIB/mount.log" 2>/dev/null
+      fi
+    fi
     case "$_st" in
       download|verify|install)
         case "$_ps" in ''|*[!0-9]*) ;; *) kill -0 "$_ps" 2>/dev/null && { echo "OK:running"; exit 0; } ;; esac
@@ -273,6 +288,12 @@ case "${1:-check}" in
     ;;
   # 后台安装的状态查询：把 state 文件原样吐出来（UI 直接解析 stage=/cur=/total=/pid=）
   #   顺带做一次"worker 死了但状态还停在 download"的判定 —— 不然进度条会一直转
+  installkill)
+    _ps=$(sed -n 's/^pid=//p' "$STATE" 2>/dev/null)
+    case "$_ps" in ''|*[!0-9]*) ;; *) kill -9 "$_ps" 2>/dev/null ;; esac
+    rm -f "$STATE" "$TMP/dl.rc" "$TMP/worker.rc" "$TMP/install.log" 2>/dev/null
+    echo "OK:killed"
+    ;;
   installstate)
     if [ -f "$STATE" ]; then
       cat "$STATE" 2>/dev/null
