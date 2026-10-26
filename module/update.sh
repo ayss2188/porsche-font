@@ -161,8 +161,8 @@ load_json() {
   _BUST=$(date +%s 2>/dev/null)
   case "${_BUST:-}" in ''|*[!0-9]*) _BUST=0 ;; esac
   for base in \
-      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/${UPD_JSON}?t=%s' "$repo" "$_BUST")" \
-      "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/${UPD_JSON}?t=%s' "$repo" "$_BUST")" \
+      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/%s?t=%s' "$repo" "$UPD_JSON" "$_BUST")" \
+      "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/%s?t=%s' "$repo" "$UPD_JSON" "$_BUST")" \
       "$([ -n "$repo" ] && printf '%s/update?repo=%s&t=%s' "$UPD_WORKER" "$repo" "$_BUST")" \
       "${url:-}" ; do
     [ -n "$base" ] || continue
@@ -365,7 +365,7 @@ case "${1:-check}" in
     ZIP="$TMP/module.zip"
     # 顺带清掉上一次留下的 install.log 和校验状态：不然这次校验失败退出时，
     # 那几个旧文件还在，看起来像"这次装成功了/这次校验过了"
-      rm -f "$ZIP" "$STATE" "$TMP/dl.rc" "$TMP/install.log" 2>/dev/null
+      rm -f "$ZIP" "$STATE" "$TMP/dl.rc" "$TMP/install.log" "$TMP/update.json" 2>/dev/null
     TOTAL=$(http_size "$ZIP_URL")
     prog download 0 "$TOTAL" "正在下载刷机包"
     # 后台下载 + 每秒刷新进度。
