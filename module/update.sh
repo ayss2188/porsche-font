@@ -138,10 +138,13 @@ load_json() {
 
   # 依次尝试；记下 versionCode 最大的那个
   # 2026-10-27 顺序调整：raw 最快放第一，Worker 慢/不通放最后
+  # 2026-10-27 破缓存：每个源都带 ?t=时间戳，否则刚发版会拿到旧缓存 → 误报"已是最新"
+  _BUST=$(date +%s 2>/dev/null)
+  case "${_BUST:-}" in ''|*[!0-9]*) _BUST=0 ;; esac
   for base in \
-      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/${UPD_JSON}' "$repo")" \
-      "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/${UPD_JSON}' "$repo")" \
-      "$([ -n "$repo" ] && printf '%s/update?repo=%s' "$UPD_WORKER" "$repo")" \
+      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/${UPD_JSON}?t=%s' "$repo" "$_BUST")" \
+      "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/${UPD_JSON}?t=%s' "$repo" "$_BUST")" \
+      "$([ -n "$repo" ] && printf '%s/update?repo=%s&t=%s' "$UPD_WORKER" "$repo" "$_BUST")" \
       "${url:-}" ; do
     [ -n "$base" ] || continue
     if _try_update_url "$base" "$TMP/update.json"; then
@@ -280,7 +283,7 @@ case "${1:-check}" in
     printf 'stage=download\ncur=0\ntotal=0\nmsg=正在准备下载\npid=0\n' > "$STATE" 2>/dev/null
     # setsid：让 worker 脱离当前会话，WebUI 那边断开也不会把它带走
     _ss=""; command -v setsid >/dev/null 2>&1 && _ss=setsid
-    ( $_ss sh "$MODDIR/update.sh" install >> "$TMP/worker.log" 2>&1 < /dev/null; echo $? > "$TMP/worker.rc" ) >/dev/null 2>&1 &
+    ( $_ss sh "$MODDIR/update.sh" install "${2:-}" >> "$TMP/worker.log" 2>&1 < /dev/null; echo $? > "$TMP/worker.rc" ) >/dev/null 2>&1 &
     # ★ 立刻把 **worker 自己的 pid** 写进 state。
     #   不能写 installbg 自己的 $$：那个进程马上就退出了，installstate 里的
     #   `kill -0 $pid` 判活会立刻判成"worker 死了" → 进度条刚出来就报错。
