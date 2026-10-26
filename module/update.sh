@@ -112,7 +112,7 @@ _read_json() {   # $1=json 文件；把五个字段填进全局
 _try_update_url() {   # $1=url  $2=目标文件
   _TRY_CODE=""
   rm -f "$2" 2>/dev/null
-  fetch "$1" "$2" 20 || return 1
+  fetch "$1" "$2" 8 || return 1
   [ -s "$2" ] || return 1
   _read_json "$2"
   case "$NEW_CODE" in ''|*[!0-9]*) return 1 ;; esac
@@ -137,11 +137,12 @@ load_json() {
   _BEST=""; _BEST_SRC=""
 
   # 依次尝试；记下 versionCode 最大的那个
+  # 2026-10-27 顺序调整：raw 最快放第一，Worker 慢/不通放最后
   for base in \
-      "${url:-}" \
-      "$([ -n "$repo" ] && printf '%s/update?repo=%s' "$UPD_WORKER" "$repo")" \
+      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/${UPD_JSON}' "$repo")" \
       "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/${UPD_JSON}' "$repo")" \
-      "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/${UPD_JSON}' "$repo")" ; do
+      "$([ -n "$repo" ] && printf '%s/update?repo=%s' "$UPD_WORKER" "$repo")" \
+      "${url:-}" ; do
     [ -n "$base" ] || continue
     if _try_update_url "$base" "$TMP/update.json"; then
       if [ -z "$_BEST" ] || [ "$_TRY_CODE" -gt "$_BEST" ] 2>/dev/null; then
@@ -279,7 +280,7 @@ case "${1:-check}" in
     printf 'stage=download\ncur=0\ntotal=0\nmsg=正在准备下载\npid=0\n' > "$STATE" 2>/dev/null
     # setsid：让 worker 脱离当前会话，WebUI 那边断开也不会把它带走
     _ss=""; command -v setsid >/dev/null 2>&1 && _ss=setsid
-    ( $_ss sh "$MODDIR/update.sh" install >/dev/null 2>&1 < /dev/null; echo $? > "$TMP/worker.rc" ) >/dev/null 2>&1 &
+    ( $_ss sh "$MODDIR/update.sh" install >> "$TMP/worker.log" 2>&1 < /dev/null; echo $? > "$TMP/worker.rc" ) >/dev/null 2>&1 &
     # ★ 立刻把 **worker 自己的 pid** 写进 state。
     #   不能写 installbg 自己的 $$：那个进程马上就退出了，installstate 里的
     #   `kill -0 $pid` 判活会立刻判成"worker 死了" → 进度条刚出来就报错。

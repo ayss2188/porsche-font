@@ -1,7 +1,7 @@
 id=porsche_font_multi
 name=保时捷字体（三合一）
-version=v4.4.9.11
-versionCode=440911
+version=v4.4.9.12
+versionCode=440912
 author=暗影双生
 description=[默认：不替换字体] 内置三套配色字体（718素装 / 911经典 / GT3烈焰）一键切换；自带挂载，无需元模块；自动识别机型，重启生效。
 updateJson=https://cfs-report.2188366745q.workers.dev/update?repo=ayss2188/porsche-font
