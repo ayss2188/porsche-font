@@ -285,6 +285,26 @@ case "${1:-check}" in
     #   不能写 installbg 自己的 $$：那个进程马上就退出了，installstate 里的
     #   `kill -0 $pid` 判活会立刻判成"worker 死了" → 进度条刚出来就报错。
     printf 'stage=download\ncur=0\ntotal=0\nmsg=正在准备下载\npid=%s\n' "$!" > "$STATE" 2>/dev/null
+    # ★ 2026-10-27 worker 秒退检测：等最多 3 秒看它有没有留下 rc；
+    #   有 rc 且非 0 → 把真实原因写进 state，界面立刻能看到（而不是一直显示"正在连接"）
+    _w=0
+    while [ "$_w" -lt 6 ]; do
+      [ -f "$TMP/worker.rc" ] && break
+      sleep 0.5 2>/dev/null || sleep 1
+      _w=$((_w + 1))
+    done
+    if [ -f "$TMP/worker.rc" ]; then
+      _rc=$(cat "$TMP/worker.rc" 2>/dev/null | tr -dc '0-9')
+      case "${_rc:-0}" in
+        0) : ;;
+        *)
+          _why=$(tail -n 1 "$TMP/worker.log" 2>/dev/null | tr -d '\r' | cut -c1-120)
+          case "$_why" in ""|*"ERROR:"*) ;; *) _why="ERROR:$_why" ;; esac
+          [ -n "$_why" ] || _why="ERROR:后台下载进程启动后立即退出（本机可能没有 curl/wget，或连不上更新源）"
+          printf 'stage=error\ncur=0\ntotal=0\nmsg=%s\npid=0\n' "$_why" > "$STATE" 2>/dev/null
+          ;;
+      esac
+    fi
     echo "OK:started"
     ;;
   # 后台安装的状态查询：把 state 文件原样吐出来（UI 直接解析 stage=/cur=/total=/pid=）
