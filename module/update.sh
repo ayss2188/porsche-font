@@ -466,9 +466,24 @@ case "${1:-check}" in
         _iok=1
         break
       fi
+      # ★ 2026-10-27 修「没装完就亮重启」：
+      #   管理器是边解包边写 modules_update 的，目录一出现就判成功 → 红灯提前亮。
+      #   现在要求：目标版本对得上 + 目录大小连续 3 次探测（约 3 秒）不再变化。
       if [ -n "$_MID" ] && [ -d "/data/adb/modules_update/$_MID" ]; then
-        _iok=1
-        break
+        _uv=$(sed -n 's/^versionCode=//p' "/data/adb/modules_update/$_MID/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
+        if [ -n "$_uv" ] && [ "$_uv" = "$NEW_CODE" ]; then
+          _usz=$(du -sk "/data/adb/modules_update/$_MID" 2>/dev/null | tr -dc '0-9')
+          if [ -n "$_usz" ] && [ "$_usz" = "${_pst:-}" ]; then
+            _pstn=$((${_pstn:-0} + 1))
+          else
+            _pstn=0
+          fi
+          _pst="$_usz"
+          if [ "${_pstn:-0}" -ge 3 ] 2>/dev/null; then
+            _iok=1
+            break
+          fi
+        fi
       fi
       # 关机中就别再等了
       [ -n "$(getprop sys.powerctl)$(getprop sys.shutdown.requested)" ] && { kill "$_IPID" 2>/dev/null; break; }
