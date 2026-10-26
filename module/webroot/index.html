@@ -1760,7 +1760,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-0705</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1027-0735</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -10592,8 +10592,9 @@ async function installUpdate() {
     //   （以前这里直接 `await update.sh install` —— 同步 exec 阻塞整个页面，
     //     几十 MB 的下载过程中界面完全不动，正是"进度条是摆设"的原因。）
     const out = (await ksuExec(`sh -c 'sh ${MODDIR}/update.sh installbg >/dev/null 2>&1 &'`) || "").trim();
+    // 命令已丢到后台，正常拿不到输出；是否真的开始下载交给下面的轮询判断（22 秒兜底）
     const last = out.split("\n").pop() || "";
-    if (last.indexOf("OK:") !== 0) {
+    if (last.indexOf("ERROR:") === 0) {
       done = true;
       const msg = last.replace(/^ERROR:/, "") || "无法开始下载";
       updProg("更新失败：" + msg + "\n（更新包从 GitHub 下载，挂个梯子再试）", 0);
@@ -11033,7 +11034,7 @@ async function updInstall() {
     UPD2.phase = "error"; UPD2.msg = "启动下载失败：" + errText(e); u2paint(); return;
   }
   const last = (out.trim().split("\n").pop() || "").trim();
-  if (last.indexOf("OK:") !== 0) {
+  if (last.indexOf("ERROR:") === 0) {
     UPD2.phase = "error";
     UPD2.msg = last.replace(/^ERROR:/, "") || "无法开始下载（先连 VPN 再试）";
     u2paint();
