@@ -100,6 +100,15 @@ if command -v slot_build_slots >/dev/null 2>&1; then
   fi
 fi
 
+# 2026-10-28：安装环境扫不出槽位时（厂商分区没挂上），沿用升级前的清单
+if [ ! -s "$LIB/scanned/slots.list" ] && [ -s "$LIB/scanned.old/slots.list" ]; then
+  rm -rf "$LIB/scanned" 2>/dev/null
+  mv -f "$LIB/scanned.old" "$LIB/scanned" 2>/dev/null
+  ui_print "- 这次没扫到槽位，已沿用上次的清单（进界面可点「重新数一遍系统的字体」重扫）"
+else
+  rm -rf "$LIB/scanned.old" 2>/dev/null
+fi
+
 # ============================================================================
 # 升级迁移（2026-10-18，v1.3.1 架构改动）
 #
