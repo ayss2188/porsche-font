@@ -15,7 +15,7 @@ env:
   #      一加 ColorOS 这类"按 postscriptName 找字体"的 ROM 会满屏方块。
   #      v1 仍然在线（老 tag 的包要能重打），但**不要再退回去**。
   #    换 fonts-v2 之前请确认该 Release 已经建好、附件已上传，否则 CI 会在取字体那步失败。
-  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v4/porsche-font-profiles-v4.zip"
+  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v5/porsche-font-profiles-v5.zip"
 
 jobs:
   build:
