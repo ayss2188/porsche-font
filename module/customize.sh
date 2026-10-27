@@ -54,7 +54,9 @@ _MK="$LIB/.scan_version"
 _CUR=$(sed -n 's/^versionCode=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
 _OLD=$(cat "$_MK" 2>/dev/null | tr -d '\r\n')
 if [ -n "$_CUR" ] && [ "$_OLD" != "$_CUR" ]; then
-  rm -rf "$LIB/scanned" 2>/dev/null
+  # 2026-10-28：不再直接删，先搬到 scanned.old —— 新扫描失败时可以回退
+  rm -rf "$LIB/scanned.old" 2>/dev/null
+  [ -d "$LIB/scanned" ] && mv -f "$LIB/scanned" "$LIB/scanned.old" 2>/dev/null
   rm -f "$LIB"/*.ttc[0-9]* 2>/dev/null
   rm -f "$LIB/.verify.cache" "$LIB/.device_fonts" "$LIB/.cand.cache" \
         "$LIB/.plan.cache" "$LIB/.plan.marks" 2>/dev/null

@@ -730,7 +730,7 @@ slot_device_scan() {   # $1=moddir → 生成 device.list
   #   随后出现「任何模块的 WebUI 一点就闪退」（64 个 tombstone 全在 WebView 渲染进程）。
   #   除非用户在 Flyme 专区手动打开 flyme_scan，否则 Flyme 不扫本机。
   _rom_f=$(tr -d '[:space:]' 2>/dev/null < "$moddir/current_rom" 2>/dev/null)
-  if [ "$_rom_f" = "flyme" ] && [ "$(cfg_get flyme_scan 0 2>/dev/null)" != 1 ]; then
+  if [ "$_rom_f" = "flyme" ] && [ "$(cfg_get flyme_scan 1 2>/dev/null)" != 1 ]; then
     # ★ 2026-10-25：光 return 不够 —— 上一版扫出来的 device.list / slots.list
     #   还会被沿用（slot_build_slots 直接读它们），96 个槽位照样在。
     #   这里把扫描缓存清掉，让计划回到「只用机型清单」的状态（= 4.4.2 时代的范围）。

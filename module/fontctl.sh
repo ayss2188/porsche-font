@@ -920,9 +920,15 @@ do_apply() {
       echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=$sel"
       echo "plan=$(grep -c . "$plan" 2>/dev/null) scope=$scope 判定依据=${SCOPE_VIA:-?} keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0)"
     } > "$LIB/ttc.log" 2>/dev/null
+    # 2026-10-28：清单为空时先自动重扫一次，再决定是否报错
+    if [ ! -s "$plan" ] && [ ! -s "$LIB/scanned/slots.list" ]; then
+      sh "${MODDIR:-$MODPATH}/fontctl.sh" rescan >/dev/null 2>&1
+      make_plan "$sel" "$plan" >/dev/null
+      scope="$PLAN_SCOPE"
+    fi
     if [ ! -s "$plan" ]; then
       rm -f "$plan"
-      echo "ERROR:没有找到可替换的槽位（范围：$scope）。可到设置里关闭「保留…」选项，或查看诊断报告"
+      echo "ERROR:没有找到可替换的槽位（范围：$scope）。已尝试自动重扫，仍为空请到「高级设置 → 通用 → 重新数一遍系统的字体」点一次再切换"
       exit 1
     fi
     # ★ 2026-10-17（作者：切换必须快）：**这里不再逐个 chmod/chcon 字体文件**。
@@ -1626,10 +1632,19 @@ case "${1:-}" in
     # ★ 2026-10-17：重新扫描本机字体并覆盖设备清单。
     #   什么时候用：换了系统大版本、装了新字体但界面没显示、或诊断建议你重扫。
     #   平时**不需要**跑 —— apply/reapply 只读清单，不扫描。
-    if slot_build_slots "$MODDIR" 2>/dev/null; then
-      _rn=$(sed -n 's/^total=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
-      _tn=$(sed -n 's/^targets=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
-      echo "OK:已重新扫描，${_rn:-?} 个字体槽位（机组清单 ${_tn:-?} + 本机补）"
+    # 2026-10-28：判成功看清单内容，不看退出码（Flyme 会误报）
+    [ -s "$LIB/scanned/device.list" ] || slot_device_scan "$MODDIR" >/dev/null 2>&1
+    slot_build_slots "$MODDIR" 2>/dev/null
+    _rc=$?
+    _rn=$(sed -n 's/^total=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
+    _tn=$(sed -n 's/^targets=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
+    _ln=$(grep -c . "$LIB/scanned/slots.list" 2>/dev/null | tr -dc '0-9')
+    case "${_rn:-}" in ''|*[!0-9]*) _rn=0 ;; esac
+    case "${_ln:-}" in ''|*[!0-9]*) _ln=0 ;; esac
+    if [ "$_ln" -gt 0 ] || [ "$_rn" -gt 0 ]; then
+      [ "$_rc" != 0 ] && echo "[rescan] rc=$_rc 但清单已生成" >> "$LIB/ttc.log" 2>/dev/null
+      [ "$_rn" -gt 0 ] || _rn=$_ln
+      echo "OK:已重新扫描，${_rn} 个字体槽位（机组清单 ${_tn:-0} + 本机补）"
     else
       echo "ERROR:扫描失败（可能是字体目录还没就绪，重启后再试）"
       exit 1
