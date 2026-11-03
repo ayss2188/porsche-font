@@ -1633,7 +1633,7 @@ try {
     <div class="sw" id="sw_theme_fonts"></div>
   </div>
   <div class="switch-row fade" onclick="toggleSetting('keep_lockscreen')">
-    <div><div class="t">保留锁屏时钟字体</div><div class="d">小米/红米/POCO 的锁屏时钟有<b>自己专用的一份字体</b>，默认会一起换成你的字体。<br><b>开</b>：那几份保留原样，你还能在系统里换锁屏时钟样式。<br><b>关</b>：连锁屏时钟也换成你的字体。<br>（其他品牌没有这种专用字体，开关无影响）</div></div>
+    <div><div class="t">保留锁屏时钟字体</div><div class="d">已知这几家把<b>时钟字体单独放一族</b>：<br>· 小米 / 红米 / POCO（miclock、mitype-clock）<br>· 红魔 / 努比亚 / 中兴（RedMagicDigit、ZDigit）<br>· 三星 One UI（SECNum 数字族）<br>默认会连它们一起换成你的字体。<br><b>开</b>：这些保留原样，你还能在系统里换时钟样式。<br><b>关</b>：连锁屏时钟也一起换。<br>（其他品牌没有单独的时钟字体，开关无影响）</div></div>
     <div class="sw" id="sw_keep_lockscreen"></div>
   </div>
 
@@ -1771,7 +1771,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1101-0610</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1103-1030</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -2073,7 +2073,7 @@ const WORKER_KEY = "up_AIWDsNGqSacruDo4wLnJmEiMvgEMpGtt";
      ③ POST /report       —— 口令对不对 + R2 桶通不通（传一小段测试文本）
 */
 const NONE_LABEL = "无字体（系统默认）";
-const ROM_NAMES = {hyperos:"澎湃OS/HyperOS/MIUI", coloros:"ColorOS/OPPO/一加/realme", originos:"OriginOS/vivo/iQOO", flyme:"Flyme/魅族", samsung:"三星 One UI", honor:"荣耀 MagicOS（自动发现）", huawei:"华为 EMUI/鸿蒙（自动发现）", nothing:"Nothing OS（自动发现）", aosp:"原生/类原生/谷歌Pixel"};
+const ROM_NAMES = {hyperos:"澎湃OS/HyperOS/MIUI", coloros:"ColorOS/OPPO/一加/realme", originos:"OriginOS/vivo/iQOO", flyme:"Flyme/魅族", oneui:"三星 One UI", samsung:"三星 One UI", redmagic:"红魔 / 努比亚（RedMagic OS）", honor:"荣耀 MagicOS（自动发现）", huawei:"华为 EMUI/鸿蒙（自动发现）", nothing:"Nothing OS（自动发现）", aosp:"原生/类原生/谷歌Pixel"};
 const HUGE_FONT = Infinity;   // 保时捷版：不做体积警告（内置配色本身就 42MB）
 const SCOPE_TEXT = {all: "中英文", latin: "仅英文/数字", cjk: "仅中文"};
 const THEME_LABELS = {auto:"🌓 自动", light:"☀️ 浅色", dark:"🌙 深色"};
@@ -2247,8 +2247,14 @@ function labelOf(id) {
      ② 补族键 / 渲染：各自保护，出错不影响状态显示（少个配对信息而已）
      ③ 重入保护：同一时间只跑一次，避免互相覆盖 */
 let refreshBusy = false;
-async function refreshAll() {
-  if (refreshBusy) return;          // ③ 已经在跑就别再发一遍
+async function refreshAll(force) {
+  if (refreshBusy) {
+    // ★ 2026-11-03（与主项目同版）：导入/切换结束的那次刷新常撞上别的刷新
+    //   正在跑 → 被静默吞掉，界面停在旧状态。force=true 时等它跑完再补一次。
+    if (!force) return;
+    for (let i = 0; i < 20 && refreshBusy; i++) await new Promise(r => setTimeout(r, 250));
+    if (refreshBusy) return;
+  }
   refreshBusy = true;
   try {
     // ① 这一步是"能不能跟模块说上话"，失败才是真的读不到
@@ -6524,7 +6530,8 @@ async function selectFont(id) {
     //   每次完整 status 都要重新加载一遍后端脚本）。1.2 秒后的那次保留 —— 它负责
     //   把 VF/MO/verify 这些重字段刷准。
     try { pendingId = id; render(); } catch (e) {}
-    try { await refreshAll(); } catch (e) {}
+    // ★ 2026-11-03：force —— 撞上在跑的刷新时等它结束再补一次，不再被静默吞掉
+    try { await refreshAll(true); } catch (e) {}
     // ★ 2026-11-03：结果提示最后弹（与主项目同版）—— 刷新期间线程被冻结，
     //   定时器不走、提示超时挂着；现在刷新完了再弹，3 秒就是 3 秒。
     if (_selMsg) showToast(_selMsg, false, 3000);
@@ -7218,6 +7225,31 @@ const ADV_TREE = [
       { id: "adv_refresh_set", name: "刷新开关状态",
         desc: "重新从模块读一遍所有开关。打开菜单不再自动读（会卡），所以想确认状态就点这里。",
         hint: "读不到会直接告诉你；读到会更新界面。", safe: 1, cmd: "advRefreshSettings" },
+      { id: "kernel_umount", name: "让所有 App 都能看到字体（一键修）",
+        desc: "KernelSU 默认会把模块挂载从普通应用里卸掉，于是只有 root 应用能看到字体。"
+            + "点这里会自动关掉那个开关。",
+        hint: "改完重启才生效；会先备份配置文件，想恢复有备份。APatch 会告诉你开关在哪，Magisk 不需要。",
+        safe: 2, cmd: "kernelumount" },
+      { id: "conflicts_card", name: "查一下有没有别的字体/主题模块",
+        desc: "两个模块同时改字体时，只有后挂的生效，表现就是「换了一半」。"
+            + "这里列出所有可能抢字体的模块（含 zygisk 类）。",
+        hint: "列出来的模块，留一个就行：管理器里停用另一个再重启。", safe: 1, cmd: "conflicts" },
+      { id: "fontlib_bak", name: "备份字体库（含设置）",
+        desc: "把字体库里的字体、名称、设置、当前选择打成一个压缩包，存到手机的 Download。"
+            + "换机、刷机、或者想折腾前先备份一份。",
+        hint: "字体大的话要几十秒，别退出；备份文件叫 fontlib-日期.tar.gz，可能很大。",
+        safe: 2, cmd: "fontbackup" },
+      { id: "fontlib_restore", name: "从备份恢复（最新一份）",
+        desc: "自动选 Download 里最新的 fontlib-*.tar.gz，先校验字体是否完好，再写回字体库。",
+        hint: "恢复完回主界面点一次「切换」，再重启才生效。",
+        safe: 2, cmd: "fontrestore" },
+      { id: "fontlib_list", name: "看看有哪些备份",
+        desc: "列出 Download 里所有 fontlib-*.tar.gz 和它们的大小、时间。",
+        hint: "只想看不想动，用这个。", safe: 1, cmd: "backuplist" },
+      { id: "ota_report", name: "系统更新后的自动适配记录",
+        desc: "每次系统更新（OTA）后，模块会自动重扫槽位、按你当前的选择重新生成计划，"
+            + "这里能看到它做了什么、有没有失败。",
+        hint: "字体在系统更新后没生效，先看这里。", safe: 1, cmd: "otareport" },
 
       { id: "export", name: "把现场打包发给作者", desc: "作者要你提供情况时，用这里的第一个就够了", children: [
         { id: "pack", name: "打个包（推荐先点这个）",

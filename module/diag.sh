@@ -2223,6 +2223,32 @@ conclusion() {
   hr
   echo "本次开机: post-fs-data $([ "$PFD_THIS" = 0 ] && echo '未执行' || echo '已执行')   service $([ "$SVC_THIS" = 0 ] && echo '未执行' || echo '已执行')   实际生效 $VHIT/$VTOT"
   echo "扫描范围: $(printf '%s\n' "$FONTDIRS" | grep -c . ) 个字体目录、$(printf '%s\n' "$XMLFOUND" | grep -c . ) 份字体配置（含厂商分区与 apex）"
+  # ★ 2026-11-03：字体配置 XML 可读性自检（只读，不改任何东西）
+  #   扫不出槽位时，先看这里：是"配置读不到"，还是"配置里本来就没有可换的 family"。
+  _xh_n=0; _xh_bad=0
+  for _xh_x in $XMLFOUND; do
+    _xh_p="$FSROOT$_xh_x"
+    if [ -r "$_xh_p" ]; then
+      _xh_sz=$(wc -c < "$_xh_p" 2>/dev/null | tr -dc '0-9')
+      _xh_fam=$(tr -d '\n\r' < "$_xh_p" 2>/dev/null | grep -oE '<family[ >]' | wc -l | tr -d ' ')
+      _xh_end=$(tr -d '\n\r' < "$_xh_p" 2>/dev/null | grep -o '</family>' | wc -l | tr -d ' ')
+      echo "  配置可读: $_xh_x  ${_xh_sz:-?} 字节  family 开=${_xh_fam:-0} 关=${_xh_end:-0}"
+      if [ "${_xh_fam:-0}" != "${_xh_end:-0}" ]; then
+        echo "    ⚠ 开/闭标签数量不一致 —— 这份配置可能被截断，解析会失败（槽位会少）"
+        _xh_bad=$((_xh_bad + 1))
+      fi
+    else
+      echo "  配置读不到: $_xh_x（权限不足或路径不存在）"
+      _xh_bad=$((_xh_bad + 1))
+    fi
+    _xh_n=$((_xh_n + 1))
+  done
+  if [ "$_xh_n" = 0 ]; then
+    echo "  配置可读: 一份都没找到 —— 只能靠静态清单换字体（扫不出本机槽位）"
+  elif [ "$_xh_bad" -gt 0 ]; then
+    echo "  ⚠ 有 $_xh_bad 份配置不可用：这正是「扫描失败 / 换字体没反应」的常见原因"
+  fi
+
         echo "本次口径: 完整报告（唯一口径）"
         echo "本次指纹: 稀疏指纹（大小+修改时间+头尾各 64KB 的 sha256）—— 用于判断字体有没有被替换；同一份文件只算一次"
   echo "挂载实测: $MT_RESULT"

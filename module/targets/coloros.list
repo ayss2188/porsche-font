@@ -20,6 +20,7 @@
 [clock]
 AndroidClock.ttf
 
+OSans-Solid-Digits-VF.ttf
 [main]
 DINPro-Bold.ttf
 DINPro-Medium.ttf
@@ -115,6 +116,14 @@ SysSans-Hans-Light.ttf
 SysSans-Hans-Medium.ttf
 SysSans-Hans-Regular.ttf
 
+SysFont-Myanmar.ttf
+Rotobo-Regular.ttf
+MyanmarZg.ttf
+FZZWXBTOT_Uni.ttf
+HYShenQiTuJianU.ttf
+Banana_Wide_Brush_Inspiration.ttf
+Billgates-2.ttf
+Galada-Regular.ttf
 [theme]
 DINCondensedBold.ttf
 OPPODINCondensed-Bold.ttf

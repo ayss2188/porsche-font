@@ -363,3 +363,74 @@ _wd_start
 if [ -f "${LIB:-/data/adb/custom_font_lib}/logs/.on" ] && [ -f "$MODDIR/logcatch.sh" ]; then
   sh "$MODDIR/logcatch.sh" resume >/dev/null 2>&1
 fi
+
+# ★ 2026-11-03：更新源自愈
+#   worker（cfs-report...workers.dev）的 GitHub token 过期后，/update 一直返回旧版本
+#   （v1.3.5），管理器就再也检测不到更新了。这里在开机时把 module.prop 的
+#   updateJson 改写成 jsDelivr 直连（内容就是仓库里的 update.json），
+#   老用户不用重装也能恢复「管理器里能检测到更新」。
+_update_json_selfheal() {
+  local mp want cur mid
+  MODDIR="${MODDIR:-${0%/*}}"
+  LIB="${LIB:-/data/adb/custom_font_lib}"
+  mp="$MODDIR/module.prop"
+  [ -f "$mp" ] || return 0
+  mid=$(sed -n 's/^id=//p' "$mp" 2>/dev/null | head -n1 | tr -d '\r')
+  case "$mid" in
+    porsche_font_718) want="https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/update-718.json" ;;
+    porsche_font_911) want="https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/update-911.json" ;;
+    porsche_font_gt3) want="https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/update-gt3.json" ;;
+    porsche_font_*)   want="https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/update.json" ;;
+    *)                want="https://cdn.jsdelivr.net/gh/ayss2188/custom-font-switcher@main/update.json" ;;
+  esac
+  cur=$(sed -n 's/^updateJson=//p' "$mp" 2>/dev/null | head -n1 | tr -d '\r')
+  [ "$cur" = "$want" ] && return 0
+  case "$cur" in
+    *workers.dev*|"") ;;
+    *) return 0 ;;   # 用户自己改过更新源就不动
+  esac
+  sed -i "s|^updateJson=.*|updateJson=$want|" "$mp" 2>/dev/null \
+    || { grep -q '^updateJson=' "$mp" && sed -i "/^updateJson=/d" "$mp"; echo "updateJson=$want" >> "$mp"; }
+  printf '%s\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null) updateJson 已自愈 → $want" >> "$LIB/update.log" 2>/dev/null
+}
+_update_json_selfheal
+
+# ★ 2026-11-03：系统 OTA 之后的自动适配
+#   系统更新会换掉 /system 的字体重排（字体文件名/配置可能变），
+#   旧扫描结果和旧计划就没用了。这里比对 ro.build.fingerprint：
+#   变了 → 后台重扫槽位 + 按当前选择重新生成计划 + 记一笔（界面「通用」可查）。
+_ota_guard() {
+  MODDIR="${MODDIR:-${0%/*}}"
+  LIB="${LIB:-/data/adb/custom_font_lib}"
+  _fp=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n')
+  [ -n "$_fp" ] || return 0
+  _old=$(cat "$LIB/.sysfp" 2>/dev/null | tr -d '\r\n')
+  [ "$_fp" = "$_old" ] && return 0
+  printf '%s' "$_fp" > "$LIB/.sysfp" 2>/dev/null
+  # 第一次记录（老用户升级上来）不算系统更新
+  [ -z "$_old" ] && return 0
+  _pf=$(cat "$MODDIR/pending_font" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$_pf" ] || _pf=$(cat "$LIB/pending_font" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$_pf" ] || _pf=$(cat "$LIB/last_selection" 2>/dev/null | tr -d '[:space:]')
+  case "$_pf" in ""|none) _pf="" ;; esac
+  {
+    printf '[%s] 系统更新：%s → %s\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "$_old" "$_fp"
+    rm -f "$MODDIR/current_rom" "$LIB/.plan.cache" "$LIB/.cand.cache" \
+          "$LIB/.device_fonts" "$LIB/.xmlnames.cache" "$LIB/.skipscan.cache" 2>/dev/null
+    if sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1; then
+      printf '  ✓ 槽位已重扫\n'
+    else
+      printf '  ! 槽位重扫失败（可在界面点「重新数一遍」）\n'
+    fi
+    if [ -n "$_pf" ]; then
+      if sh "$MODDIR/fontctl.sh" apply "$_pf" >/dev/null 2>&1; then
+        printf '  ✓ 已按当前选择重新生成计划（重启后生效）\n'
+      else
+        printf '  ! 重新应用失败（可在界面重新切一次）\n'
+      fi
+    fi
+  } >> "$LIB/ota.log" 2>&1
+  : > "$LIB/.ota.adapted" 2>/dev/null
+}
+# 后台跑，别拖慢开机
+( _ota_guard ) >/dev/null 2>&1 &

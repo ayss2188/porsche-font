@@ -19,7 +19,7 @@
 
 [clock]
 AndroidClock.ttf
-
+VivoClock.ttf
 [main]
 GoogleSans-Bold.ttf
 GoogleSans-Medium.ttf
@@ -52,7 +52,8 @@ VivoSans-Thin.ttf
 VivoSansVF.ttf
 iQOOSans-Regular.ttf
 vivoSans-Regular.ttf
-
+VivoFont.ttf
+vivofont.ttf
 [theme]
 VivoSansCondensed-Bold.ttf
 VivoSansCondensed-Medium.ttf

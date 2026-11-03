@@ -250,15 +250,28 @@ detect_rom() {
       fi ;;
   esac
 
+  # ---- 6.5 红魔 / 努比亚 / 中兴（RedMagic OS / MyOS）----
+  _prop_get ro.build.version.redmagic;      strong="$PROP_V"
+  if [ -z "$strong" ]; then
+    case "$vdisplay" in
+      *RedMagicOS*|*RedMagic*|*MyOS*|*NubiaOS*|*ZTEOS*) strong=1 ;;
+    esac
+  fi
+  case "$vbrand $vmanu" in
+    *REDMAGIC*|*RedMagic*|*redmagic*|*nubia*|*Nubia*|*NUBIA*|*ZTE*|*Zte*) weak=1 ;;
+    *) weak="" ;;
+  esac
+  if [ -n "$strong" ] || [ -n "$weak" ]; then echo "redmagic"; return 0; fi
+
   # ---- 7. 三星 One UI ----
   _prop_get ro.build.version.oneui;         strong="$PROP_V"
   [ -n "$strong" ] || { _prop_get ro.build.version.sem; strong="$PROP_V"; }
   [ -n "$strong" ] || { _prop_get ro.config.knox; strong="$PROP_V"; }
-  if [ -n "$strong" ]; then echo "samsung"; return 0; fi
+  if [ -n "$strong" ]; then echo "oneui"; return 0; fi
   case "$vbrand $vmanu" in
     *samsung*|*SAMSUNG*|*Samsung*)
       if _rom_has_dir /system/etc/floating_feature.xml /system/etc/samsung /system/samsung; then
-        echo "samsung"; return 0
+        echo "oneui"; return 0
       fi ;;
   esac
 

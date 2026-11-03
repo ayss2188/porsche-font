@@ -1,3 +1,7 @@
+# samsung.list —— 兼容旧版 current_rom（旧版把三星写成 samsung）
+# 内容与 oneui.list 相同；新版系统识别统一写 oneui。
+# 2026-11-03
+
 # samsung —— 按分区组织
 #
 # ★ 2026-10-17：改成**分区**格式。分区的作用：

@@ -1,0 +1,36 @@
+# redmagic 机型清单（红魔 / 努比亚 / 中兴 RedMagic OS）
+#
+# 来源：真机报告 REDMAGIC NX809J（Android 16 / RedMagicOS11.0.22，2026-11-02）
+# 说明：只列厂商专有字体；AOSP 那批通用字体由 targets/aosp.list 兜底，不用重复写。
+#
+# 分区：没有分区名的（文件开头的）进 [base]；[main] 主字体、[clock] 时钟、[cjk] 中文、[theme] 主题/装饰
+
+[clock]
+AndroidClock.ttf
+RedMagicDigit-Regular.ttf
+RedMagicDigit.ttf
+ZDigit-Bold.ttf
+ZDigit-Light.ttf
+ZDigit-Medium.ttf
+ZDigit-Regular.ttf
+ZDigit-Thin.ttf
+
+[main]
+CNZH_Light.ttf
+CNZ_ExtraLight.ttf
+CNZ_SemiBold.ttf
+CNZI_ExtraLight.ttf
+HYZhengYuan-Bold.ttf
+HYZhengYuan-Light.ttf
+HYZhengYuan-Medium.ttf
+HYZhengYuan-Regular.ttf
+DroidSans.ttf
+DroidSans-Bold.ttf
+DroidSansMono.ttf
+
+[theme]
+ICNDigit-Bold.ttf
+ICNDigit-Light.ttf
+ICNDigit-Medium.ttf
+ICNDigit-Regular.ttf
+Days-aaa-Regular-02.ttf

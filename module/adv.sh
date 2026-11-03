@@ -174,17 +174,39 @@ _boot() {
 
 _conflicts() {
   _me=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
+  echo "== 别的模块会不会和本模块抢字体 =="
   _found=0
   for _d in /data/adb/modules/*; do
     [ -d "$_d" ] || continue
     _mid=${_d##*/}
     [ "$_mid" = "$_me" ] && continue
-    [ -d "$_d/system/fonts" ] || continue
-    _n=$(ls -1 "$_d/system/fonts" 2>/dev/null | grep -c .)
-    echo "  模块 $_mid 里有 $_n 个字体文件"
+    [ -f "$_d/remove" ] && continue
+    _name=$(sed -n 's/^name=//p' "$_d/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
+    _desc=$(sed -n 's/^description=//p' "$_d/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
+    _hit=""
+    # 直接往 system/fonts 里塞文件的
+    if [ -d "$_d/system/fonts" ]; then
+      _n=$(ls -1 "$_d/system/fonts" 2>/dev/null | grep -c .)
+      _hit="system/fonts 里有 $_n 个字体文件"
+    else
+      # 按名字/描述判断：字体、主题、zygisk 注入
+      case "$_mid $_name $_desc" in
+        *字体*|*[Ff]ont*|*FONT*|*主题*|*[Tt]heme*|*字库*|*字形*)
+          _hit="名字/描述像字体或主题模块（${_name:-$_mid}）" ;;
+      esac
+      case "$_mid" in
+        *zygisk*|*Zygisk*|*shamiko*|*Shamiko*) [ -n "$_hit" ] || _hit="zygisk 类（可能改字体挂载可见性）" ;;
+      esac
+    fi
+    [ -n "$_hit" ] || continue
+    echo "  · $_mid${_name:+（$_name）}"
+    echo "      $_hit"
+    echo "      → 两个模块同时改字体时，只留一个：管理器里停用/卸载另一个再重启"
     _found=1
   done
-  [ "$_found" = 0 ] && echo "  （没有其它模块带 system/fonts）"
+  [ "$_found" = 0 ] && echo "  ✓ 没发现别的字体/主题/zygisk 模块（只装了本模块）"
+  echo
+  echo "提示：本模块自身是 $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)"
 }
 
 _theme() {
@@ -267,7 +289,161 @@ _prewarm_all() {
   echo "做完这些之后切任何字体都不用再现场合成 —— 第一次就是秒级。"
 }
 
+
+# ★ 2026-11-03：一键修「模块被隐藏，普通 App 看不到字体」
+#   KernelSU 默认 kernel_umount=1 → 把模块挂载从普通应用里卸掉，只有 root 应用能看到；
+#   APatch 的「排除修改」等价；Magisk 没这个机制。
+_umount_fix() {
+  local f bak _mgr=""
+  [ -d /data/adb/ksu ] && _mgr=ksu
+  [ -z "$_mgr" ] && [ -d /data/adb/ap ] && _mgr=apatch
+  [ -z "$_mgr" ] && [ -d /data/adb/magisk ] && _mgr=magisk
+  echo "== 让所有 App 都能看到字体 =="
+  echo "识别到的 Root 管理器：${_mgr:-未知}"
+  echo
+  case "$_mgr" in
+    ksu)
+      f=/data/adb/ksu/.feature_config
+      echo "配置文件：$f"
+      if [ -f "$f" ]; then
+        echo "--- 修改前 ---"
+        grep -n 'kernel_umount' "$f" 2>/dev/null || echo "（没有 kernel_umount 这一行 = 当前隐藏模块，普通 App 看不到字体）"
+      else
+        echo "（文件不存在，将新建）"
+      fi
+      bak="$f.bak.$(date +%Y%m%d%H%M%S 2>/dev/null)"
+      [ -f "$f" ] && cp -f "$f" "$bak" 2>/dev/null && echo "已备份：$bak"
+      if [ -f "$f" ] && grep -q '^kernel_umount=' "$f" 2>/dev/null; then
+        sed -i 's/^kernel_umount=.*/kernel_umount=0/' "$f" 2>/dev/null
+      else
+        printf 'kernel_umount=0\n' >> "$f" 2>/dev/null
+      fi
+      echo "--- 修改后 ---"
+      grep -n 'kernel_umount' "$f" 2>/dev/null
+      echo
+      echo "✅ 已写入 kernel_umount=0。重启后「普通 App 也能看到字体」。"
+      echo "   想恢复原样：把上面那个 .bak 文件覆盖回去，然后重启。"
+      ;;
+    apatch)
+      echo "检测到 APatch："
+      echo "  APatch 管理器 → 设置 → 关闭「排除修改 / Exclude modifications」→ 重启。"
+      echo "  （APatch 没有可直接改写的配置文件，需要手动点这个开关）"
+      ;;
+    magisk)
+      echo "检测到 Magisk：Magisk 没有「默认卸载模块」机制，普通 App 本来就能看到字体。"
+      echo "如果只有部分 App 没变：多半是该 App 自带字体（需要「全覆盖」）或用了独立字体包。"
+      ;;
+    *)
+      echo "没识别出 Root 管理器。"
+      echo "如果管理器里有「默认卸载模块 / 排除修改 / 遵守排除列表」之类的开关，关掉再重启。"
+      ;;
+  esac
+}
+
+
+# ★ 2026-11-03：字体库备份 / 恢复（纯 shell，不依赖 python）
+#   备份内容：字体库里的用户字体 + 元数据 + 设置 + 当前选择
+#   输出：/sdcard/Download/fontlib-YYYYmmdd-HHMMSS.tar.gz
+#   注意：字体动辄几十 MB，备份文件可能很大；界面会提示耗时。
+_FB_DIR=/sdcard/Download
+_FB_ITEM=''
+_fb_pick() {   # 列出可备份的东西
+  _FB_ITEM=""
+  for _f in "$LIB"/f*.ttf "$LIB"/f*.otf "$LIB"/*.meta "$LIB"/*.name; do
+    [ -f "$_f" ] && _FB_ITEM="$_FB_ITEM${_FB_ITEM:+ }${_f##*/}"
+  done
+  for _f in settings.conf last_selection pending_font; do
+    [ -f "$LIB/$_f" ] && _FB_ITEM="$_FB_ITEM${_FB_ITEM:+ }$_f"
+  done
+}
+
+_fontbackup() {
+  echo "== 备份字体库 =="
+  _fb_pick
+  if [ -z "$_FB_ITEM" ]; then echo "字体库里没有可备份的内容（还没有导入过字体）"; return 1; fi
+  mkdir -p "$_FB_DIR" 2>/dev/null
+  _ts=$(date +%Y%m%d-%H%M%S 2>/dev/null)
+  _out="$_FB_DIR/fontlib-$_ts.tar.gz"
+  echo "正在打包（字体大时要几十秒，别退出）…"
+  # shellcheck disable=SC2086
+  ( cd "$LIB" && tar -czf "$_out" $_FB_ITEM ) 2>/dev/null
+  if [ -s "$_out" ]; then
+    _sz=$(du -h "$_out" 2>/dev/null | awk '{print $1}')
+    echo "✅ 已备份：$_out（${_sz:-?}）"
+    echo "   里面包含：$(printf '%s' "$_FB_ITEM" | tr ' ' '\n' | wc -l | tr -d ' ') 个文件"
+    echo "   Download 里如果看不到，说明需要给文件管理器存储权限。"
+  else
+    echo "❌ 备份失败：写不进 $_FB_DIR（检查存储空间 / 权限）"
+    return 1
+  fi
+}
+
+_fontrestore() {
+  echo "== 恢复字体库 =="
+  mkdir -p "$_FB_DIR" 2>/dev/null
+  _list=$(ls -1t "$_FB_DIR"/fontlib-*.tar.gz 2>/dev/null | head -n 8)
+  if [ -z "$_list" ]; then echo "Download 里没有找到 fontlib-*.tar.gz 备份"; return 1; fi
+  echo "可用的备份（新的在前）："
+  printf '%s\n' "$_list" | sed 's|.*/||' | nl -ba | sed 's/^/  /'
+  # 支持传序号或文件名：fontrestore 1
+  _pick="${1:-1}"
+  _sel=$(printf '%s\n' "$_list" | sed -n "${_pick}p")
+  [ -n "$_sel" ] || { echo "没有第 $_pick 个备份"; return 1; }
+  echo "选中：${_sel##*/}"
+  _tmp="$LIB/.restore.$$"
+  rm -rf "$_tmp"; mkdir -p "$_tmp" 2>/dev/null
+  if ! tar -xzf "$_sel" -C "$_tmp" 2>/dev/null; then
+    echo "❌ 解包失败：文件可能损坏"; rm -rf "$_tmp"; return 1
+  fi
+  # 先校验：字体头 + 大小
+  _bad=0; _ok=0
+  for _f in "$_tmp"/f*.ttf "$_tmp"/f*.otf; do
+    [ -f "$_f" ] || continue
+    _h=$(head -c 4 "$_f" 2>/dev/null)
+    _s=$(wc -c < "$_f" 2>/dev/null | tr -dc '0-9')
+    case "$_h" in
+      $'\x00\x01\x00\x00'|OTTO|true|ttcf) ;;
+      *) [ "${_s:-0}" -gt 1024 ] 2>/dev/null || { echo "  跳过损坏字体：${_f##*/}"; _bad=$((_bad+1)); continue; } ;;
+    esac
+    _ok=$((_ok + 1))
+  done
+  if [ "$_ok" -eq 0 ]; then echo "❌ 备份里没有可用字体（$ _bad 个损坏）"; rm -rf "$_tmp"; return 1; fi
+  echo "校验通过：$_ok 个字体可用${_bad:+，跳过 $_bad 个损坏的}"
+  # 落盘：字体与元数据覆盖，设置只在备份里有才覆盖
+  for _f in "$_tmp"/*; do
+    [ -f "$_f" ] || continue
+    _b=${_f##*/}
+    case "$_b" in
+      settings.conf|last_selection|pending_font) cp -f "$_f" "$LIB/$_b" 2>/dev/null ;;
+      *) cp -f "$_f" "$LIB/$_b" 2>/dev/null ;;
+    esac
+  done
+  rm -rf "$_tmp"
+  echo "✅ 已恢复 $_ok 个字体"
+  echo "   下一步：回界面点「切换」应用一次，然后重启生效。"
+}
+
+_fontbackuplist() {
+  echo "== Download 里的字体库备份 =="
+  ls -1lt "$_FB_DIR"/fontlib-*.tar.gz 2>/dev/null | awk '{printf "  %-46s %8.1f MB  %s %s %s\n", $9, $5/1048576, $6, $7, $8}' \
+    | sed 's|/sdcard/Download/||'
+  [ -n "$(ls -1 "$_FB_DIR"/fontlib-*.tar.gz 2>/dev/null)" ] || echo "  （没有备份）"
+}
+
+_otareport() {
+  echo "== 系统更新后的自动适配记录 =="
+  if [ -s "$LIB/ota.log" ]; then tail -n 30 "$LIB/ota.log"; else echo "  （还没有触发过：要么没做过系统更新，要么系统版本没变）"; fi
+  echo
+  echo "当前系统：$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r')"
+  echo "上次记录：$(cat "$LIB/.sysfp" 2>/dev/null | tr -d '\r')"
+}
+
 case "${1:-}" in
+  kernelumount) _umount_fix ;;
+  fontbackup)   _fontbackup ;;
+  fontrestore)  _fontrestore "${2:-1}" ;;
+  backuplist)   _fontbackuplist ;;
+  otareport)    _otareport ;;
   pack)      _pack ;;
   plan)      echo "== slots.map（前 60 行 / 共 $(grep -c . "$MAP" 2>/dev/null) 行） =="; head -n 60 "$MAP" 2>/dev/null ;;
   mountlog)  echo "== mount.log（末 60 行） =="; tail -n 60 "$LIB/mount.log" 2>/dev/null ;;
