@@ -394,6 +394,19 @@ $real"
   #   而"本来就在位 / 全部跳过"这两种情况也同样该把状态对齐 ——
   #   它们说明"挂载早已生效，只是状态没同步"。
   do_sync_state
+  # ★ 2026-11-01（v24 快照机制的配套，作者提醒"软重启想到没"）：
+  #   免重启挂载成功 = 当前计划**已经是实际生效**——必须立刻把两样东西追平：
+  #     · cp slots.map → slots.boot.map：BN（已生效）= 刚挂上去的这份计划
+  #     · touch .boot.mark：PD 基准更新到此刻 → 「重启后生效」横幅消失
+  #   为什么不能等 service.sh：软重启不跑模块脚本，boot.mark / 快照都不会更新，
+  #   界面会一直挂着横幅、已生效还是旧数字 —— 跟"刚刚明明免重启生效了"矛盾
+  #   （真实流程：切开关 → 横幅出现 → 点「免重启应用」→ 横幅就该消失）。
+  #   之后用户再改开关 → slots.map 重写、比 boot.mark 新 → PD=1 横幅回归，
+  #   此时 BN 仍是"上次生效的那份计划"，口径依旧正确。
+  if [ "$fail" = 0 ]; then
+    cp -f "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null
+    touch "$LIB/.boot.mark" 2>/dev/null
+  fi
   [ "$fail" = 0 ] || return 1
   return 0
 }

@@ -706,6 +706,12 @@ slot_scan_cache_drop() {
   local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
   rm -f "$_sd/device.list" "$_sd/slots.list" "$_sd/slots.meta" \
         "$_sd/skip.list" "$_sd/ttc.list" "$_sd/env.list" "$_sd/.schema" 2>/dev/null
+  # ★ 2026-10-31（修正）：**绝不清空 .plancache** ——
+  #   这行是第一轮加的（当时缓存钥匙还是 mtime，怕脏数据）。
+  #   现在钥匙是纯内容哈希（md5）：重扫后清单内容一样 → 钥匙一样 → 缓存照常命中；
+  #   内容真的变了 → 钥匙自动换 → 旧条目只是没人引用、会被 12 份上限自然淘汰。
+  #   而这行在"每次刷入都重扫"的节奏下（扫描印记同版本也重扫）会把计划缓存
+  #   每次刷入端掉一次 —— 正是"恢复选型/预生成永远命中不了"的元凶。
   return 0
 }
 
@@ -830,6 +836,24 @@ slot_device_scan() {   # $1=moddir → 生成 device.list
 #   影响槽位的开关只有 keep_lockscreen / theme_fonts 两个 → 4 种组合，
 #   每种生成一份文本清单（几百行、几十 KB，不占空间）。
 #   切换时按开关直接选文件，**不做任何过滤**。
+# ---------------------------------------------------------------------------
+# ★ 2026-10-31：**内容没变就不替换**（保住 mtime）
+#   slot_build_slots 每次刷入都会重跑；旧写法无条件覆盖 slots.list 等 4 份清单
+#   → mtime 每次都变 → fontctl 的"计划缓存"必然失效 → 每次刷入后第一次恢复
+#   选型都要走完整生成（真机实测"沿用上次配色"那步慢）。
+#   _pub：临时文件内容与目标一致 → 丢弃临时、**保留原文件的 mtime**；
+#         内容真的变了（换 ROM/换清单）→ 才覆盖。
+#   cmp 是内建级小工具（toybox/busybox 都有），逐字节比对，152 行毫秒级。
+# ---------------------------------------------------------------------------
+_sb_pub() {   # $1=临时文件  $2=目标文件
+  if [ -s "$2" ] && cmp -s "$1" "$2" 2>/dev/null; then
+    rm -f "$1" 2>/dev/null
+  else
+    mv -f "$1" "$2" 2>/dev/null
+  fi
+  return 0
+}
+
 slot_build_slots() {   # $1=moddir
   local moddir="${1:-${MODDIR:-}}" rom tlist tmp tgt_n dev_n
   # ★ 这三个路径必须在这里自己算 —— 不能依赖顶层变量
@@ -956,22 +980,25 @@ slot_build_slots() {   # $1=moddir
   # ── 四份清单 ──
   #   th=0：直接过滤
   #   th=1：过滤后再追加主题字体（theme_slots 要读目录，所以只在这里跑）
+  #   ★ 2026-10-31：写临时文件再 _pub —— 内容没变就保住 mtime（计划缓存跨刷入命中）
   _gen() {   # $1=输出文件  $2=kl(0/1)  $3=th(0/1)
+    _gt="$1.pub.$$"
     awk -v kl="$2" -v lock="$_lk" '
       BEGIN { n = split(lock, A, " "); for (i = 1; i <= n; i++) if (A[i] != "") LK[A[i]] = 1 }
       { if (kl == 1 && ($3 in LK)) next; print }
-    ' "$tmp" > "$1" 2>/dev/null
+    ' "$tmp" > "$_gt" 2>/dev/null
     if [ "$3" = 1 ]; then
       # ★ 强制模式：这时开关可能是关着的，但我们要的是"打开后会是什么样"。
       #   theme_slots 只处理"已经在计划里的名字"，所以喂给它基础计划。
       # ⚠️ theme_slots 期望的是「role 相对路径」两列格式（它读第 2 字段当路径），
       #    而 slots.list 是「role 目录 文件名」三列 —— 必须先转换，
       #    否则它拿到的路径是 /system/fonts，跟文件名永远对不上，一个都加不进来。
-      _base2=$(awk 'NF >= 3 { d = $2; sub(/^\//, "", d); print $1 " " d "/" $3 }' "$1" 2>/dev/null)
+      _base2=$(awk 'NF >= 3 { d = $2; sub(/^\//, "", d); print $1 " " d "/" $3 }' "$_gt" 2>/dev/null)
       ( CFS_FORCE_THEME=1; theme_slots "$_base2" 2>/dev/null ) \
-        | awk '!seen[$0]++' >> "$1" 2>/dev/null
-      awk '!seen[$0]++' "$1" > "$1.d" 2>/dev/null && mv -f "$1.d" "$1" 2>/dev/null
+        | awk '!seen[$0]++' >> "$_gt" 2>/dev/null
+      awk '!seen[$0]++' "$_gt" > "$_gt.d" 2>/dev/null && mv -f "$_gt.d" "$_gt" 2>/dev/null
     fi
+    _sb_pub "$_gt" "$1"
   }
   _gen "$_use"                 0 0     # slots.list      kl=0 th=0
   _gen "$_sd/slots.kl1.list"   1 0
@@ -1383,9 +1410,12 @@ _role_set_core() {  _rf_init
 
 # ★ 2026-10-24 B2-5：main_only 用包装函数实现
 #   原因：_role_set_core 里很多分支是 `ROLE=xxx; return`，写在函数末尾的过滤执行不到。
+# ★ 2026-10-31（性能）：main_only 改读 _rf_init 一次性读好的内存值 ——
+#   原来这里是 `$(cfg_get ...)` 命令替换，**每个槽位 fork 一个子 shell**，
+#   生成计划时 150~400 个槽位就是 150~400 个进程，这是"第一次应用慢"的大头之一。
 _role_set() {
   _role_set_core "$@"
-  if [ "$(cfg_get main_only 0 2>/dev/null)" = 1 ]; then
+  if [ "${_RF_main_only:-0}" = 1 ]; then
     case "${ROLE:-}" in
       main|cjk) ;;
       *) ROLE=sym ;;
@@ -2778,119 +2808,3 @@ slot_sources_report() {
   printf 'u=0\n'
 }
 
-
-
-# ---------------------------------------------------------------------------
-# ★ 2026-10-17：「模块额外补的」这个数字怎么算
-#
-#   slot_sources_report 给的 x/s/o/d 是**优先级去重后**的归属
-#   （x 配置 > s 清单 > o 厂商 > d 目录）。真机上目录扫描扫到 215 个名字，
-#   其中 212 个配置也提到了 → 全被配置赢走 → d 显示 0。
-#   但"扫描真正多补了几个"是用户关心的，显示 0 会以为扫描坏了。
-#
-#   ⚠️ 为什么这里**自己直接扫目录**、不调 slot_dir_names / slot_dirs：
-#     那两个函数有进程内缓存，而本函数可能在更早的时机被调用过
-#     （拿到空结果）→ 跟着显示 0（真机踩过）。
-#     自己扫的判据跟扫描层保持一致（>32KB + 排除符号/等宽/时钟/衬线）。
-#
-#   输出：
-#     extra   = 目录里存在、而配置/清单/厂商都没提到的名字数（扫描的净贡献）
-#     symskip = 目录里存在、但因符号/emoji 规则刻意不换的名字数
-# ---------------------------------------------------------------------------
-slot_extra_report() {
-  local moddir="${1:-${MODDIR:-}}" xf df n_extra n_sym d f b bl sz
-  # ★ 2026-10-17 提速：**加重结果缓存**。
-  #   这个函数每次进界面都会被 status 调用（界面要显示"模块额外补了 N 个"），
-  #   而它要扫十几个字体目录才能算出来 —— 界面每次刷新都白扫一遍。
-  #   结果只在三种情况下会变：换开机 / 槽位计划变 / 字体目录里的文件变，
-  #   所以拿这三样当 key，命中就直接读缓存（跟 payload_verify 同一套思路）。
-  local _ck _cnow
-  local _ver
-  # ★ 2026-10-17 修：key 里必须带**脚本版本**（slots.sh 的 mtime）。
-  #   否则升级模块后，会命中旧逻辑算出来的缓存 —— 用户实测就踩到了：
-  #   候选语义从"按开关过滤"改成"固定全读"，但缓存没失效，
-  #   于是装新包后槽位从 78 变成 46（少了 [clock] 那批）。
-  _ver="$(stat -c '%Y' "${MODDIR:-}/slots.sh" 2>/dev/null)"
-  _cnow="$_ver|$(boot_id 2>/dev/null)"
-  _cnow="$_cnow|$(stat -c '%Y-%s' "$moddir/slots.map" 2>/dev/null)"
-  for _d in /system/fonts /system_ext/fonts /product/fonts /vendor/fonts /odm/fonts \
-            /oem/fonts /mi_ext/fonts /my_product/fonts /my_heytap/fonts \
-            /hw_product/fonts /prism/fonts /optics/fonts /oplus_product/fonts; do
-    [ -d "${FSROOT:-}$_d" ] && _cnow="$_cnow|$_d:$(stat -c '%Y-%s' "${FSROOT:-}$_d" 2>/dev/null)"
-  done
-  if [ -s "$LIB/.extra.cache" ]; then
-    if [ "$(sed -n '1p' "$LIB/.extra.cache" 2>/dev/null)" = "$_cnow" ]; then
-      # 第 1 行是 key，第 2 行起才是结果（两行：extra=… / symskip=…）
-      # ⚠️ 必须原样输出两行 —— 跟不走缓存时格式完全一致。
-      sed -n '2,$p' "$LIB/.extra.cache" 2>/dev/null
-      return 0
-    fi
-  fi
-
-  xf="${TMPDIR:-/data/local/tmp}/.xr.$$"
-  df="${TMPDIR:-/data/local/tmp}/.dr.$$"
-  : > "$xf"; : > "$df"
-
-  slot_xml_names 2>/dev/null | grep -v '^[[:space:]]*$' | sort -u > "$xf"
-  if [ -n "$moddir" ]; then
-    slot_static_names "$moddir" 2>/dev/null | grep -v '^[[:space:]]*$' >> "$xf"
-    slot_oem_names "$moddir" 2>/dev/null | grep -v '^[[:space:]]*$' >> "$xf"
-  fi
-  sort -u -o "$xf" "$xf"
-
-  n_sym=0
-  # ★ 2026-10-17 提速（进 UI 读状态的主要开销就在这）：
-  #   这段跟 slot_dir_names 是**两份独立代码**，之前只优化了那边。
-  #   原来是每个文件 `wc -c` —— 把整个字体文件读一遍来量大小，
-  #   291 个字体文件就是 291 次完整读盘，而界面每次刷新都会走到这里。
-  #   现在用 `ls -ln` 一次把目录里所有文件的大小拿回来（只读元数据）。
-  #   判断规则一个字没改：小文件跳过、emoji/符号计数、mono/serif 等排除。
-  for d in /system/fonts /system_ext/fonts /product/fonts /vendor/fonts \
-           /odm/fonts /oem/fonts /mi_ext/fonts /my_product/fonts /my_heytap/fonts \
-           /hw_product/fonts /prism/fonts /optics/fonts /oplus_product/fonts; do
-    [ -d "$FSROOT$d" ] || continue
-    ls -ln "$FSROOT$d" 2>/dev/null | awk -v df="$df" -v sym="$LIB/.symcnt.$$" '
-      {
-        if ($1 ~ /^d/) next
-        if ($1 ~ /^total$/) next
-        if (NF < 9) next
-        sz = $5 + 0
-        if (sz < 32768) next
-        name = $NF
-        if (name ~ /\*/) next
-        low = tolower(name)
-        if (low !~ /\.(ttf|otf)$/) next
-        if (low ~ /sans-serif/ || low ~ /sansserif/) { print name >> df; next }
-        if (low ~ /emoji/ || low ~ /symbol/ || low ~ /dingbat/ || low ~ /braille/) {
-          print 1 >> sym; next
-        }
-        if (low ~ /mono/ || low ~ /cursive/ || low ~ /casual/ || low ~ /math/ || \
-            low ~ /music/ || low ~ /clock/ || low ~ /serif/) next
-        print name >> df
-      }'
-    if [ -s "${LIB}/.symcnt.$$" ]; then
-      # symskip 是"计数"不是"名字"，awk 里写成一行一个 1，这里数行数加进总数
-      _add=$(wc -l < "${LIB}/.symcnt.$$" 2>/dev/null | tr -d ' ')
-      n_sym=$(( n_sym + ${_add:-0} ))
-      rm -f "${LIB}/.symcnt.$$" 2>/dev/null
-    fi
-  done
-  sort -u -o "$df" "$df"
-
-  n_extra=$(grep -Fxvf "$xf" "$df" 2>/dev/null | grep -c .)
-  _scanned=$(wc -l < "$df" 2>/dev/null | tr -d ' ')
-
-  rm -f "$xf" "$df" 2>/dev/null
-  # 写缓存（第一行 key、后面是结果）
-  # ★ 2026-10-17 防呆：这个函数在开机很早（post-fs-data）也会被调用，那一刻
-  #   字体目录可能还没挂载好 → 扫出来是 0。如果把这个 0 缓存下来，
-  #   界面之后就会永远显示"额外补 0 个"（跟以前修过的"空缓存锁死"同一类坑）。
-  #   判据：扫到的字体数太少（< 10）说明环境没就绪 → 这次不写缓存，下次重算。
-  if [ "${_scanned:-0}" -ge 10 ] 2>/dev/null; then
-    { printf '%s\n' "$_cnow"
-      printf 'extra=%d\nsymskip=%d\n' "${n_extra:-0}" "${n_sym:-0}"
-    } > "$LIB/.extra.cache.tmp.$$" 2>/dev/null && \
-      mv -f "$LIB/.extra.cache.tmp.$$" "$LIB/.extra.cache" 2>/dev/null
-  fi
-  printf 'extra=%d\nsymskip=%d\n' "${n_extra:-0}" "${n_sym:-0}"
-}

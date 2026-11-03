@@ -52,9 +52,14 @@ _tag() {
 }
 
 # 把 key=value 写进 meta（先删同名的旧行，再追加）
+# ★ 2026-10-31（幂等）：值已经对了就**一个字节都不写** ——
+#   旧写法即使值完全相同也 mv 回去 → meta 的 mtime 每次刷入必变
+#   → 计划缓存的 meta 指纹跟着变 → 预生成/恢复选型永远命中不了缓存。
 _put() {   # _put <metafile> <key> <value>
-  local mf="$1" k="$2" v="$3" tmp="${1}.tmp.$$"
+  local mf="$1" k="$2" v="$3" tmp="${1}.tmp.$$" cur
   [ -f "$mf" ] || : > "$mf"
+  cur=$(sed -n "s/^${k}=//p" "$mf" 2>/dev/null | tail -n1 | tr -d '\r')
+  [ "$cur" = "$v" ] && return 0
   grep -v "^${k}=" "$mf" > "$tmp" 2>/dev/null
   printf '%s=%s\n' "$k" "$v" >> "$tmp"
   mv -f "$tmp" "$mf" 2>/dev/null || rm -f "$tmp"

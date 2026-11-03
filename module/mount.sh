@@ -30,9 +30,15 @@
 command -v boot_id >/dev/null 2>&1 || boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n'; }
 
 
+# ★ 2026-10-30（性能）：timeout 有没有，开机只探测一次
+#   （原来每次挂载都 fork 一个 `command -v timeout` —— 300 个槽位就是 300 个进程）
+_TO_HAVE=""
 _to_s() {
   _to_n="$1"; shift
-  if command -v timeout >/dev/null 2>&1; then
+  if [ -z "${_TO_HAVE+x}" ]; then
+    if command -v timeout >/dev/null 2>&1; then _TO_HAVE=1; else _TO_HAVE=0; fi
+  fi
+  if [ "$_TO_HAVE" = 1 ]; then
     timeout "$_to_n" "$@"; _to_rc=$?
     [ "$_to_rc" = 127 ] || return $_to_rc
   fi
@@ -66,6 +72,7 @@ _MOUNT_BIN=${CFS_MOUNT_BIN:-}
 if [ -n "$_MOUNT_BIN" ] && [ ! -x "$_MOUNT_BIN" ]; then
   _MOUNT_BIN=""
 fi
+_CFS_CHCON=""
 _mount() {
   # ★ 2026-10-25：**默认不做 chcon** —— 恢复到 4.4.2 的行为。
   #   背景：4.4.2 及更早从不给挂载源补标签，真机（魅族 Flyme 12.6 / Android 16）
@@ -74,14 +81,24 @@ _mount() {
   #   推断：补了标签后渲染进程才能 mmap 这个 43MB 的可变字体，而它在这台机器的
   #   Chromium/FreeType 上会崩；不补标签时渲染进程读不到 → 走系统兜底 → 不崩。
   #   需要 WebView 直接读字体时，可在高级设置把 chcon_fonts 打开。
-  if [ "$(cfg_get chcon_fonts 0 2>/dev/null)" = 1 ]; then
+  # ★ 2026-10-30（性能）：① chcon 开关只查一次（cfg_get 已是内存缓存，这里省的是
+  #   每次调用的 eval 开销）；② bind,ro 一次 mount 调用完成 —— 原来是 bind 之后再
+  #   remount,ro，每个槽位多一次 mount 系统调用；老内核不支持 bind,ro 时自动回退
+  #   两步走（live.sh 已在真机验证过这条路）。
+  if [ -z "${_CFS_CHCON+x}" ]; then _CFS_CHCON=$(cfg_get chcon_fonts 0 2>/dev/null); fi
+  if [ "$_CFS_CHCON" = 1 ]; then
     chcon u:object_r:system_file:s0 "$1" 2>/dev/null
   fi
   if [ -n "$_MOUNT_BIN" ]; then
-    _to "$_MOUNT_BIN" -o bind "$1" "$2"
-  else
-    _to mount -o bind "$1" "$2"
+    if _to "$_MOUNT_BIN" -o bind,ro "$1" "$2" 2>/dev/null; then return 0; fi
+    _to "$_MOUNT_BIN" -o bind "$1" "$2" || return 1
+    _to "$_MOUNT_BIN" -o remount,bind,ro "$2" 2>/dev/null
+    return 0
   fi
+  if _to mount -o bind,ro "$1" "$2" 2>/dev/null; then return 0; fi
+  _to mount -o bind "$1" "$2" || return 1
+  _to mount -o remount,bind,ro "$2" 2>/dev/null
+  return 0
 }
 
 
@@ -106,9 +123,10 @@ _datafont_is_ours() {   # $1=字体库源文件  $2=目标文件 → 0=目标已
   [ -n "$a" ] && [ "$a" = "$b" ]
 }
 
-# 取字节数（取不到给 0；别把 $(wc …) 直接塞进算术里，ash 会当场报错）
+# 取字节数（取不到给 0；别把 $(stat) 直接塞进算术里，ash 会当场报错）
+# ★ 2026-10-31：stat 只读元数据（原来 wc -c 把 17MB 的主题字体整份读一遍）
 _df_sz() {
-  _v=$(wc -c < "$1" 2>/dev/null | tr -d ' \t\r\n')
+  _v=$(stat -c %s "$1" 2>/dev/null | tr -d ' \t\r\n')
   case "${_v:-}" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$_v" ;; esac
 }
 
@@ -159,7 +177,7 @@ datafont_swap() {
   dir=${dst%/*}
   if command -v free_kb >/dev/null 2>&1; then
     local need free
-    need=$(( $(wc -c < "$src" 2>/dev/null | tr -d ' ') / 1024 + 4096 ))
+    need=$(( $(stat -c %s "$src" 2>/dev/null | tr -d ' ') / 1024 + 4096 ))
     free=$(free_kb "$dir")
     if [ -n "$free" ] && [ "$free" -lt "$need" ] 2>/dev/null; then
       echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 空间不足，主题字体改用挂载：$dst（需要 $((need/1024))MB，剩 $((free/1024))MB）" >> "$LIB/mount.log" 2>/dev/null
@@ -171,8 +189,8 @@ datafont_swap() {
   tmp="$dir/.cfs_tmp_$$"
   cp -f "$src" "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
   [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
-  # 内容核对（写入过程被截断的话宁可不动）
-  if [ "$(wc -c < "$tmp" 2>/dev/null | tr -d ' ')" != "$(wc -c < "$src" 2>/dev/null | tr -d ' ')" ]; then
+  # 内容核对（写入过程被截断的话宁可不动）★ 2026-10-31：比对改 stat，不整读文件
+  if [ "$(stat -c %s "$tmp" 2>/dev/null)" != "$(stat -c %s "$src" 2>/dev/null)" ]; then
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
@@ -345,6 +363,29 @@ payload_mount() {
     echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 延迟 ${_delay}s 后再挂载（B5）" >> "$LIB/mount.log" 2>/dev/null
     sleep "$_delay"
   fi
+  # ★ 2026-10-30（性能）：批量预取"源 inode 表 + 目标当前 inode 表"
+  #   原来幂等判断对每个槽位做 2 次 `stat -L`（每次一个进程）—— 300 个槽位就是 600 个
+  #   进程，全是白花的。现在：源文件通常只有 1~3 个、目标目录只有 2~3 个，
+  #   各用一次 stat/ls 批量拿回来压成字符串，循环里纯 case 匹配（零进程）。
+  #   表里查不到的槽位仍按原路逐个 stat（行为与原来完全一致）。
+  _pv_theme_phys=$(cfg_get theme_phys 0 2>/dev/null)
+  _pv_mnt_retry=$(cfg_get mount_retry 3 2>/dev/null)
+  _SRC_PAIRS=""; _DST_PAIRS=""
+  _pv_srcs=""; _pv_dsts=""
+  while read -r _bi _br _bs || [ -n "${_br:-}" ]; do
+    case "${_bi:-}" in ""|*[!A-Za-z0-9_]*) continue ;; esac
+    case "${_br:-}" in ""|/*|*..*) continue ;; esac
+    [ -n "${_bs:-}" ] || _bs="$LIB/$_bi.ttf"
+    case "$_pv_srcs" in *" $_bs "*) ;; *) _pv_srcs="$_pv_srcs $_bs " ;; esac
+    _pv_dsts="$_pv_dsts /$_br"
+  done < "$_usemap"
+  if [ -n "$(printf '%s' "$_pv_srcs" | tr -d ' ')" ]; then
+    _SRC_PAIRS=" $(stat -L -c '%d:%i %n' $_pv_srcs 2>/dev/null | awk '{printf "%s=%s ", $2, $1}') "
+  fi
+  if [ -n "$(printf '%s' "$_pv_dsts" | tr -d ' ')" ]; then
+    _DST_PAIRS=" $(stat -L -c '%d:%i %n' $_pv_dsts 2>/dev/null | awk '{printf "%s %s; ", $1, $2}') "
+  fi
+  unset _pv_srcs _pv_dsts
   while read -r id rel src || [ -n "$rel" ]; do
     case "$id" in ""|*[!A-Za-z0-9_]*) continue ;; esac
     case "$rel" in ""|/*|*..*) continue ;; esac
@@ -379,7 +420,7 @@ payload_mount() {
     # ★ 2026-10-25：默认**不写盘**（theme_phys=0）→ 这些 /data 主题字体槽位整支跳过，
     #   既不复制、也不挂载（4.4.3 及更早连这些槽位都不进计划）。
     #   以前这里无条件 datafont_swap，会把 43MB 字体真写进用户主题目录。
-    if [ "$(cfg_get theme_phys 0 2>/dev/null)" != 1 ]; then
+    if [ "$_pv_theme_phys" != 1 ]; then
       case "$dst" in
         /data/*) skip=$((skip+1)); continue ;;
       esac
@@ -396,13 +437,28 @@ payload_mount() {
     esac
     # 幂等：已经指向我们的文件了就别再叠一层
     # （post-fs-data 和 post-mount 万一都跑到，或者被重复调用，会叠出多层挂载且再也数不清）
+    # ★ 2026-10-30：先查批量预取的 inode 表（零进程）；表里没有再按原路逐个 stat
+    _si=""
+    case "$_SRC_PAIRS" in
+      *" $src="*) _t=${_SRC_PAIRS#*" $src="}; _si=${_t%% *} ;;
+    esac
+    _ino_match=0
+    if [ -n "$_si" ] && [ -n "$_DST_PAIRS" ]; then
+      case "$_DST_PAIRS" in
+        *" $_si $dst; "*) _ino_match=1 ;;
+      esac
+    fi
+    if [ "$_ino_match" = 1 ]; then
+      same=$((same+1)); continue
+    fi
     if [ "$(stat -L -c '%d:%i' "$src" 2>/dev/null)" = "$(stat -L -c '%d:%i' "$dst" 2>/dev/null)" ]; then
       same=$((same+1)); continue
     fi
     # 每个挂载加超时：万一某个槽位卡住，绝不能让整个开机阶段跟着卡死（post-fs-data 是阻塞阶段）
     # 成败看退出码，不看有没有输出 —— mount 成功时也可能打好几行警告
     # ★ 2026-10-24 B5：失败重试（mount_retry，默认 3；0/1 = 不重试）
-    _max=$(cfg_get mount_retry 3 2>/dev/null)
+    # ★ 2026-10-30：循环外已读好（_pv_mnt_retry），不再每槽位查一次
+    _max="$_pv_mnt_retry"
     case "$_max" in ''|*[!0-9]*) _max=3 ;; esac
     [ "$_max" -ge 1 ] 2>/dev/null || _max=1
     _try=1
@@ -414,8 +470,8 @@ payload_mount() {
       sleep 1
     done
     if [ "$rc" = 0 ]; then
-      if [ -n "$_MOUNT_BIN" ]; then _to "$_MOUNT_BIN" -o remount,bind,ro "$dst"
-      else _to mount -o remount,bind,ro "$dst"; fi 2>/dev/null
+      # ★ 2026-10-30：只读已并入 _mount 的第一次调用（bind,ro 一步到位，
+      #   老内核回退两步时 _mount 内部已补 remount），这里不再重复 remount
       ok=$((ok+1))
     else
       fail=$((fail+1))

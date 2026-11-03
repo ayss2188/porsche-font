@@ -112,6 +112,16 @@ _clean_tmp() {
   rm -f /data/local/tmp/.pv.* /data/local/tmp/.pv.ino.* /data/local/tmp/.pv.clean.* \
         /data/local/tmp/.slots.clean.* /data/local/tmp/.oem.* /data/local/tmp/.marks.* \
         /data/local/tmp/.slots.* 2>/dev/null
+  # ★ 2026-10-31：本轮新增的临时文件兜底
+  rm -f /data/local/tmp/.live.* /data/local/tmp/.xr.* /data/local/tmp/.dr.* \
+        /data/local/tmp/.plan.src.* /data/local/tmp/.ttccn.* /data/local/tmp/.relive.* \
+        /data/local/tmp/.cfs_apply.* 2>/dev/null
+  # ★ 2026-10-31：新加的两个缓存目录（.plancache 计划缓存 / .ttc.cache 合集产物）。
+  #   正常路径它们随 $LIB 整体删除（都在 $LIB 内）；这里是显式兜底。
+  #   ⚠ 只在"没有其它字体模块共存"时才删 —— 兄弟模块（主/子项目）共用字库与缓存，
+  #   卸载其中一个时绝不能把另一个的缓存端掉。
+  _other_module_present || rm -rf "$LIB/.plancache" "$LIB/.ttc.cache" 2>/dev/null
+  return 0
 }
 
 

@@ -257,6 +257,16 @@ _replan() {
   sh "$MODDIR/fontctl.sh" apply "$_p" 2>&1 | tail -n 6
 }
 
+# ★ 2026-10-31：手动预热全部字体的切换计划 + 中文合集产物（高级设置按钮用）
+#   输出逐字体的进度行；产物落 $LIB/.ttc.cache 永久保存，做完之后切任何字体都是秒级。
+_prewarm_all() {
+  [ -f "$MODDIR/fontctl.sh" ] || { echo "ERROR:没有 fontctl.sh"; return 1; }
+  echo "开始预生成（有中文合集的机型每字体要几十秒，请等它跑完）…"
+  sh "$MODDIR/fontctl.sh" prewarm-all 2>&1
+  echo ""
+  echo "做完这些之后切任何字体都不用再现场合成 —— 第一次就是秒级。"
+}
+
 case "${1:-}" in
   pack)      _pack ;;
   plan)      echo "== slots.map（前 60 行 / 共 $(grep -c . "$MAP" 2>/dev/null) 行） =="; head -n 60 "$MAP" 2>/dev/null ;;
@@ -277,6 +287,7 @@ case "${1:-}" in
   remount)   _remount ;;
   rescan)    _rescan ;;
   replan)    _replan ;;
+  prewarm-all) _prewarm_all ;;
   set-desc)
     _d=$2
     [ -n "$_d" ] || { echo "ERROR:描述为空"; exit 1; }

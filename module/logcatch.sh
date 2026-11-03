@@ -170,7 +170,27 @@ _do_stop() {
       for _f in $_db; do
         echo
         echo "---------- dropbox: ${_f##*/} ----------"
-        head -200 "$_f" 2>/dev/null
+        case "$_f" in
+          *data_app_anr*)
+            # ★ 2026-11-01（真机教训：虎牙 ANR 报告定不了性）：head -200 只切到
+            #   前几个守护线程，**主线程栈根本没进报告** —— 而 ANR 的答案全在主线程。
+            #   改成：头部 60 行 + 主线程块（sysTid == 进程 pid 的那段，向前 12 行
+            #   拿线程名、向后 45 行拿栈）。
+            head -60 "$_f" 2>/dev/null
+            _ap=$(sed -n 's/^----- pid \([0-9]*\) at .*/\1/p' "$_f" 2>/dev/null | head -n1)
+            if [ -n "$_ap" ]; then
+              _aln=$(grep -n "sysTid=$_ap\b" "$_f" 2>/dev/null | head -n1 | cut -d: -f1)
+              if [ -n "$_aln" ]; then
+                echo "  ---- 主线程栈（sysTid=$_ap） ----"
+                sed -n "$((_aln - 12)),$((_aln + 45))p" "$_f" 2>/dev/null
+              else
+                echo "  （没找到主线程块 sysTid=$_ap —— trace 可能是 Native 格式）"
+                head -200 "$_f" 2>/dev/null
+              fi
+            fi
+            ;;
+          *) head -200 "$_f" 2>/dev/null ;;
+        esac
       done
     else
       echo

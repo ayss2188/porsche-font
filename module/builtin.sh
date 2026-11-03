@@ -78,6 +78,30 @@ builtin_is_vf() {
 # ---------------------------------------------------------------------------
 # 注入：把 builtin/*.ttf 硬链接成字体库里的字体
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ★ 2026-10-31：**合并式 meta 更新** —— 只确保这 5 个字段存在且值正确，
+#   其它字段（metaprobe 写的 outline_type、轮廓探测写的 outline/outline_sz、
+#   诊断用的 wgmin/wgmax…）**一律保留**。
+#   旧写法是整份重写成固定 5 字段 → 每次刷入和 metaprobe 互相覆盖
+#   → meta 内容每刷一次变一次 → 计划缓存钥匙跟着变 → 永远命中不了。
+#   值都对时一个字节都不写（保住 mtime）。
+# ---------------------------------------------------------------------------
+_builtin_meta_ensure() {   # $1=id  $2=vf(0/1)
+  _bm_id="$1"; _bm_vf="$2"
+  _bm_f="$LIB/$_bm_id.meta"
+  _bm_bsz=$(stat -c %s "$LIB/$_bm_id.ttf" 2>/dev/null | tr -d ' \t\r\n')
+  case "${_bm_bsz:-}" in ''|*[!0-9]*) _bm_bsz=0 ;; esac
+  for _bm_kv in "scope=all" "latin=1" "cjk=1" "vf=$_bm_vf" "size=$_bm_bsz"; do
+    _bm_k=${_bm_kv%%=*}; _bm_v=${_bm_kv#*=}
+    _bm_cur=$(sed -n "s/^$_bm_k=//p" "$_bm_f" 2>/dev/null | tail -n1 | tr -d '\r')
+    if [ "$_bm_cur" != "$_bm_v" ]; then
+      { grep -v "^$_bm_k=" "$_bm_f" 2>/dev/null; printf '%s=%s\n' "$_bm_k" "$_bm_v"; } \
+        > "$_bm_f.tmp.$$" 2>/dev/null && mv -f "$_bm_f.tmp.$$" "$_bm_f" 2>/dev/null
+    fi
+  done
+  return 0
+}
+
 builtin_import() {
   local bdir="$MODDIR/builtin" f n info id nm dst ok=0 vf=0
   [ -d "$bdir" ] || return 0
@@ -112,19 +136,25 @@ builtin_import() {
     # 本模块自带的三套配色都是可变字体（带 wght 字重轴）→ 写进 meta 供报告/界面判断
     if builtin_is_vf "$f"; then vf=1; else vf=0; fi
 
-    # 已经是指向同一份文件的硬链接就跳过（覆盖安装/重复安装时省事）
-    if [ -f "$dst" ] && [ "$(stat -c %i "$dst" 2>/dev/null)" = "$(stat -c %i "$f" 2>/dev/null)" ]; then
-      # 硬链接已经在位，但 meta 可能还是旧格式（比如少了 vf=）→ 重写一遍
-      printf '%s' "$nm" > "$LIB/$id.name" 2>/dev/null
-      # ★ 2026-10-19：把真实文件大小写进 meta（size=）。
-      #   界面显示字体大小读的就是它；不写的话内置配色会显示成「—」，
-      #   只有被应用过的那一套才会因为轮廓分析补上大小。
-      _bsz=$(wc -c < "$dst" 2>/dev/null | tr -d ' \t\r\n')
-      case "${_bsz:-}" in ''|*[!0-9]*) _bsz=0 ;; esac
-      printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\nsize=%s\n' "$vf" "$_bsz" > "$LIB/$id.meta" 2>/dev/null
+    # ★★ 2026-10-31（关键）：**字节一致就什么都不动** —— 这是刷入提速的命门。
+    #   旧逻辑：硬链接的 inode 比对在"模块更新"后必然失败（新目录新 inode）
+    #   → 每次刷入都 rm + 重链 + 重写 .name/.meta
+    #   → 内置字体的 mtime 变了 → TTC 合集的时间戳门判定"产物比字体旧"
+    #     → 3 个字体 × 2 份合集全部重新合成（真机实测预生成卡 1 分半）；
+    #     → meta 的 mtime 变了 → 计划缓存钥匙失效 → 恢复选型也走完整生成。
+    #   现在：内容逐字节一致（cmp）→ 保留字体库里这份**旧 inode 旧 mtime** 的文件，
+    #   name/meta 只在内容真的不同时才重写。字体真换了（版本更新）才走重链路径。
+    if [ -f "$dst" ] && cmp -s "$f" "$dst" 2>/dev/null; then
+      # ★ 内容一致 → 字体文件一个字节都不动（保住 mtime/inode）；
+      #   meta 走合并式更新（只确保 5 字段，保留 outline_type/outline 等）
+      _builtin_meta_ensure "$id" "$vf"
+      if [ "$(cat "$LIB/$id.name" 2>/dev/null)" != "$nm" ]; then
+        printf '%s' "$nm" > "$LIB/$id.name" 2>/dev/null
+      fi
       ok=$((ok + 1)); continue
     fi
 
+    # （同 inode 的情况已被上面的"字节一致"分支覆盖 —— 同 inode 必然同内容）
     rm -f "$dst" 2>/dev/null
     ln "$f" "$dst" 2>/dev/null || cp -f "$f" "$dst" 2>/dev/null
     if [ ! -s "$dst" ]; then
@@ -134,9 +164,8 @@ builtin_import() {
     chmod 644 "$dst" 2>/dev/null
     chcon u:object_r:system_file:s0 "$dst" 2>/dev/null
     printf '%s' "$nm" > "$LIB/$id.name" 2>/dev/null
-    _bsz=$(wc -c < "$dst" 2>/dev/null | tr -d ' \t\r\n')
-    case "${_bsz:-}" in ''|*[!0-9]*) _bsz=0 ;; esac
-    printf 'scope=all\nlatin=1\ncjk=1\nvf=%s\nsize=%s\n' "$vf" "$_bsz" > "$LIB/$id.meta" 2>/dev/null
+    # ★ 2026-10-31：meta 改合并式更新（保留 outline_type/outline 等其它字段）
+    _builtin_meta_ensure "$id" "$vf"
     ok=$((ok + 1))
   done
   return 0

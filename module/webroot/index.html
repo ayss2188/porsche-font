@@ -127,9 +127,14 @@ body { min-height: 100%; }
   .icon-btn:active { background: var(--card-press); }
 
   .option.busy { cursor: progress; }
+  /* ★ 2026-11-01（作者要求，与主项目同版）：「修改中」遮罩 = 二级菜单同款毛玻璃 ——
+     半透明 + 背面模糊（跟弹层同一配方，明暗主题各自取 --glass-bg） */
   .option .overlay {
     position: absolute; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 8px;
-    background: var(--card); color: var(--pending-blue); font-size: 13px; font-weight: 600; border-radius: 16px;
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(20px) saturate(1.1);
+    backdrop-filter: blur(20px) saturate(1.1);
+    color: var(--pending-blue); font-size: 13px; font-weight: 600; border-radius: 16px;
   }
   /* 转圈：1.0.9 换掉"一个边框缺口在转"的老式写法。
      现在是"环形轨道 + 双弧 + 中心点呼吸"：看着更顺、不像一个符号在打转，
@@ -538,7 +543,8 @@ body { min-height: 100%; }
   .switch-row { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 8px; cursor: pointer; transition: transform .16s ease, background .22s ease, border-color .22s ease; }
   .switch-row:active { transform: scale(.98); background: var(--card-press); }
   .switch-row.loading { pointer-events: none; border-color: var(--pending-blue); }
-  .switch-row .overlay { position: absolute; top: 0; right: 0; bottom: 0; left: 0; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--card); color: var(--pending-blue); font-size: 13px; font-weight: 600; animation: popIn .25s ease both; }
+  /* ★ 2026-11-01：开关行的「修改中」遮罩同款毛玻璃（跟卡片遮罩统一） */
+  .switch-row .overlay { position: absolute; top: 0; right: 0; bottom: 0; left: 0; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--glass-bg); -webkit-backdrop-filter: blur(20px) saturate(1.1); backdrop-filter: blur(20px) saturate(1.1); color: var(--pending-blue); font-size: 13px; font-weight: 600; animation: popIn .25s ease both; }
   .switch-row .t { font-size: 14px; font-weight: 600; }
   .switch-row .d { font-size: 11px; color: var(--text-dim); margin-top: 3px; line-height: 1.5; }
   .sw { flex-shrink: 0; width: 44px; height: 26px; border-radius: 13px; background: var(--border); position: relative; transition: background .25s ease; }
@@ -1582,6 +1588,11 @@ try {
   <div class="banner warn" id="fpBanner">
   ⚠ 系统更新过（构建指纹已变），本模块的字体可能没有完全生效。请重新选一次字体并重启；若仍不对，把「替换范围」调小再试。
   </div>
+  <!-- ★ 2026-11-01（与主项目同版）：计划/设置比本次开机新 → 持久提示「重启后生效」，
+       横幅上带槽位计数（没重启就按当前生效算，重启才更新数字） -->
+  <div class="banner" id="planBanner">
+  🕐 计划/设置已更新：<b>重启手机后生效</b>。上方「实际生效」显示的还是上一次开机挂载的结果，不是没换上。
+  </div>
   <div class="banner warn" id="missedBanner">
     ⚠ 本次开机没有执行自带挂载。最常见的原因是 Root 管理器在开机时没有运行模块脚本（例如临时 root：重启后需要重新激活的那种），也可能是模块被停用或进了安全模式。可先重启一次；仍不行就在下方「替换范围（高级）」里改为「交给管理器挂载」再试。
   </div>
@@ -1760,7 +1771,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1028-0555</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1101-0610</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -2096,13 +2107,16 @@ const nextPaint = () => new Promise(r => setTimeout(r, 50));
 const baseName = p => p.split("/").pop();
 const stripExt = n => n.replace(/\.[^.]+$/, "");
 
-function showToast(msg, sticky) {
+function showToast(msg, sticky, ms) {
   if (rebooting && !msg.startsWith("正在重启")) return;   // 重启中不让后台进度提示抢提示条
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.classList.add("show");
   if (toastTimer) clearTimeout(toastTimer);
-  if (!sticky) toastTimer = setTimeout(() => t.classList.remove("show"), 2800);
+  // ★ 2026-11-01（作者反馈"还没来得及看就没了"，与主项目同版）：
+  //   结果提示给 3 秒（作者定稿：8 秒太长）→ 可传第三个参数自定义；
+  //   普通短提示维持 2.8 秒；sticky 仍常驻、由流程收尾时清掉。
+  if (!sticky) toastTimer = setTimeout(() => t.classList.remove("show"), ms || 2800);
 }
 
 function clearToast() {
@@ -2250,7 +2264,7 @@ async function refreshAll() {
       setValue("romLabel", "无法读取");
       return;
     }
-    fonts = listOut.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+    const parsed = listOut.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
       const p = l.split("|");
       const id = p.shift();
       const metaStr = p.pop();
@@ -2259,6 +2273,9 @@ async function refreshAll() {
       (metaStr || "").split(",").forEach(kv => { const i = kv.indexOf("="); if (i > 0) meta[kv.slice(0, i)] = kv.slice(i + 1); });
       return {id, name: p.join("|") || id, size, meta};
     });
+    // ★ 2026-11-01（作者反馈"开关时列表可能变空白"，与主项目同版）：
+    //   开关刚 reapply 完设备正忙，list 偶发返回空 —— 空结果不顶掉已有列表。
+    if (parsed.length || !fonts.length) fonts = parsed;
     applyStatus(st);
 
     // ② 后面的都是"锦上添花"，出错不要动状态那几行
@@ -2333,7 +2350,16 @@ function applyStatus(st) {
     pendingId = g("P").trim() || activeId;
     const rom = g("R").trim();
     const nSlots = g("N").trim();
-    setValue("slotLabel", nSlots && +nSlots > 0 ? nSlots + " 个" : "0（未替换）");
+    // ★ 2026-11-01（作者反馈"已替换槽位没跟着一起改"，与主项目同版）：
+    //   计划比本次开机新时按「当前」口径 —— 显示开机快照的替换数（BN），
+    //   重启后才更新成新计划的数字。
+    if (g("PD").trim() === "1") {
+      const _bnS = parseInt((g("BN") || "").trim(), 10) || 0;
+      const _cur = _bnS > 0 ? _bnS : (+nSlots || 0);
+      setValue("slotLabel", _cur + " 个（重启后变 " + nSlots + "）");
+    } else {
+      setValue("slotLabel", nSlots && +nSlots > 0 ? nSlots + " 个" : "0（未替换）");
+    }
     // ★ 槽位来源（定稿）：三行 —— 总数 / 机型清单里的 / 本机扫描补的
     //   「槽位总数」是这两项之和，也就是设备上的全部槽位（安装时扫出来的，不随开关变）；
     //   而上面那行「已替换槽位」是**这次计划替换**的数量（受「保留锁屏时钟」等开关影响）。
@@ -2374,6 +2400,29 @@ function applyStatus(st) {
     {
       const fpB = document.getElementById("fpBanner");
       if (fpB) fpB.classList.toggle("show", g("FP").trim() === "1");
+    }
+    // ★ 2026-11-01（与主项目同版）：计划/设置比本次开机新 → 持久提示「重启后生效」，
+    //   横幅带上槽位计数（没重启就按当前生效算，重启才更新数字）
+    //   ★ v24：「当前实际生效」改读开机快照 BN（apply 会当场重写 payload，VF 跟着变）
+    {
+      const pb = document.getElementById("planBanner");
+      const pdOn = g("PD").trim() === "1";
+      if (pb) {
+        pb.classList.toggle("show", pdOn);
+        if (pdOn) {
+          const pv = g("VF").split(",");
+          if (pv[0] !== "" && +pv[1] > 0) {
+            const bnN = parseInt((g("BN") || "").trim(), 10) || (+pv[0]);
+            // ★ 数字一样就不报数（与主项目同版）——"121 个重启后变 121 个"像废话
+            if (bnN !== +pv[1]) {
+              pb.innerHTML = "🕐 计划/设置已更新：<b>重启手机后生效</b>。当前实际生效 " + bnN +
+                " 个，重启后变 " + (+pv[1]) + " 个 —— 「实际生效」那行在重启前保持当前数字不变。";
+            } else {
+              pb.innerHTML = "🕐 计划/设置已更新：<b>重启手机后生效</b>。上方「实际生效」显示的还是上一次开机挂载的结果，不是没换上。";
+            }
+          }
+        }
+      }
     }
     setValue("romLabel", ROM_NAMES[rom] || rom || "未知");
     setValue("curVerLabel", g("V") || "-");
@@ -2439,7 +2488,17 @@ function applyStatus(st) {
       vl.classList.remove("warn", "ok");
       if (vf[0] !== "" && +vf[1] > 0) {
         const hitN = +vf[0], planN = +vf[1];
-        if (hitN === planN) {
+        // ★ 2026-11-01（作者要求，与主项目同版）：计划比本次开机新（拨了开关/
+        //   换了字体还没重启）时，数字口径固定为"左边 = 当前实际生效，
+        //   重启后才更新成新计划的数量"，避免 154/121 这种看着像算错的显示。
+        //   ★ v24：「已生效」改读开机快照 BN —— apply 会当场把 payload 换成
+        //   新计划，VF 的 hit 跟着变，两个数会"一起改"；快照在重启前纹丝不动。
+        if (g("PD").trim() === "1") {
+          const bnN = parseInt((g("BN") || "").trim(), 10) || hitN;
+          setValue("verifyLabel", "已生效 " + bnN + " 个 · 新计划 " + planN + " 个 · 重启后更新");
+          vl.classList.add("warn");
+          vl.removeAttribute("title");
+        } else if (hitN === planN) {
           setValue("verifyLabel", hitN + " / " + planN + " 个槽位");
           vl.classList.add("ok");
           vl.removeAttribute("title");
@@ -2653,7 +2712,10 @@ async function pvLoadFace(id) {
   ksuExec(`rm -f ${shq(MODDIR + "/webroot")}/.pvtmp-*.ttf 2>/dev/null; echo ok`).catch(() => {});
   const src = `${LIB}/${id}.ttf`;
   const tmp = `${MODDIR}/webroot/.pvtmp-${id}.ttf`;
-  await ksuExec(`cp -f ${shq(src)} ${shq(tmp)} 2>/dev/null; echo done`);
+  // ★ 2026-10-30（性能）：硬链接代替整份复制 —— $LIB 和 webroot 同在 /data 分区，
+  //   ln 是瞬时的；60MB 级内置字体的预览 / A-B 对比 / 海报不再每次拷几十 MB。
+  //   链接失败（跨设备等极端情况）自动回退 cp。之后 rm 掉的只是链接本身，源文件不动。
+  await ksuExec(`ln -f ${shq(src)} ${shq(tmp)} 2>/dev/null || cp -f ${shq(src)} ${shq(tmp)} 2>/dev/null; echo done`);
   let buf;
   try {
     const url = new URL(`.pvtmp-${id}.ttf`, location.href).href;
@@ -6108,8 +6170,13 @@ async function abCompare(targetId) {
 }
 
 // 应用入口：需要时先弹 A/B 对比
+// ★ 2026-10-31（性能）：A/B 对比**默认关闭** —— 它要在切换前把两份字体
+//   （可能各 40~60MB）完整加载进 WebView 才能显示，用户的感知就是
+//   "点应用要等好几秒才出窗，确认了还要等"。想要对比预览：
+//   高级设置 → 界面自定义 → 打开「切换前先弹 A/B 对比」。
 async function applyFont(id) {
   try {
+    if (String(UI.ab || "0") !== "1") return selectFont(id);
     const cur = (activeId && activeId !== "none") ? activeId : null;
     if (!cur || cur === id) return selectFont(id);
     const shown = await abCompare(id);
@@ -6363,6 +6430,21 @@ function setCardBusy(card, on) {
 }
 
 /* ---------- 切换 / 重命名 / 删除 ---------- */
+// ★ 2026-11-02：异步应用的结果轮询（与主项目同版）—— apply-bg 后台跑，
+//   JS 线程不被冻住；每 0.5 秒读一次状态文件，读到 OK:/ERROR: 即结束。
+async function pollApplyResult(timeoutMs) {
+  const sf = LIB + "/.reapply.state";
+  const T0 = Date.now();
+  await new Promise(r => setTimeout(r, 600));   // 先给后台一小会再开始问
+  while (Date.now() - T0 < (timeoutMs || 180000)) {
+    let st = "";
+    try { st = String(await ksuExec(`cat ${shq(sf)} 2>/dev/null`) || "").trim(); } catch (e) {}
+    if (st && st.indexOf("stage=running") !== 0) return st.split("\n")[0];
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return "ERROR:处理超时（后台可能还在跑，稍后看顶部状态）";
+}
+
 async function selectFont(id) {
   if (busy) return;
   const big = selIds(id).map(x => fonts.find(f => f.id === x)).filter(f => f && f.size >= HUGE_FONT);
@@ -6383,6 +6465,9 @@ async function selectFont(id) {
   await nextPaint();
   // ★ 2026-10-23：看门狗 —— apply 走的是同步 exec，卡住时界面会永远停在"修改中"
   let __applyDone = false;
+  // ★ 2026-11-03：结果提示攒到 finally 刷新结束后再弹（与主项目同版，
+  //   否则刷新期间线程冻结、定时器不走，提示显示时长 ≠ 设定值）
+  let _selMsg = "";
   const __applyWd = setTimeout(() => {
     if (__applyDone) return;
     try { busy = false; } catch (e) {}
@@ -6391,7 +6476,9 @@ async function selectFont(id) {
     try { refreshStatusOnly(); } catch (e) {}
   }, 180000);
   try {
-    const out = await ksuExec(`sh ${MODDIR}/fontctl.sh apply ${shq(id)}`);
+    // ★ 2026-11-02：改异步（与主项目同版）—— apply-bg 立即返回、后台真跑、这里轮询
+    await ksuExec(`sh ${MODDIR}/fontctl.sh apply-bg ${shq(id)}`);
+    const out = await pollApplyResult();
     // ★ 2026-10-18 修：返回值末尾可能带 `:kl=N`（do_apply 附带的诊断字段），
     //   这里以前没接受它 → 后端明明成功、界面却提示"切换失败"（真机实测）。
     // ★ 2026-10-23（ColorOS 真机）：后端返回 "OK:无字体（系统默认）:0:none:" ——
@@ -6400,20 +6487,28 @@ async function selectFont(id) {
     const m = out.match(/^OK:(.*?):(\d+):(\w+)(?::([^\n]*))?\s*$/m);
     if (m) {
       const slots = parseInt(m[2], 10) || 0;
+      // ★ 2026-10-31：后端尾部附带 t=X.XXs（应用耗时）和 kl=N —— 分开解析，
+      //   让用户切完立刻看到真实耗时（慢不慢用数据说话，不再靠感觉）
+      const _klM = (m[4] || "").match(/kl=(\d)/);
+      const _tM = (m[4] || "").match(/t=([0-9.]+)s/);
+      const klTag = _klM ? "，时钟开关=" + _klM[1] : "";
+      const tTag = _tM ? "，应用耗时 " + _tM[1] + " 秒" : "";
       if (id === "none" || slots === 0) {
-        showToast("已恢复系统默认（重启后生效）");
+        showToast("已恢复系统默认（重启后生效）" + tTag, false, 3000);
       } else {
-        showToast("已选择「" + labelOf(id) + "」：将替换 " + slots + " 个槽位（" +
-                  (SCOPE_TEXT[m[3]] || m[3]) + "），重启后生效");
+        _selMsg = "已选择「" + labelOf(id) + "」：将替换 " + slots + " 个槽位（" +
+                  (SCOPE_TEXT[m[3]] || m[3]) + "）" + klTag + tTag + "，重启后生效";
       }
+      // ★ 2026-11-02：切完也后台预热全部字体（与主项目同版）
+      try { ksuExec(`sh -c 'sh ${MODDIR}/fontctl.sh prewarm-all >/dev/null 2>&1 &'`); } catch (_) {}
     } else if (/^\s*OK:/m.test(out)) {
       // 后端说 OK，只是格式没按预期 —— 也当成功，别吓用户
-      showToast("已应用（重启后生效）");
+      _selMsg = "已应用（重启后生效）";
     } else {
-      showToast("切换失败：" + out.replace(/^ERROR:/, ""));
+      _selMsg = "切换失败：" + out.replace(/^ERROR:/, "");
     }
   } catch (e) {
-    showToast("切换失败：" + errText(e));
+    _selMsg = "切换失败：" + errText(e);
   } finally {
     __applyDone = true;
     try { clearTimeout(__applyWd); } catch (e) {}
@@ -6424,9 +6519,15 @@ async function selectFont(id) {
     //   撞上别的刷新在跑就直接返回（还不抛错），界面停在旧状态。
     //   顺序：先本地乐观更新 → 再直刷顶部 → 再全量 → 最后再兜一次。
     // 只改 pending（待重启生效）；active 保持『本次开机实际生效』不变
+    // ★ 2026-10-30（性能）：apply 的返回值已带槽位数/范围，顶部状态由 refreshAll(quick)
+    //   补齐即可；紧跟的那次完整 status 砍掉（挂载/验证状态不会因为"写计划"而变，
+    //   每次完整 status 都要重新加载一遍后端脚本）。1.2 秒后的那次保留 —— 它负责
+    //   把 VF/MO/verify 这些重字段刷准。
     try { pendingId = id; render(); } catch (e) {}
-    try { await refreshStatusOnly(); } catch (e) {}
     try { await refreshAll(); } catch (e) {}
+    // ★ 2026-11-03：结果提示最后弹（与主项目同版）—— 刷新期间线程被冻结，
+    //   定时器不走、提示超时挂着；现在刷新完了再弹，3 秒就是 3 秒。
+    if (_selMsg) showToast(_selMsg, false, 3000);
     setTimeout(() => { try { refreshStatusOnly(); } catch (e) {} }, 1200);
   }
 }
@@ -7088,6 +7189,9 @@ const ADV_TREE = [
       { id: "ui_title", cycle: "titleSize", name: "标题字号", desc: "点一下切小 / 中 / 大。", hint: "看着费劲就选大。" },
       { id: "sw_anim", type: "switch", key: "__anim", uiOnly: 1,
         name: "保留动画效果", desc: "关掉后所有过渡动画消失（老机器更顺）。", hint: "默认开。" },
+      { id: "sw_ab", type: "switch", key: "__ab", uiOnly: 1,
+        name: "切换前先弹 A/B 对比", desc: "开：应用前并排预览两份字体再确认（要先加载字体，慢好几秒）。",
+        hint: "默认关 = 点「应用」直接切换，最快。" },
       { id: "sw_hide_update", type: "switch", key: "__hideUpdate", uiOnly: 1,
         name: "隐藏「模块更新」整块", desc: "不想看到更新提示就打开。", hint: "还能在管理器里手动更新。" },
       { id: "sw_no_update_check", type: "switch", key: "__noUpdateCheck", uiOnly: 1,
@@ -7323,6 +7427,10 @@ const ADV_TREE = [
           desc: "清单是空的时候、或者明显不对的时候，重新算一遍。",
           hint: "算完看「一眼看概况」：准备换的数量不是 0 就说明好了，重启生效。",
           safe: 3, cmd: "replan" },
+        { id: "prewarm_all", name: "预生成切换计划 + 中文合集（秒切准备）",
+          desc: "把字体库里每份字体的切换计划和中文合集产物提前做好并永久保存（每字体几秒到几十秒）。",
+          hint: "做完之后切任何字体都是秒级。升级模块 / 改开关 / 导入新字体后点一次即可（平时会自动做）。",
+          safe: 2, cmd: "prewarm-all" },
       ]},
     ]
   },
@@ -7561,6 +7669,7 @@ const UI_DEF = {
   accent: "", theme: "", titleSize: "", radius: "", density: "", listStyle: "",
   anim: "1", hideUpdate: "0", hideGoogle: "0", hideFeedback: "0", hideDebug: "0",
   simple: "0", longPress: "1", dblclick: "1", noUpdateCheck: "0",
+  ab: "0",
   names: {}, bg: "", bgDim: "35", bgBlur: "6",
 };
 let UI = Object.assign({}, UI_DEF);
@@ -7905,6 +8014,17 @@ function uiApplyBackground() {
   img.style.filter = parts.join(" ");
   img.style.transform = blur > 0 ? "scale(1.06)" : "";
   body.classList.add("cfs-hasbg");
+  // ★ 2026-10-31：壁纸文件读不到（模块刚更新、还原还没跑到）→ 自动退回无壁纸状态。
+  //   不做这一步：半透明卡片设置还在而背景没了 → 二级界面卡片直接重叠（真机踩过）。
+  //   等 service.sh / customize.sh 把 $LIB/bg.jpg 还原回 webroot 后，重进页面即恢复。
+  img.onerror = () => {
+    if (String(UI.bg || "").indexOf("data:") === 0) return;   // dataURL 不经文件，不会有 404
+    try { UI.bg = ""; uiSave(); } catch (e) {}
+    try { uiApplyTextMode(); } catch (e) {}
+    try { body.classList.remove("cfs-hasbg"); } catch (e) {}
+    try { document.documentElement.style.removeProperty("--bg-img"); } catch (e) {}
+    try { img.remove(); } catch (e) {}
+  };
 }
 function advAccentHelp() {
   showToast("强调色 = 按钮/开关/进度条的颜色；在上面输入框填色号，或点下面「预设强调色」");
@@ -7940,6 +8060,14 @@ async function cfsCheckInstallId() {
 
 function uiSave() {
   try { localStorage.setItem(UI_KEY, JSON.stringify(UI)); } catch (e) {}
+  // ★ 2026-10-31：界面设置同步落盘 $LIB/ui.json（永久目录）——
+  //   更新模块 / 管理器清了 WebView 数据 / 换管理器，设置都不丢。
+  //   JSON 里含中文 → 先 encodeURIComponent 再 btoa，得到纯 ASCII 的 base64，
+  //   shell 参数里没有引号/特殊字符，单条 printf 就能写（体积才 1~2KB）。
+  try {
+    const _b = btoa(unescape(encodeURIComponent(JSON.stringify(UI))));
+    ksuExec("printf '%s' '" + _b + "' | base64 -d > " + LIB + "/ui.json 2>/dev/null").catch(() => {});
+  } catch (e) {}
   uiApply();
 }
 function uiSet(k, v) { UI[k] = v; uiSave(); }
@@ -8049,18 +8177,9 @@ async function uiPickBg() {
     } catch (e) { showToast("读不出这张图：" + errText(e)); return; }
     if (!b64) { showToast("读不出这张图（空数据）"); return; }
 
-    // 小图：直接存成 data URL，纯前端、立刻生效
-    if (f.size <= 1200 * 1024) {
-      UI.bg = dataUrl;
-      UI.bgT = Date.now();
-      uiSave();
-      try { advRender(); } catch (e) {}
-      try { refreshAll(); } catch (e) {}
-      showToast("背景已设置（" + Math.round(f.size / 1024) + " KB）");
-      return;
-    }
-
-    // 大图：分块写文件
+    // ★ 2026-10-31（永久目录）：壁纸统一写**文件双份**（webroot 给 WebView 取用、
+    //   $LIB/bg.jpg 是正本），UI.bg 永远指向 ./bg.jpg —— 不再存 dataURL（会被
+    //   "重装判定"清掉），模块更新后由 customize.sh / service.sh 从 $LIB 还原。
     const CH = 120000;
     let ok = true, sz = 0;
     try {
@@ -8071,13 +8190,15 @@ async function uiPickBg() {
       await ksuExec("base64 -d " + MODDIR + "/webroot/bg.b64 > " + MODDIR + "/webroot/bg.jpg 2>/dev/null; rm -f " + MODDIR + "/webroot/bg.b64; chmod 644 " + MODDIR + "/webroot/bg.jpg");
       sz = parseInt(String(await ksuExec("wc -c < " + MODDIR + "/webroot/bg.jpg")).trim(), 10) || 0;
       if (sz < 1000) ok = false;
+      // 正本落永久目录
+      if (ok) await ksuExec("cp -f " + MODDIR + "/webroot/bg.jpg " + LIB + "/bg.jpg 2>/dev/null; chmod 644 " + LIB + "/bg.jpg 2>/dev/null");
     } catch (e) { ok = false; }
-    if (!ok) { showToast("大图写不进去（" + sz + " 字节），换 1MB 以内的图"); return; }
+    if (!ok) { showToast("壁纸写不进去（" + sz + " 字节），换一张试试"); return; }
     UI.bg = "./bg.jpg";
     UI.bgT = Date.now();
     try { if (!UI.bgBlur || UI.bgBlur === "0") UI.bgBlur = "12"; if (!UI.bgDim || UI.bgDim === "35") UI.bgDim = "45"; if (!UI.cardAlpha || UI.cardAlpha === "100") UI.cardAlpha = "78"; } catch (e) {}
     uiSave();
-    showToast("背景已设置（" + Math.round(sz / 1024) + " KB）");
+    showToast("背景已设置（" + Math.round(sz / 1024) + " KB，更新模块不会丢）");
   };
   inp.click();
 }
@@ -8086,7 +8207,8 @@ async function uiPickBg() {
 async function uiClearBg() {
   try { setTimeout(() => { if (window.advRender) advRender(); }, 60); } catch (e) {}
   UI.bg = ""; uiSave();
-  try { await ksuExec("rm -f " + MODDIR + "/webroot/bg.jpg"); } catch (e) {}
+  // ★ 2026-10-31：正本（$LIB）与副本（webroot）一起删
+  try { await ksuExec("rm -f " + MODDIR + "/webroot/bg.jpg " + LIB + "/bg.jpg"); } catch (e) {}
   showToast("背景已清除");
 }
 
@@ -8358,7 +8480,7 @@ function advRender() {
   //   现在进页面时读一次，之后 all 用内存里的 settings。
   // 界面自定义的开关初态
   try {
-    const UIMAP = { "__anim": "anim", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
+    const UIMAP = { "__anim": "anim", "__ab": "ab", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
                     "__hideGoogle": "hideGoogle", "__hideFeedback": "hideFeedback",
                     "__simple": "simple", "__longPress": "longPress", "__dblclick": "dblclick" };
     Object.keys(UIMAP).forEach(k => {
@@ -8479,6 +8601,8 @@ function advApplyEntry() {
 }
 function advUnlock() {
   try { localStorage.setItem("cfs_adv_unlocked", "1"); } catch (e) {}
+  // ★ 2026-10-31：解锁标记同步落盘 $LIB（localStorage 丢了也能恢复，见 init）
+  ksuExec("echo unlocked > " + LIB + "/.adv_unlocked 2>/dev/null").catch(() => {});
   advApplyEntry();
 }
 /* ★ 2026-10-25 锁定前先确认，并提示怎么重新打开 */
@@ -8493,6 +8617,7 @@ async function advLockConfirm() {
 
 function advRelock() {
   try { localStorage.removeItem("cfs_adv_unlocked"); } catch (e) {}
+  ksuExec("rm -f " + LIB + "/.adv_unlocked 2>/dev/null").catch(() => {});
   advApplyEntry();
   try { advClose(); } catch (e) {}
   showToast("已锁定高级设置（主界面入口已隐藏）");
@@ -8554,7 +8679,7 @@ async function advTap() {
 async function toggleSetting(key) {
   if (busy) return;
   if (key.indexOf("__") === 0) {
-    const map = { "__anim": "anim", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
+    const map = { "__anim": "anim", "__ab": "ab", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
                   "__hideGoogle": "hideGoogle", "__hideFeedback": "hideFeedback",
                   "__simple": "simple", "__longPress": "longPress", "__dblclick": "dblclick" };
     const k2 = map[key];
@@ -8602,6 +8727,7 @@ async function toggleSetting(key) {
   }
   busy = true;
   let success = false;
+  let _resultMsg = "";   // ★ 2026-11-01：结果提示攒到最后弹（避免被顶掉，与主项目同版）
   try {
     // ★ 2026-10-17 修：这两步的后端返回必须**真的检查**。
     //   以前只要 ksuExec 不抛异常就算成功 —— 而后端出错时是返回 "ERROR:..." 文本，
@@ -8613,17 +8739,26 @@ async function toggleSetting(key) {
     }
     if (pendingId !== "none") {
       const out = await ksuExec(`sh ${MODDIR}/fontctl.sh reapply`);
-      const m = out.match(/^OK:(.*):(\d+):(\w+)(?::(kl=\d))?\s*$/m);
+      // ★ 2026-11-01 修（与主项目同款正则）：旧版要求第四段必须是 kl=\d，
+      //   后端带上 t= 耗时后匹配失败 → 一直误报"处理失败"。第四段放宽为任意。
+      const m = out.match(/^OK:(.*?):(\d+):(\w+)(?::([^\n]*))?\s*$/m);
       if (!m) {
         showToast("处理失败：" + String(out).replace(/^\s*ERROR:?/, "").trim());
         throw new Error("reapply failed");
       }
       // ★ 2026-10-17：把模块**实际读到的开关值**显示出来。
       //   用户反馈"切了开关没反应"时，这能直接分辨是"设置没写进去"还是"过滤没生效"。
-      const klTag = m[4] ? "（时钟开关=" + m[4].slice(3) + "）" : "";
-      showToast("已重新生成：" + m[2] + " 个槽位" + klTag + "，重启后生效");
+      const _klM = (m[4] || "").match(/kl=(\d)/);
+      const _tM = (m[4] || "").match(/t=([0-9.]+)s/);
+      const klTag = _klM ? "（时钟开关=" + _klM[1] + "）" : "";
+      const tTag = _tM ? " · 应用耗时 " + _tM[1] + " 秒" : "";
+      // ★ 2026-11-01：提示攒到最后弹（refresh 结束后不会被顶掉），6 秒
+      _resultMsg = "已重新生成：" + m[2] + " 个槽位" + klTag + tTag + "，重启后生效";
+      // ★ 2026-11-01（与主项目同版）：开关改了设置指纹 → 后台 prewarm-all 把
+      //   其他字体的计划按新钥匙提前算好，之后切任何字体都是命中。
+      try { ksuExec(`sh -c 'sh ${MODDIR}/fontctl.sh prewarm-all >/dev/null 2>&1 &'`); } catch (_) {}
     } else {
-      showToast("已修改");
+      _resultMsg = "已修改";
     }
     success = true;
     // ★ 2026-10-17 修（用户反复反馈"切开关交替成功"的真根因）：
@@ -8646,7 +8781,10 @@ async function toggleSetting(key) {
   //   正好撞上别的刷新在跑时，这次调用直接返回 → 顶部数字不更新。
   //   所以先直接刷新顶部那几行（不受这个闸门限制），再补一次完整刷新。
   try { await refreshStatusOnly(); } catch (e) {}
-  try { await refreshAll(); } catch (e) {}
+  // ★ 2026-10-30（性能）：切开关不会改变字体列表，refreshAll（又一次 quick）省掉；
+  //   顶部槽位统计 refreshStatusOnly 已经覆盖，1.2 秒后再补一次重的（VF/MO/verify）。
+  // ★ 2026-11-01：结果提示**最后弹**（refresh 都结束了，没人再顶它），6 秒读得完
+  if (_resultMsg) showToast(_resultMsg, false, 3000);   // 统一 3 秒（作者定稿）
   setTimeout(() => { try { refreshStatusOnly(); } catch (e) {} }, 1200);
 }
 /* ---------- 诊断报告 ---------- */
@@ -10804,6 +10942,27 @@ async function resumeRunningUpdate() {
   setCacheLoad();   // 先用上次记录渲染（同步、秒出）
   loadSettings();  // 再从模块读真值覆盖
   try { uiApply(); } catch (e) {}
+  // ★ 2026-10-31（永久目录）：界面设置与高级解锁标记以 $LIB 里的文件为正本——
+  //   localStorage 在更新模块 / 清 WebView 数据后会丢，$LIB 里的不会。
+  //   ui.json 恢复后再调一次 uiApply，壁纸（bg=./bg.jpg）也会跟着回来。
+  try {
+    const _uiRaw = String(await ksuExec(`cat ${LIB}/ui.json 2>/dev/null`) || "").trim();
+    if (_uiRaw) {
+      const _o = JSON.parse(_uiRaw);
+      if (_o && typeof _o === "object") {
+        Object.assign(UI, _o);
+        try { uiApply(); } catch (e) {}
+        try { advRender(); } catch (e) {}
+      }
+    }
+  } catch (e) {}
+  try {
+    const _adv = String(await ksuExec(`cat ${LIB}/.adv_unlocked 2>/dev/null`) || "").trim();
+    if (_adv) {
+      try { localStorage.setItem("cfs_adv_unlocked", "1"); } catch (e) {}
+      try { advApplyEntry(); } catch (e) {}
+    }
+  } catch (e) {}
   // ★ 2026-10-17 提速：refreshGoogle 原来跟首屏的 list/status 一起发。
   //   而 google_font.sh 在缓存失效时会跑 `dumpsys package com.google.android.gms`，
   //   在 HyperOS / Android 17 上可能要跑几分钟（代码注释里写着实测结论）。

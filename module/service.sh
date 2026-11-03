@@ -9,6 +9,13 @@
 
 MODDIR=${0%/*}
 
+# ★ 2026-10-31：壁纸正本在 $LIB/bg.jpg（永久目录），模块更新会换掉 webroot ——
+#   开机把副本补还原回去（跟 customize.sh 的还原互为兜底，幂等）。
+if [ ! -s "$MODDIR/webroot/bg.jpg" ] && [ -s "/data/adb/custom_font_lib/bg.jpg" ]; then
+  cp -f "/data/adb/custom_font_lib/bg.jpg" "$MODDIR/webroot/bg.jpg" 2>/dev/null
+  chmod 644 "$MODDIR/webroot/bg.jpg" 2>/dev/null
+fi
+
 # ---------------------------------------------------------------------------
 # 自愈：扫描缓存被清过（或安装时 rescan 失败）→ 补建一次槽位清单
 #   只在这个小文件缺失时才动手，正常开机零开销。
@@ -23,16 +30,18 @@ fi
 #   万一没写成（老版本装的字体、档案被清过），在这里补，比等界面探测早得多，
 #   界面打开时就是现成的。只检查、只补缺的，正常开机零开销。
 if [ -f "$MODDIR/metaprobe.sh" ]; then
+  # ★ 2026-10-31（性能）：原来的检查是"每个字体 grep 一次"（20 个字体 = 20 个进程）。
+  #   现在两步批量做完，判据一字不改：
+  #     ① 纯 shell 检查每个 f*.ttf 都有 .meta（缺档 = 要补）
+  #     ② 一次 grep -L 扫全部 meta，列出"没有 outline_type= 的"（有输出 = 要补）
   _miss=0
   for _f in "$_LIB"/f*.ttf; do
     [ -e "$_f" ] || continue
-    _i=${_f##*/}; _i=${_i%.ttf}
-    if [ -f "$_LIB/$_i.meta" ]; then
-      grep -q '^outline_type=' "$_LIB/$_i.meta" 2>/dev/null || { _miss=1; break; }
-    else
-      _miss=1; break
-    fi
+    [ -f "${_f%.ttf}.meta" ] || { _miss=1; break; }
   done
+  if [ "$_miss" = 0 ]; then
+    [ -n "$(grep -L '^outline_type=' "$_LIB"/f*.meta 2>/dev/null)" ] && _miss=1
+  fi
   [ "$_miss" = 1 ] && LIB="$_LIB" sh "$MODDIR/metaprobe.sh" >/dev/null 2>&1
 fi
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
@@ -50,6 +59,15 @@ shutting_down && exit 0
 
 rm -f "$MODDIR/mount_missed"
 [ "$(getprop sys.boot_completed)" = "1" ] && rm -f "$MODDIR/.booting"
+# ★ 2026-11-01：**开机标记**（内容 = 本次 boot_id，mtime = 开机完成时刻）——
+#   quick/status 用它和 slots.map 的 mtime 比对，判定"计划是否比本次开机新"：
+#   新 = 用户改了开关/换了字体但还没重启 → 界面挂持久横幅「重启后生效」；
+#   重启后本文件被重写（mtime 更新）→ 横幅自动消失，无需手动关。
+printf '%s\n' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" > "$LIB/.boot.mark" 2>/dev/null
+# ★ 2026-11-01（作者要求，与主项目同版）：**开机生效快照** ——
+#   这次开机真正挂载的计划存一份；之后改开关/换字体只重写 slots.map 不动快照，
+#   界面的「当前实际生效」（BN=）在重启前保持开机数字，不会跟着新计划一起变。
+cp -f "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null
 # 开机真的完成了 -> 把"连续失败"计数清零：说明这个字体在这台机器上是能用的。
 # （计数只在 post-fs-data 的救援分支里加，两次就会写 disable 停用模块，宁可保守。）
 [ "$(getprop sys.boot_completed)" = "1" ] && rm -f "$LIB/rescue_count" 2>/dev/null
@@ -237,6 +255,21 @@ shutting_down && exit 0
 sh "$MODDIR/fontctl.sh" sync
 shutting_down && exit 0
 sh "$MODDIR/fontctl.sh" relink >/dev/null 2>&1
+
+# ---------------------------------------------------------------------------
+# ★ 2026-10-31：后台**预热全部字体的计划缓存**（prewarm-all）
+#   解决"字体是以前导入的，第一次切换永远未命中"：开机 30 秒后把字体库里每份
+#   字体的最终计划都提前算好存进 $LIB/.plancache，之后**第一次**切换就是命中。
+#   完全不和开机抢资源（开机完成 + 延迟 30 秒 + 降优先级）；失败无感，下次开机再试。
+# ---------------------------------------------------------------------------
+if [ -f "$MODDIR/fontctl.sh" ]; then
+  (
+    sleep 30
+    renice 19 $$ >/dev/null 2>&1 || true
+    [ -x /system/bin/ionice ] && /system/bin/ionice -c3 $$ >/dev/null 2>&1 || true
+    sh "$MODDIR/fontctl.sh" prewarm-all
+  ) >/dev/null 2>&1 &
+fi
 MISSED=0
 [ -f "$MODDIR/mount_missed" ] && MISSED=1
 beat service "finish active=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font") missed=$MISSED"

@@ -19,6 +19,16 @@
 
 [clock]
 AndroidClock.ttf
+# ★ 2026-11-02（红魔 NX809J 用户报告）：红魔/努比亚的锁屏+桌面时钟数字用的是
+#   RedMagicDigit / ZDigit（ZTE 系），原来没分类 → 落进 [main] 被一起换掉。
+#   放进 [clock] 后，「保留锁屏时钟字体」开着就会保留它们（关着照常替换）。
+RedMagicDigit.ttf
+RedMagicDigit-Regular.ttf
+ZDigit-Bold.ttf
+ZDigit-Light.ttf
+ZDigit-Medium.ttf
+ZDigit-Regular.ttf
+ZDigit-Thin.ttf
 
 [main]
 DroidSans-Bold.ttf

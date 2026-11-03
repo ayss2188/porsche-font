@@ -453,8 +453,15 @@ ttc_enabled() {
   esac
   # 直接调用（不用 $(...) 包）：这样 ttc_cn_pairs 的缓存留在当前 shell 里，
   # 同一条命令里后面再问（比如逐个合集判序号）就不会重复扫字体配置了。
-  ttc_cn_pairs >/dev/null 2>&1
-  [ -n "$TTC_PAIRS_CACHE" ]
+  if command -v ttc_cn_pairs >/dev/null 2>&1; then
+    ttc_cn_pairs >/dev/null 2>&1
+    [ -n "$TTC_PAIRS_CACHE" ]
+  else
+    # ★ 2026-10-31：slots.sh 未加载（计划缓存命中路径）时的近似判定——
+    #   安装时算好的 ttc.list 非空 = 这台机器有「被中文引用的合集」，
+    #   与 ttc_cn_pairs 同源同结论；只为日志/界面显示，不影响计划本身。
+    [ -s "$LIB/scanned/ttc.list" ]
+  fi
 }
 # 生效值（1/0），给界面和设置回显用
 ttc_effective() { ttc_enabled && echo 1 || echo 0; }

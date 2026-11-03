@@ -39,18 +39,36 @@ STORAGE=${STORAGE:-/data/media/0}
 #   后果不是"少个功能"：fontctl.sh 是界面的唯一入口，它当场退出 = 卡片空白、切不了字体、
 #   诊断打不开、所有开关失效，而且用户拿不到任何线索。
 #   （2026-10-11 姊妹项目同步 v1.0.5 时抓到的，原来是 `. ... 2>/dev/null`）
-# ★ 2026-10-25 提速：settings 系列只需要 common.sh，不必解析 slots.sh / mount.sh
-#   （开关切换会调用它，之前每次都要把十几万字符的脚本读一遍）
-_need_heavy=1
+# ★★ 2026-10-31（性能·第二轮）：**按命令分级加载**
+#   一次 ksuExec 的固定开销 = 解析这些脚本；slots.sh 约 11 万字符、mount.sh 约 3 万。
+#   之前除 settings 外所有命令都要把三份全解析 —— 现在按实际需要加载：
+#     · 只需 common.sh：quick / list / index / ls / settings / group / import /
+#       upload-* / delete / rename / setmeta* / conflicts / ack* / prop / sync /
+#       relink / panic / diag（diag.sh 子进程自己加载）
+#     · common + mount：status / verify（payload_verify 在 mount.sh）
+#     · common + slots：plan / rescan；report 两个都要
+#     · apply / reapply：common + mount，**slots 懒加载** —— 计划缓存命中时整条
+#       切换路径都不解析 slots.sh（见 _ensure_slots），这是"秒切"的一部分
+#   ⚠ 给函数搬家时注意：某条命令用到的函数，其所在文件必须在对应的加载名单里
+#     （2026-10-31 status 分支已改为直读 slots.meta，不再依赖 slots.sh 的函数；
+#       apply 的 slots.sh 走 _ensure_slots 懒加载）。
+_LOAD_SLOTS=""; _LOAD_MOUNT=""
 case "${1:-}" in
-  settings) _need_heavy=0 ;;
+  plan|rescan)            _LOAD_SLOTS=1 ;;
+  report)                 _LOAD_SLOTS=1; _LOAD_MOUNT=1 ;;
+  status|verify|apply|reapply) _LOAD_MOUNT=1 ;;
 esac
-for _mf in common.sh slots.sh mount.sh; do
-  [ "$_need_heavy" = 0 ] && [ "$_mf" != "common.sh" ] && continue
-  [ -f "$MODDIR/$_mf" ] || { echo "ERROR:模块文件缺失（$_mf）—— 请重新安装模块"; exit 3; }
-  . "$MODDIR/$_mf"
-done
-unset _mf
+[ -f "$MODDIR/common.sh" ] || { echo "ERROR:模块文件缺失（common.sh）—— 请重新安装模块"; exit 3; }
+. "$MODDIR/common.sh"
+if [ -n "$_LOAD_SLOTS" ]; then
+  [ -f "$MODDIR/slots.sh" ] || { echo "ERROR:模块文件缺失（slots.sh）—— 请重新安装模块"; exit 3; }
+  . "$MODDIR/slots.sh"
+fi
+if [ -n "$_LOAD_MOUNT" ]; then
+  [ -f "$MODDIR/mount.sh" ] || { echo "ERROR:模块文件缺失（mount.sh）—— 请重新安装模块"; exit 3; }
+  . "$MODDIR/mount.sh"
+fi
+unset _mf _LOAD_SLOTS _LOAD_MOUNT
 # ttcwrap.sh（.ttc 合集生成器）是**可选**的：老包/不完整包里可能没有。
 # 缺了只是"合集替换"这条功能不可用，绝不能让整个 fontctl 退出 ——
 # apply 里会为这种槽位记一笔 via=no-generator（见下面的 .ttc 分支）。
@@ -168,7 +186,8 @@ valid_font() {
   local f="$1" m sz b num tot bytes v c tag off ln
   local has_cmap=0 has_head=0 has_hhea=0 has_hmtx=0 has_maxp=0 has_glyf=0 has_cff=0
   [ -f "$f" ] || return 1
-  sz=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+  # ★ 2026-10-31：stat 只读元数据（原来 wc -c 把整个字体读一遍只为量大小）
+  sz=$(stat -c %s "$f" 2>/dev/null | tr -d ' ')
   case "$sz" in ''|*[!0-9]*) return 1 ;; esac
   [ "$sz" -ge 512 ] 2>/dev/null || return 1
   m=$(head -c 4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')
@@ -302,7 +321,7 @@ has_outline() {
   done
   # 把结论补记进 .meta（只写一次，之后都走上面的快路）
   if [ -s "$LIB/$id.meta" ]; then
-    _hosz=$(wc -c < "$f" 2>/dev/null | tr -d ' \t\r')
+    _hosz=$(stat -c %s "$f" 2>/dev/null | tr -d ' \t\r')
     _hotmp="$LIB/$id.meta.tmp.$$"
     { grep -v '^outline=\|^outline_sz=' "$LIB/$id.meta" 2>/dev/null
       echo "outline=$_HO_HIT"
@@ -411,7 +430,11 @@ store_font() {
   #   这样以后每次切换直接读记录，不用再读字体文件（切换更快）。
   #   在 store_font 里做最合适：valid_font 刚刚已经完整验过一遍，这里只是把结论落盘。
   _sf_sz=$(stat -c '%s' "$dst" 2>/dev/null)
-  if valid_font "$dst"; then _sf_ho=1; else _sf_ho=0; fi
+  # ★ 2026-10-31（性能）：不再对 dst 再跑一遍 valid_font ——
+  #   函数开头已经验过 src（不通过早返回了），而 dst 是刚复制/改名出来的同一份
+  #   （cp 模式在上面已核对过字节数一致）。结论必然相同，直接复用：
+  #   导入省一整遍字体表校验。
+  _sf_ho=1
   if [ -s "$LIB/$id.meta" ]; then
     _sf_tmp="$LIB/$id.meta.tmp.$$"
     { grep -v '^outline=\|^outline_sz=' "$LIB/$id.meta" 2>/dev/null
@@ -733,12 +756,96 @@ remove_manager_files() {
   done < "$APPLIED"
 }
 
+# ---------------------------------------------------------------------------
+# ★ 2026-10-31（manager 专用·单点翻转）：**符号链接 payload + .active 间接层**
+#   目标：manager 挂载下切换字体从「154 次硬链接」降到「1~3 次翻转」。
+#   结构：
+#     模块目录槽位文件 = 符号链接 → $LIB/.active/<n>（稳定名，n = 计划内
+#                        该源首次出现的序号，跨字体稳定）
+#     $LIB/.active/<n> = 指向当前字体的硬链接
+#   切字体：对每个 n，若 .active/<n> 的 inode ≠ 新计划的 src → ln -f 翻转
+#   （单字体计划 = 1 次翻转）。payload 符号链接**从不重建**（布局签名一致时零操作）。
+#   风险与回退：依赖管理器挂载跟随符号链接（bind mount 会解析路径）；
+#   若重启后字体没变，高级设置 → 挂载方式 → 关闭「符号链接 payload」再应用一次即回旧行为。
+# ---------------------------------------------------------------------------
+_symlink_on() {
+  # ★ 2026-10-31（真机结论）：默认**关** —— 符号链接 payload 在用户的
+  #   Hybrid Mount 链路上卡开机 2 屏（挂载器早期暂存不跟随符号链接，
+  #   悬空链接 → 框架读字体失败）。代码保留作实验开关，默认走 v18 硬链接。
+  [ "$(cfg_get symlink_payload 0 2>/dev/null)" = 1 ]
+}
+
+_mgr_symlink_apply() {   # $1=map 文件（id rel src）→ 0=成功
+  local _mapf="$1" _cls _newsig _sig
+  [ -s "$_mapf" ] || return 0
+  mkdir -p "$LIB/.active" 2>/dev/null
+  _cls="${TMPDIR:-/data/local/tmp}/.pw.cls.$$"
+  # class 表：src 在 map 顺序里首次出现 → 编号；并生成 payload 布局签名
+  awk '{ if (!($3 in S)) { S[$3] = ++N } print $1 "|" $2 "|" $3 "|" S[$3] }' "$_mapf" \
+    > "$_cls" 2>/dev/null || { rm -f "$_cls"; return 1; }
+  _newsig=$(awk -F'|' '{ print $2 "|" $4 }' "$_cls" 2>/dev/null | md5sum 2>/dev/null | awk '{ print $1 }')
+  _sig=$(cat "$MODDIR/.payload_links" 2>/dev/null)
+  # ② 翻转间接文件：每个 class 的 .active/<n> → 该 class 的 src（内容变了才动，1~3 次）
+  awk -F'|' '{ print $4, $3 }' "$_cls" 2>/dev/null | sort -u -k1,1 | while read -r _n _src; do
+    [ -n "$_n" ] && [ -n "$_src" ] || continue
+    if [ "$(stat -c %i "$LIB/.active/$_n" 2>/dev/null)" != "$(stat -c %i "$_src" 2>/dev/null)" ]; then
+      ln -f "$_src" "$LIB/.active/$_n" 2>/dev/null || cp -f "$_src" "$LIB/.active/$_n" 2>/dev/null
+    fi
+  done
+  # ③ payload 符号链接：布局签名一致 → 全部已就位（零操作）
+  if [ "$_sig" = "$_newsig" ] && [ -s "$MODDIR/.payload_links" ]; then
+    rm -f "$_cls"
+    return 0
+  fi
+  # 布局变了 / 首次 → 逐槽位建符号链接（每个布局只发生一次）
+  while IFS='|' read -r _id _rel _src _n; do
+    [ -n "${_rel:-}" ] || continue
+    case "$_rel" in data/*) continue ;; esac
+    _dest="$MODDIR/$(mgr_path "$_rel")"
+    _want="$LIB/.active/$_n"
+    mkdir -p "${_dest%/*}" 2>/dev/null
+    [ "$(readlink "$_dest" 2>/dev/null)" = "$_want" ] && continue
+    if ! ln -sfn "$_want" "$_dest" 2>/dev/null; then
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 符号链接失败 $_dest -> $_want" \
+        >> "$LIB/ttc.log" 2>/dev/null
+      rm -f "$_cls"
+      return 1
+    fi
+  done < "$_cls"
+  printf '%s' "$_newsig" > "$MODDIR/.payload_links" 2>/dev/null
+  rm -f "$_cls"
+  return 0
+}
+
 # 提交：用已生成好的 stage 替换旧的字体文件 / 槽位记录
+# ---------------------------------------------------------------------------
+# ★ 2026-11-01（第二轮提速）：批量并行物化硬链接
+#   为什么：每槽位一次 ln = 154 个串行 fork ≈ 5 秒（fork 本身 25~40ms）。
+#   _ACC_LN 里每行是一条 `ln -f '源' '目标' || echo 目标 >> 失败记录`，
+#   每 10 条插一个 wait 控制同时存活的进程数（154 个全并行是 fork 风暴），
+#   整个批次用一个 `sh 脚本` 跑完 —— 154 个槽位从 ~5 秒降到 ~1 秒。
+#   调用前：调用方已 `: > 失败记录文件`，并把文件路径烤进每行命令里。
+#   结果：_LN_FAILN = 失败条数（调用方据此 fail=1 并记日志）。
+# ---------------------------------------------------------------------------
+_ln_batch_run() {   # _ln_batch_run <失败记录文件>
+  _LN_FAILN=0
+  [ -n "${_ACC_LN:-}" ] || return 0
+  printf '%s' "${_ACC_LN}wait
+" > "$LIB/.lnbatch.$$" 2>/dev/null
+  sh "$LIB/.lnbatch.$$" 2>/dev/null
+  _LN_FAILN=$(wc -l 2>/dev/null < "$1" | tr -d ' ')
+  case "${_LN_FAILN:-}" in ''|*[!0-9]*) _LN_FAILN=0 ;; esac
+  rm -f "$LIB/.lnbatch.$$" 2>/dev/null
+  return 0
+}
+
 commit_payload() {
   local stage="$1" mode="$2" old_mode f
   old_mode=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")
   # 管理器模式的旧文件，以及旧版遗留的直接放在模块根目录的旧链接
-  [ "$old_mode" = self ] || remove_manager_files
+  # ★ 2026-10-31：MANAGER_INPLACE=1 = 物化已直接写进模块目录（且已按差集清理过
+  #   旧副本）→ 跳过 remove_manager_files，否则会把刚物化的文件删掉
+  [ "$old_mode" = self ] || [ "${MANAGER_INPLACE:-0}" = 1 ] || remove_manager_files
   rm -rf "$MODDIR/payload" 2>/dev/null
 
   if [ "$mode" = manager ]; then
@@ -833,7 +940,8 @@ _ttc_hex() {   # _ttc_hex <file> <offset> → 8 位十六进制（比十进制�
 ttc_verify() {   # ttc_verify <file> <expected_faces>
   local f="$1" want="$2" magic cnt sz i off ver bad=0
   [ -s "$f" ] || return 1
-  sz=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+  # ★ 2026-10-31：stat 只读元数据（原来 wc -c 把整个合集从头到尾读一遍）
+  sz=$(stat -c %s "$f" 2>/dev/null)
   [ -n "$sz" ] || return 1
   magic=$(_ttc_hex "$f" 0)
   # "ttcf" = 0x74746366
@@ -861,10 +969,170 @@ ttc_verify() {   # ttc_verify <file> <expected_faces>
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# ★ 2026-10-30（性能）：**计划缓存** —— 同一字体 + 同一组开关的切换直接读上次的计划
+#
+#   背景：刷入时已经把"槽位清单"预生成好（scanned/slots.*.list），但每次 apply
+#   仍要现场做 scope 过滤 + 逐行过滤 + 写 stage.map（真机 150~400 行）。
+#   而绝大多数用户的实际情况是：字体不变、开关不变，每次结果都一样。
+#   把"最终计划"按 (字体 × 设置指纹 × 清单指纹) 缓存下来，命中就直接用 —— 切换才能秒级。
+#
+#   失效是**全自动**的（key 里含全部指纹，任何一项变了就等于换了一把钥匙）：
+#     · settings.conf 内容（cksum）        → 改任何开关都换 key
+#     · slots.list / slots.kl1/th1 清单    → 重扫 / 升级后换 key
+#     · $LIB/*.meta 全体（含 sel 自己）    → setmeta / 删除字体 / 重新探测后换 key
+#     · slots.sh 的 mtime                  → 升级模块（扫描逻辑变了）换 key
+#     · $CFS_NO_TTC                        → 开机自愈的"轻量 apply"单独一把钥匙，
+#                                            不会污染正常 apply 的缓存
+#     · 挂载模式                           → manager 模式要实体文件，直接不参与缓存
+#
+#   安全底线：命中后逐行核对计划引用的每个源文件还在（test -f 是内建，零进程）；
+#   .ttc 产物被 prune 清掉过、或文件被外部动过 → 任一缺失就回退完整生成路径。
+# ---------------------------------------------------------------------------
+# ★ 2026-10-31：apply 的 slots.sh 懒加载 —— 计划缓存命中时用不到它，别提前解析
+#   （11 万字符的解析开销，真机上每次都要花掉零点几秒）
+#   ttcwrap.sh（.ttc 合集生成器，可选）也在这里一起懒加载：
+#   只有"缓存未命中且计划里有 .ttc 槽位"时才真正用到它；
+#   包不完整缺它时 apply 会按 via=no-generator 跳过合集槽位（原有行为，不变）。
+_ensure_slots() {
+  command -v slot_plan >/dev/null 2>&1 && return 0
+  [ -f "$MODDIR/slots.sh" ] || { echo "ERROR:模块文件缺失（slots.sh）—— 请重新安装模块"; exit 3; }
+  . "$MODDIR/slots.sh"
+  [ -f "$MODDIR/ttcwrap.sh" ] && . "$MODDIR/ttcwrap.sh"
+  return 0
+}
+
+plan_cache_key() {   # $1=sel（调用方须已算好 $EFF_SCOPE）
+  # ★ 2026-10-31 重写：**不再依赖 cksum** —— 部分系统的 toybox/toolbox 没有它，
+  #   之前那种情况下 key 永远算不出来 → 缓存**静默永不命中**（真机"切 A 再切 A 还是慢"
+  #   的头号嫌疑）。现在全部用 stat（哪里都有）+ 纯 shell 求和，key 是一行短文本。
+  # ① meta 指纹：**只算「影响计划」的字段**（scope/latin/cjk/rate_cjk/hant/group）——
+  #    计划依赖的就是这几项；族名/upem/子族名/其它覆盖率是展示性数据，
+  #    UI 的 backfillFam/探测每个会话都会补写 → 旧版整份 meta 做指纹
+  #    → 每个会话钥匙必变（真机 ttc.log 实锤：28bf4571 → 700e1cb5）。
+  #    组字重时成员的 wght/vf 也参与判定 → 一并算入。
+  _pc_mf=$(sed -n -e 's/^scope=//p' -e 's/^latin=//p' -e 's/^cjk=//p' \
+                -e 's/^rate_cjk=//p' -e 's/^hant=//p' -e 's/^group=//p' \
+                "$LIB/$1.meta" 2>/dev/null | md5sum 2>/dev/null | awk '{ printf "%s", substr($1, 1, 8) }')
+  _pc_grp=$(sed -n 's/^group=//p' "$LIB/$1.meta" 2>/dev/null | tail -n1 | tr -d '\r')
+  if [ -n "$_pc_grp" ]; then
+    for _pmf in "$LIB"/*.meta; do
+      [ -f "$_pmf" ] || continue
+      grep -q "^group=$_pc_grp" "$_pmf" 2>/dev/null || continue
+      _pc_mf="$_pc_mf$(sed -n -e 's/^wght=//p' -e 's/^vf=//p' "$_pmf" 2>/dev/null | md5sum 2>/dev/null | awk '{ printf "%s", substr($1, 1, 8) }')"
+    done
+  fi
+  case "${_pc_mf:-}" in
+    '') _pc_mf="nometa" ;;   # meta 不存在 / 无 md5sum → 常量（与老字体行为一致）
+  esac
+  # ② 设置指纹：**按「影响计划的开关值」算，不按文件内容算** ——
+  #    旧版两版都在这翻车：mtime 版（每拨一次开关重写文件 → 钥匙必变）
+  #    和内容 md5 版 —— cfg_set 重写文件会把键**挪到文件末尾**，
+  #    拨开→关→开之后"值全一样但文件内容回不去" → 所有字体的钥匙永久换锁
+  #    （真机实锤：开关 A→B→A 一次之后，切字体 3 秒 → 8 秒）。
+  #    现在只取计划真正依赖的那几个开关的**值**，格式/顺序怎么变都无所谓；
+  #    这些键全走 cfg_get 的内存缓存（本进程首次读盘一次，之后零进程）。
+  _pc_ssv="$(cfg_get keep_lang 0),$(cfg_get keep_special 0),$(cfg_get keep_lockscreen 0),$(cfg_get keep_samsung 0),$(cfg_get skip_product 0),$(cfg_get skip_vf 0),$(cfg_get theme_fonts 0),$(cfg_get ttc_replace 0),$(cfg_get ttc_no_mix 0),$(cfg_get ttc_all_faces 0),$(cfg_get main_only 0)"
+  _pc_ss=$(printf '%s' "$_pc_ssv" | md5sum 2>/dev/null | awk '{ printf "%s", substr($1, 1, 8) }')
+  case "${_pc_ss:-}" in '') _pc_ss="nosettings" ;; esac
+  # ③ 槽位清单（**内容哈希进 key**）+ 脚本版本。
+  #    ★ 2026-10-31：slots.sh 只取**大小**不取 mtime —— 模块目录每次刷入都是新的，
+  #    mtime 必变，会把缓存钥匙搅乱；大小在同版本内是稳定的，脚本真改了大小才会变。
+  #    ★ 清单用 **md5 内容哈希** 而不是 mtime —— 刷入/重扫会"删了重建"这些文件，
+  #    mtime 必变但内容不变；哈希只认内容：内容一样 = 钥匙一样 = 缓存跨刷入命中。
+  _pc_sl=$(stat -c '%s' "$MODDIR/slots.sh" 2>/dev/null)
+  _pc_sl2=$(md5sum "$LIB/scanned/slots.list" "$LIB/scanned/slots.kl1.list" \
+                 "$LIB/scanned/slots.th1.list" "$LIB/scanned/slots.kl1th1.list" 2>/dev/null \
+            | awk '{ printf "%s", substr($1, 1, 8) }')
+  case "${_pc_sl2:-}" in
+    '') # md5sum 不可用（极老系统）→ 退回 mtime（老行为）
+      _pc_sl2=$(stat -c '%Y' "$LIB/scanned/slots.list" \
+                    "$LIB/scanned/slots.kl1.list" "$LIB/scanned/slots.th1.list" \
+                    "$LIB/scanned/slots.kl1th1.list" 2>/dev/null | tr '\n' '+') ;;
+  esac
+  _pc_sl="${_pc_sl%+}"
+  # ④ 拼成 key（sel/scope/轻量apply标志/挂载模式 都是语义维度，直接进 key）
+  printf 'p%s.%s.%s.%s.%s.%s.%s.%s' \
+    "$1" "${EFF_SCOPE:-}" "${CFS_NO_TTC:-0}" "$(mount_mode 2>/dev/null)" \
+    "${_pc_ss// /-}" "$_pc_sl" "${_pc_sl2%+}" "$_pc_mf"
+}
+
+plan_cache_lookup() {   # $1=sel $2=stage.map $3=stage.list → 命中置 PC_* 并 return 0
+  PC_SCOPE=""; PC_COUNT=""; PC_KLLAST=""; PC_HIT=0
+  # ★ 2026-10-31：manager 挂载也参与缓存 —— 计划本身与挂载方式无关；
+  #   manager 命中后只做轻量物化（硬链接副本），重算计划/合成合集全省掉。
+  case "$(mount_mode 2>/dev/null)" in self|manager) ;; *) return 1 ;; esac
+  local _d _k _map _hdr _miss=0 _pid _rel _src
+  _d="$LIB/.plancache"
+  _k=$(plan_cache_key "$1")
+  [ -n "$_k" ] || return 1
+  _map="$_d/$_k.map"; _hdr="$_d/$_k.hdr"
+  # ★ 2026-10-31：钥匙留痕（ttc.log）——save/lookup 各记一行，
+  #   两次钥匙一对比，哪个分量变了直接看得到（sel/设置/清单/档案逐段可读）
+  printf 'plancache lookup sel=%s key=%s\n' "$1" "$_k" >> "$LIB/ttc.log" 2>/dev/null
+  [ -s "$_map" ] && [ -s "$_hdr" ] || return 1
+  # 逐行核对源文件还在（while + 内建 test，零进程）
+  while read -r _pid _rel _src; do
+    [ -n "${_rel:-}" ] || continue
+    [ -n "${_src:-}" ] || _src="$LIB/$_pid.ttf"
+    [ -f "$_src" ] || { _miss=1; break; }
+  done < "$_map"
+  [ "$_miss" = 0 ] || return 1
+  # ★ 2026-10-31：头文件解析改零进程（原来 3 条 sed 管道 = 6 个进程）
+  while IFS='=' read -r _hk _hv; do
+    case "${_hk:-}" in
+      scope)  PC_SCOPE="$_hv" ;;
+      count)  PC_COUNT="$_hv" ;;
+      kllast) PC_KLLAST="$_hv" ;;
+    esac
+  done < "$_hdr" 2>/dev/null
+  case "$PC_SCOPE" in all|latin|cjk|combo) ;; *) return 1 ;; esac
+  case "$PC_COUNT" in ''|*[!0-9]*) return 1 ;; esac
+  # ★ 2026-10-31：临时文件 + mv 原子落位（预热和 apply 可能并发写同一个目标）
+  cp -f "$_map" "$2.tmp.$$" 2>/dev/null && mv -f "$2.tmp.$$" "$2" 2>/dev/null || \
+    { rm -f "$2.tmp.$$" 2>/dev/null; return 1; }
+  cp -f "$_d/$_k.list" "$3.tmp.$$" 2>/dev/null && mv -f "$3.tmp.$$" "$3" 2>/dev/null || \
+    { rm -f "$3.tmp.$$" 2>/dev/null; return 1; }
+  [ -s "$2" ] && [ -s "$3" ] || return 1
+  PC_HIT=1
+  return 0
+}
+
+plan_cache_save() {   # $1=sel $2=stage.map $3=stage.list $4=scope $5=kllast $6=count
+  # ★ 2026-10-31：manager 挂载也存（计划与挂载方式无关，见 lookup 的说明）
+  case "$(mount_mode 2>/dev/null)" in self|manager) ;; *) return 0 ;; esac
+  [ -s "$2" ] && [ -s "$3" ] || return 0
+  local _d _k
+  _d="$LIB/.plancache"
+  _k=$(plan_cache_key "$1")
+  [ -n "$_k" ] || return 0
+  mkdir -p "$_d" 2>/dev/null || return 0
+  printf 'plancache save sel=%s key=%s\n' "$1" "$_k" >> "$LIB/ttc.log" 2>/dev/null
+  # ★ 2026-10-31：全部 tmp + mv 原子写（两个进程同时保存同一 key 时不会写坏）
+  cp -f "$2" "$_d/$_k.map.tmp.$$" 2>/dev/null && \
+    mv -f "$_d/$_k.map.tmp.$$" "$_d/$_k.map" 2>/dev/null || \
+    { rm -f "$_d/$_k.map.tmp.$$" 2>/dev/null; return 0; }
+  cp -f "$3" "$_d/$_k.list.tmp.$$" 2>/dev/null && \
+    mv -f "$_d/$_k.list.tmp.$$" "$_d/$_k.list" 2>/dev/null || \
+    { rm -f "$_d/$_k.list.tmp.$$" 2>/dev/null; return 0; }
+  { printf 'scope=%s\nkllast=%s\ncount=%s\nsel=%s\n' "$4" "$5" "$6" "$1"; } \
+    > "$_d/$_k.hdr.tmp.$$" 2>/dev/null && \
+    mv -f "$_d/$_k.hdr.tmp.$$" "$_d/$_k.hdr" 2>/dev/null
+  # 只留最近 12 份，防止换字体频繁时占空间（一份就几十 KB）
+  ls -1t "$_d"/*.map 2>/dev/null | tail -n +13 | while IFS= read -r _old; do
+    [ -n "$_old" ] || continue
+    rm -f "${_old%.map}.map" "${_old%.map}.list" "${_old%.map}.hdr" 2>/dev/null
+  done
+  return 0
+}
+
 do_apply() {
   local sel scope plan role rel id src dest stage mode COUNT=0 fail=0 wid
   GRP_LAST=""; GRP_PAIRS=""     # 多字重配对的缓存（见 grp_load）
   sel=$(check_sel "$1") || { echo "$sel"; exit 1; }
+  # ★ 2026-10-31 计时基准（/proc/uptime，10ms 精度；结果写进 ttc.log 和 OK 返回行，
+  #   用户切完字立刻能在提示里看到「应用耗时 X 秒」—— 慢不慢用数据说话）
+  _cfs_t0=$(cut -d' ' -f1 /proc/uptime 2>/dev/null | tr -d ' ')
 
   # ★★ 2026-10-14：**应用前再验一遍轮廓表**（不只是导入时验）。
   #
@@ -910,17 +1178,104 @@ do_apply() {
   # 为什么要有它：报告里 dump 的 fonts.xml 每行被截断到 2000 字，光看报告看不出
   # 模块到底判了哪几号 face、范围是怎么定出来的；用户发一份报告就能从源头看出对不对。
   # 真正的内容在下面 make_plan 之后写（那时才知道计划数和判定依据），这里先占位。
-  : > "$LIB/ttc.log" 2>/dev/null
+  # ★ 2026-10-31：预热模式不清空 ttc.log —— 那是"上次真正 apply"的诊断记录，
+  #   预热只是后台补缓存，别把证据洗掉（预热自己的行带 tag=prewarm）。
+  [ "${CFS_PREWARM:-0}" = 1 ] || : > "$LIB/ttc.log" 2>/dev/null
 
   if [ "$sel" != none ]; then
+    # ★ 2026-10-30（性能）：先查计划缓存 —— 同一字体 + 同一组开关直接复用上次结果
+    _eff_scope "$sel"
+    scope="$EFF_SCOPE"
+    if plan_cache_lookup "$sel" "$stage.map" "$stage.list"; then
+      scope="$PC_SCOPE"
+      COUNT="$PC_COUNT"
+      KLLAST="$PC_KLLAST"
+      SCOPE_VIA="计划缓存命中（同字体同开关，直接复用上次结果）"
+      {
+        echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=$sel${CFS_PREWARM:+ tag=prewarm}"
+        echo "plan=$COUNT scope=$scope 判定依据=${SCOPE_VIA:-?} keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0)"
+      } >> "$LIB/ttc.log" 2>/dev/null
+      # ★ 2026-10-31：manager 挂载命中缓存后**仍要物化模块目录副本**——
+      #   缓存省掉的是"重算计划 + 合成合集"，物化这步必须做（元模块挂的是这些文件）。
+      #   data/ 槽位不物化（由 datafont_apply 在开机时处理，与原逻辑一致）。
+      #   ★ 直接写进模块目录（跳过 stage → commit 逐个 mv，少一半 fork）：
+      #     · 目录按计划去重一次建好
+      #     · 计划缩水时先清掉"新清单里没有"的旧副本（按 slots.applied 差集）
+      #     · 硬链接与源同 inode（源已是 644+system_file）→ 成功时不需 chmod/chcon
+      #     · 每槽位只剩 1 次 ln fork；commit_payload 收到 MANAGER_INPLACE=1
+      #       会跳过 remove_manager_files（避免删掉刚物化的文件）
+      if [ "$mode" = manager ] && [ "${CFS_PREWARM:-0}" != 1 ]; then
+        # ★ 2026-10-31：符号链接模式（单点翻转）——payload 全是符号链接，
+        #   切字体 = 翻转 .active/N（1~3 次操作），154 个槽位零重建
+        if _symlink_on; then
+          if _mgr_symlink_apply "$stage.map"; then
+            cp -f "$stage.list" "$APPLIED" 2>/dev/null
+            MANAGER_INPLACE=1
+          else
+            fail=1
+          fi
+        else
+          rm -f "$MODDIR/.payload_links" 2>/dev/null
+        _cm_dirs=" $(awk 'NF >= 2 { p = $2; sub(/^\//, "", p); sub(/\/[^\/]*$/, "", p); if (p != "") print p }' "$stage.map" 2>/dev/null | sort -u | tr '\n' ' ') "
+        for _cm_d in $_cm_dirs; do
+          [ -n "$_cm_d" ] && mkdir -p "$MODDIR/$(mgr_path "$_cm_d")" 2>/dev/null
+        done
+        # ★ 2026-11-01：差集比对改纯 shell（原来每个旧槽位一次 grep -qxF =
+        #   154 个 fork ≈ 4 秒；现在新清单读进变量，case 匹配零 fork）
+        _NEWLIST=""
+        [ -s "$stage.list" ] && _NEWLIST=$(cat "$stage.list" 2>/dev/null)
+        if [ -s "$APPLIED" ]; then
+          while IFS= read -r _oldr; do
+            [ -n "$_oldr" ] || continue
+            case "$_oldr" in data/*) continue ;; esac
+            case "
+${_NEWLIST}" in *"
+${_oldr}
+"*) continue ;; esac
+            rm -f "$MODDIR/$(mgr_path "$_oldr")" 2>/dev/null
+          done < "$APPLIED"
+        fi
+        unset _NEWLIST
+        # ★ 2026-11-01（第三轮提速）：命中物化也走批量并行（同生成路径）
+        _LF_ERR="$LIB/.lnfail.$$"
+        : > "$_LF_ERR" 2>/dev/null
+        _LN_N=0; _ACC_LN=""
+        while read -r _cmid _cmrel _cmsrc; do
+          [ -n "${_cmrel:-}" ] || continue
+          case "$_cmrel" in data/*) continue ;; esac
+          [ -n "${_cmsrc:-}" ] || _cmsrc="$LIB/$_cmid.ttf"
+          _cmdest="$MODDIR/$(mgr_path "$_cmrel")"
+          _ACC_LN="${_ACC_LN}ln -f '${_cmsrc}' '${_cmdest}' || echo '${_cmdest}' >> '${_LF_ERR}'
+"
+          _LN_N=$((_LN_N + 1))
+          case ${_LN_N} in *0) _ACC_LN="${_ACC_LN}wait
+" ;; esac
+        done < "$stage.map"
+        _ln_batch_run "$_LF_ERR"
+        if [ "${_LN_FAILN:-0}" -gt 0 ]; then
+          echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 命中物化失败 ${_LN_FAILN} 个，首个：$(head -n1 "$_LF_ERR" 2>/dev/null)（/data 剩余 $(df -k /data 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4) KB）" \
+            >> "$LIB/ttc.log" 2>/dev/null
+          fail=1
+        fi
+        rm -f "$_LF_ERR" 2>/dev/null
+        unset _ACC_LN _LN_N _cmdest
+        cp -f "$stage.list" "$APPLIED" 2>/dev/null
+        MANAGER_INPLACE=1
+        unset _cm_dirs _cm_d
+        fi   # _symlink_on else（符号链接关 → v18 硬链接物化）
+      fi
+    else
+    # ★ 2026-10-31：走到这里说明缓存未命中，才需要 slots.sh（懒加载，见函数注释）
+    _ensure_slots
+    _GEN_NEW=1
     # 不用 $(...)：那会开子 shell，make_plan 里设的 SCOPE_VIA（判定依据）就拿不到了
     make_plan "$sel" "$plan" >/dev/null
     scope="$PLAN_SCOPE"
     {
-      echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=$sel"
+      echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=$sel${CFS_PREWARM:+ tag=prewarm}"
       echo "plan=$(grep -c . "$plan" 2>/dev/null) scope=$scope 判定依据=${SCOPE_VIA:-?} keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0)"
-    } > "$LIB/ttc.log" 2>/dev/null
-    # 2026-10-28：清单为空时先自动重扫一次，再决定是否报错
+    } >> "$LIB/ttc.log" 2>/dev/null
+    # ★ 2026-10-27：清单为空时先自动重扫一次（升级后常见），再决定是否报错
     if [ ! -s "$plan" ] && [ ! -s "$LIB/scanned/slots.list" ]; then
       sh "${MODDIR:-$MODPATH}/fontctl.sh" rescan >/dev/null 2>&1
       make_plan "$sel" "$plan" >/dev/null
@@ -928,7 +1283,7 @@ do_apply() {
     fi
     if [ ! -s "$plan" ]; then
       rm -f "$plan"
-      echo "ERROR:没有找到可替换的槽位（范围：$scope）。已尝试自动重扫，仍为空请到「高级设置 → 通用 → 重新数一遍系统的字体」点一次再切换"
+      echo "ERROR:没有找到可替换的槽位（范围：$scope）。已尝试自动重扫，仍为空的话请到「高级设置 → 通用 → 重新数一遍系统的字体」点一次，再切换"
       exit 1
     fi
     # ★ 2026-10-17（作者：切换必须快）：**这里不再逐个 chmod/chcon 字体文件**。
@@ -941,6 +1296,24 @@ do_apply() {
     mkdir -p "$stage"
     : > "$stage.list"
     : > "$stage.map"
+    _ACC_LIST=""; _ACC_MAP=""
+    # ★ 2026-11-01（fork 精简第二轮）：管理器挂载改「就地物化」——
+    #   硬链接直接写进模块目录，不再"先进 stage、commit 再逐个 mv"。
+    #   ★ 第三轮：循环里**连 ln 都不做**，只把命令攒进 _ACC_LN，
+    #     循环结束一批并行执行（154 次串行 ln ≈ 5 秒 → 10 个一批并行 ≈ 1 秒）。
+    _DIRWRITE=0
+    _LF_ERR=""
+    if [ "$mode" = manager ] && [ "${CFS_PREWARM:-0}" != 1 ] && ! _symlink_on; then
+      _DIRWRITE=1
+      _LF_ERR="$LIB/.lnfail.$$"
+      : > "$_LF_ERR" 2>/dev/null
+    fi
+    _LN_N=0; _ACC_LN=""
+    # ★ 2026-10-31（fork 精简）：目录按计划一次性建好（原来每槽位一次 mkdir -p，
+    #   154 个槽位就是 154 次 fork）
+    for _gd in $(awk 'NF >= 2 { p = $2; sub(/\/[^\/]*$/, "", p); if (p != "") print p }' "$plan" 2>/dev/null | sort -u); do
+      mkdir -p "$stage/$(mgr_path "$_gd")" "$MODDIR/$(mgr_path "$_gd")" 2>/dev/null
+    done
     # ★ 2026-10-17：单字体时"角色 → 字体 id"是恒定映射，循环外算一次就够。
     #   组合字体（cjk+lat）才需要按角色分别取 —— 那种情况很少，走原来的路。
     if [ "${sel#*+}" = "$sel" ]; then
@@ -1039,13 +1412,19 @@ do_apply() {
           #   "已经是最新"直接复用 → 两个槽位挂的是同一份内容（宋体拿到黑体的
           #   日/韩字形，反之亦然）。沙箱里四个源合集全部指向同一个产物就是它。
           _csrc=$(printf '%s' "${rel##*/}" | sed 's/\.[^.]*$//; s/[^A-Za-z0-9]//g')
-          cand="$LIB/$id.ttc${nf}_${tag}_${_csrc:-ttc}"
-          # 源字体或**系统合集**比产物新，就重新生成（系统更新换了合集内容时必须重做）
+          # ★ 2026-10-31（关键重构）：合成产物**直接落在永久缓存目录**，不再写字体库根目录。
+          #   根目录产物会在切到别的字体时被 prune 判成"没人引用"删掉 →
+          #   切回来时计划缓存失效、又要重新合成几十 MB（真机实测 B→A 又变 30 秒）。
+          #   缓存路径稳定 ⇒ 计划缓存一次生成永久命中 ⇒ 合成一次永久保存（作者的设计）。
+          #   新鲜度由下面的 -ot 门把守：字体或系统合集更新了才重做。
+          TTC_CACHE="$LIB/.ttc.cache"
+          cand="$TTC_CACHE/${id}.ttc${nf}_${tag}_${_csrc:-ttc}"
           if [ ! -s "$cand" ] || [ "$cand" -ot "$src" ] 2>/dev/null || [ "$cand" -ot "/$rel" ] 2>/dev/null; then
             # 先算空间：这次要合成 = 原合集大小 + 用户字体大小。宁可这一个槽位不换，
             # 也不能把 /data 写满 —— 写满之后系统会起不来（真机反馈过强制重启后黑屏）。
-            _osz=$(wc -c < "/$rel" 2>/dev/null | tr -d ' ')
-            _usz=$(wc -c < "$src" 2>/dev/null | tr -d ' ')
+              # ★ 2026-10-31：wc -c 会把几十 MB 的合集整份读一遍，stat 只读元数据
+              _osz=$(stat -c %s "/$rel" 2>/dev/null)
+              _usz=$(stat -c %s "$src" 2>/dev/null)
             _free=$(free_kb "$LIB")
             if [ -n "$_osz" ] && [ -n "$_usz" ] && [ -n "$_free" ]; then
               _need=$(( (_osz + _usz) / 1024 + 8192 ))
@@ -1059,82 +1438,93 @@ do_apply() {
             # ★ 2026-10-16：**别再吞报错**。真机上"合集没生成"导致挂载一直失败，
             #   而 ttc.log 里一个字都没有 —— 因为这里原来是 2>/dev/null || cand=""，
             #   失败原因彻底丢失。现在把 stderr 第一行 + 产物大小 + 剩余空间都记下来。
-            # ★ 2026-10-22（提速）：合集生成结果缓存。
-            #   键包含"用户字体 + 原合集 + face 集合"，任何一项变了都算未命中。
-            TTC_CACHE="$LIB/.ttc.cache"
-            _tc_sz=$(stat -c %s "$src" 2>/dev/null); _tc_mt=$(stat -c %Y "$src" 2>/dev/null)
-            _tc_osz=$(stat -c %s "/$rel" 2>/dev/null); _tc_omt=$(stat -c %Y "/$rel" 2>/dev/null)
-            _tc_cn=$(printf '%s' "$cn" | tr -d ' ')
-            _tc_key="${id}_${_tc_sz}_${_tc_mt}_${_tc_osz}_${_tc_omt}_${nf}_${_tc_cn}_g1"
-            _tc_hit=""
-            if [ -n "$_tc_key" ] && [ -s "$TTC_CACHE/$_tc_key.ttc" ]; then
-              _tc_hit="$TTC_CACHE/$_tc_key.ttc"
+            # ★ 2026-10-31（重构）：合成**直接写进永久缓存目录**（tmp → 全套校验 → mv 落位）。
+            #   校验链一步不少：写全核对 / ttc_verify 结构校验 / 1KB 硬底线。
+            #   产物路径 = cand（缓存目录里的可读名），一次合成永久保存 ——
+            #   下次走到这里时上面的 -ot 门直接放行，零合成零拷贝。
+            mkdir -p "$TTC_CACHE" 2>/dev/null
+            cand_tmp="$cand.tmp.$$"
+            # ★ 预热模式：向状态文件报告"正在合成哪个合集"（UI 轮询显示进度）
+            if [ "${CFS_PREWARM:-0}" = 1 ]; then
+              printf 'stage=ttc id=%s rel=%s\n' "$sel" "${rel##*/}" > "$LIB/.pw.$sel.state" 2>/dev/null
             fi
-            if [ -n "$_tc_hit" ]; then
-              if cp -f "$_tc_hit" "$cand" 2>/dev/null && [ -s "$cand" ]; then
-                _twrc=0; _twerr=""
-              else
-                _twrc=1; _twerr="cache-copy-failed"; cand=""
-              fi
-              printf '%s %s faces=%s replace=%s via=ttc-cache-hit\n' \
-                "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" >> "$LIB/ttc.log" 2>/dev/null
-            else
-            _twerr=$(ttc_wrap_mix "$src" "$nf" "$cand" "/$rel" "$cn" 2>&1)
+            _twerr=$(ttc_wrap_mix "$src" "$nf" "$cand_tmp" "/$rel" "$cn" 2>&1)
             _twrc=$?
-            fi
-            [ "$_twrc" = 0 ] || cand=""
-            if [ -z "$cand" ] || [ ! -s "$cand" ]; then
-              _twsz=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
+            [ "$_twrc" = 0 ] || cand_tmp=""
+            if [ -z "$cand_tmp" ] || [ ! -s "$cand_tmp" ]; then
+              _twsz=$(stat -c %s "$cand_tmp" 2>/dev/null)
               _twfree=$(free_kb "$LIB")
               printf '%s %s faces=%s replace=%s via=wrapfail detail=包装器rc=%s 产物=%s字节 剩余=%sKB err=%s\n' \
                 "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" \
                 "${_twrc:-?}" "${_twsz:-无}" "${_twfree:-?}" \
                 "$(printf '%s' "$_twerr" | head -n1 | cut -c1-80)" \
                 >> "$LIB/ttc.log" 2>/dev/null
-              cand=""
+              rm -f "$cand_tmp" 2>/dev/null
+              cand_tmp=""
             fi
             # 合成后核对：文件必须真的写全（空间在合成途中被占满会留下半截文件）
-            if [ -s "$cand" ] && [ -n "$_osz" ] && [ -n "$_usz" ]; then
-              _got=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
-              [ -n "$_got" ] && [ "$_got" -gt "$_usz" ] 2>/dev/null || cand=""
+            if [ -s "$cand_tmp" ] && [ -n "$_osz" ] && [ -n "$_usz" ]; then
+              _got=$(stat -c %s "$cand_tmp" 2>/dev/null)
+              [ -n "$_got" ] && [ "$_got" -gt "$_usz" ] 2>/dev/null || cand_tmp=""
             fi
-            # ★ 2026-10-14：**尺寸兜底** —— 上面那道校验只在 _osz/_usz 都非空时才生效，
-            #   而 `[ -s "$cand" ]` 只要求"非空"，**16 字节也算非空**。
-            #   真机上就出过这个：一加 Ace 3 Pro 的字体库里留下一个
-            #   `builtin_flair.ttc5_2-3` = **16 字节**（只有 TTC 头、没有字体数据），
-            #   它被当成"合成好的合集"反复拿去挂载、每次都被判"无效字体"跳过，
-            #   用户看到的是"刷了不生效、切回无字体、一直转圈"。
-            #   这里加一条与实现无关的硬底线：产物至少要有 1KB（真正的合集都是 MB 级），
-            #   不够就是坏的 —— **删掉它**，让下次重新合成，而不是一直带着这个坏文件跑。
-            # ★ 结构校验：不合格就删产物并跳过（避免应用按坏 face 渲染而崩溃）
-            if [ -n "$cand" ] && [ -s "$cand" ]; then
-              if ! _tv=$(ttc_verify "$cand" "$nf"); then
+            # ★ 结构校验：不合格就删产物并跳过（避免应用按坏 face 渲染而崩溃）。
+            #   （旧版"16 字节半截文件"的尺寸兜底由下面的 1KB 硬底线 + 写全核对覆盖）
+            if [ -n "$cand_tmp" ] && [ -s "$cand_tmp" ]; then
+              if ! _tv=$(ttc_verify "$cand_tmp" "$nf"); then
                 printf '%s %s faces=%s replace=%s via=ttcbad detail=产物结构不合格（%s），已删除并跳过\n' \
                   "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "${_tv:-unknown}" \
                   >> "$LIB/ttc.log" 2>/dev/null
-                rm -f "$cand" 2>/dev/null
-                cand=""
+                rm -f "$cand_tmp" 2>/dev/null
+                cand_tmp=""
               fi
             fi
-            # 产物合格 → 存进缓存（下次同条件直接复用）
-            if [ -n "$cand" ] && [ -n "${_tc_key:-}" ] && [ ! -s "$TTC_CACHE/$_tc_key.ttc" ]; then
-              # 空间保护：剩余不足 300MB 就不缓存（宁可下次慢，也不能把存储占满）
+            if [ -n "$cand_tmp" ]; then
+              _csz=$(stat -c %s "$cand_tmp" 2>/dev/null)
+              if ! isnum "$_csz" || [ "$_csz" -lt 1024 ] 2>/dev/null; then
+                printf '%s %s faces=%s replace=%s via=toosmall detail=产物只有%s字节，已删除并跳过\n' \
+                  "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "${_csz:-?}" \
+                  >> "$LIB/ttc.log" 2>/dev/null
+                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 合集产物异常（只有 ${_csz:-?} 字节，已删除）：$cand_tmp" >> "$LIB/mount.log" 2>/dev/null
+                rm -f "$cand_tmp" 2>/dev/null
+                cand_tmp=""
+              fi
+            fi
+            # 空间保护：剩余不足 300MB 就不落盘（宁可下次重合成，也不能把存储占满）
+            if [ -n "$cand_tmp" ]; then
               _tc_free=$(free_kb "$LIB" 2>/dev/null)
               case "${_tc_free:-}" in ''|*[!0-9]*) _tc_free=0 ;; esac
               if [ "$_tc_free" -gt 0 ] && [ "$_tc_free" -lt 307200 ]; then
-                printf '%s %s via=ttc-no-cache detail=剩余空间不足(%sKB)\n' \
+                printf '%s %s via=ttc-no-store detail=剩余空间不足(%sKB)，产物不保存\n' \
                   "$id" "$rel" "${_tc_free}" >> "$LIB/ttc.log" 2>/dev/null
-              else
-              mkdir -p "$TTC_CACHE" 2>/dev/null
-              cp -f "$cand" "$TTC_CACHE/$_tc_key.ttc" 2>/dev/null
-              # 只保留最近 3 份（当前字体 + 上一次），避免占太多空间
-              ls -1t "$TTC_CACHE"/*.ttc 2>/dev/null | tail -n +4 | while IFS= read -r _old; do
-                rm -f "$_old" 2>/dev/null
-              done
+                rm -f "$cand_tmp" 2>/dev/null
+                cand_tmp=""
               fi
             fi
+            if [ -n "$cand_tmp" ]; then
+              chmod 644 "$cand_tmp" 2>/dev/null
+              chcon u:object_r:system_file:s0 "$cand_tmp" 2>/dev/null
+              # tmp+mv 原子落位：预热和 apply 并发合成同一产物也不会写坏
+              if mv -f "$cand_tmp" "$cand" 2>/dev/null; then
+                printf '%s %s faces=%s replace=%s via=ttc-synth(已入永久缓存)\n' \
+                  "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" >> "$LIB/ttc.log" 2>/dev/null
+                if [ "${CFS_PREWARM:-0}" = 1 ]; then
+                  printf 'stage=ttcdone id=%s rel=%s\n' "$sel" "${rel##*/}" > "$LIB/.pw.$sel.state" 2>/dev/null
+                fi
+              else
+                rm -f "$cand_tmp" 2>/dev/null
+                cand=""
+              fi
+            else
+              cand=""
+            fi
+            # 保留最近 12 份（3 字体 × 2 合集槽 = 6 份全装得下，不会被挤掉；
+            # 多年换字体也不会无限膨胀。60MB 一份约 700MB 上限，
+            # 且上面已有"剩余不足 300MB 不落盘"保护）
+            ls -1t "$TTC_CACHE"/*.ttc 2>/dev/null | tail -n +13 | while IFS= read -r _old; do
+              rm -f "$_old" 2>/dev/null
+            done
             if [ -n "$cand" ]; then
-              _csz=$(wc -c < "$cand" 2>/dev/null | tr -d ' ')
+              _csz=$(stat -c %s "$cand" 2>/dev/null)
               if ! isnum "$_csz" || [ "$_csz" -lt 1024 ] 2>/dev/null; then
                 printf '%s %s faces=%s replace=%s via=toosmall detail=产物只有%s字节，已删除并跳过\n' \
                   "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "${_csz:-?}" \
@@ -1151,38 +1541,105 @@ do_apply() {
           src="$cand"
           ;;
       esac
-      if [ "$mode" = manager ]; then
+      if [ "$_DIRWRITE" = 1 ]; then
+        # ★ 2026-10-31：预热模式只生成计划（存缓存），不物化 payload 文件
+        #    符号链接模式同样延后——计划完整后统一物化（见下方 _mgr_symlink_apply）
         # ★ 2026-10-19：/data 上的主题字体**不进 payload** ——
         #   元模块只 overlay system/product/vendor/system_ext，
         #   把 /data/... 塞进模块目录没人会挂它。这类槽位由 post-fs-data 里的
         #   datafont_apply 做物理替换（整份复制，主题服务按 inode/mtime 认）。
+        # ★ 2026-11-01（第三轮提速）：这里不落盘，只把"该建哪个硬链接"攒进
+        #   _ACC_LN（失败把目标路径记进 _LF_ERR，循环后批量并行执行）。
+        #   字体文件的 644 + system_file 上下文在入库时已设好，硬链接同 inode 免设。
         case "$rel" in
           data/*) ;;
           *)
-        dest="$stage/$(mgr_path "$rel")"
-        mkdir -p "${dest%/*}" 2>/dev/null
-        if ! ln -f "$src" "$dest" 2>/dev/null; then
-          # 2. 校验：复制出来的文件必须完整
-          if ! cp -f "$src" "$dest" 2>/dev/null || [ "$(wc -c < "$dest")" != "$(wc -c < "$src")" ]; then
-            fail=1; break
-          fi
-          chmod 644 "$dest" 2>/dev/null
-          chcon u:object_r:system_file:s0 "$dest" 2>/dev/null
-        fi
+        _dw_dest="$MODDIR/$(mgr_path "$rel")"
+        _ACC_LN="${_ACC_LN}ln -f '${src}' '${_dw_dest}' || echo '${_dw_dest}' >> '${_LF_ERR}'
+"
+        _LN_N=$((_LN_N + 1))
+        # 每 10 条插一个 wait（个位数是 0 就攒一批），控制并行进程数
+        case ${_LN_N} in *0) _ACC_LN="${_ACC_LN}wait
+" ;; esac
             ;;
         esac
       fi
-      echo "$rel" >> "$stage.list"
+      # ★ 2026-11-01（fork 精简第二轮）：清单/映射**攒进变量，循环结束一次写盘**。
+      #   原来每槽位两次 `echo >> 文件`，154 槽位 = 308 个进程 ≈ 8-12 秒 ——
+      #   这就是"切一次要 10 几秒"的最大单一开销。
+      _ACC_LIST="${_ACC_LIST}${rel}
+"
       # 第三个字段 = 这个槽位实际挂哪个文件（.ttc 槽位挂的是包好的合集；老格式只有两个字段）
-      echo "$id $rel $src" >> "$stage.map"
+      _ACC_MAP="${_ACC_MAP}${id} ${rel} ${src}
+"
       COUNT=$((COUNT+1))
     done < "$plan"
     rm -f "$plan"
+    # ★ 2026-11-01：攒好的清单/映射一次写盘（替代原来每槽位 2 次 echo 追加）
+    printf '%s' "$_ACC_LIST" > "$stage.list" 2>/dev/null
+    printf '%s' "$_ACC_MAP" > "$stage.map" 2>/dev/null
+    # ★ 2026-11-01（第三轮提速）：一批并行物化（详见 _ln_batch_run 注释）
+    if [ "$_DIRWRITE" = 1 ]; then
+      _ln_batch_run "$_LF_ERR"
+      if [ "${_LN_FAILN:-0}" -gt 0 ]; then
+        echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 批量物化失败 ${_LN_FAILN} 个，首个：$(head -n1 "$_LF_ERR" 2>/dev/null)（/data 剩余 $(df -k /data 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4) KB）" \
+          >> "$LIB/ttc.log" 2>/dev/null
+        fail=1
+      fi
+      rm -f "$_LF_ERR" 2>/dev/null
+      unset _ACC_LN _LN_N _dw_dest
+    fi
+    # ★ 2026-11-01：就地物化收尾 ——
+    #   ① 标记 commit_payload 跳过 remove_manager_files（别把刚写的文件删了）
+    #   ② 计划缩水时（如关掉保留锁屏时钟）按差集删掉模块目录里多余的旧副本
+    if [ "$_DIRWRITE" = 1 ] && [ "$fail" = 0 ]; then
+      MANAGER_INPLACE=1
+      if [ -s "$APPLIED" ]; then
+        while IFS= read -r _oldr; do
+          [ -n "$_oldr" ] || continue
+          case "$_oldr" in data/*) continue ;; esac
+          case "
+${_ACC_LIST}" in *"
+${_oldr}
+"*) continue ;; esac
+          rm -f "$MODDIR/$(mgr_path "$_oldr")" 2>/dev/null
+        done < "$APPLIED"
+      fi
+    fi
+    # ★ 计划生成成功 → 存进缓存，下次同字体同开关直接用
+    [ "$fail" = 0 ] && [ "$COUNT" -gt 0 ] 2>/dev/null && \
+      plan_cache_save "$sel" "$stage.map" "$stage.list" "$scope" "$KLLAST" "$COUNT"
+    fi   # ★ 2026-10-30 计划缓存 else 分支收口
+
+    # ★ 2026-10-31：符号链接模式 —— 计划完整后统一物化（管理器挂载专用）
+    if [ "${_GEN_NEW:-0}" = 1 ] && [ "$mode" = manager ] && [ "${CFS_PREWARM:-0}" != 1 ] && _symlink_on; then
+      if _mgr_symlink_apply "$stage.map"; then
+        cp -f "$stage.list" "$APPLIED" 2>/dev/null
+        MANAGER_INPLACE=1
+      else
+        fail=1
+      fi
+    fi
 
     if [ "$fail" = 1 ] || [ "$COUNT" = 0 ]; then
+      _dfree=$(df -k /data 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4)
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 生成失败：fail=$fail 槽位=$COUNT · /data 剩余 ${_dfree:-?} KB（失败的那一对路径见上方"物化失败"行）" \
+        >> "$LIB/ttc.log" 2>/dev/null
       rm -rf "$stage" "$stage.list" "$stage.map"
-      echo "ERROR:生成字体文件失败（存储空间不足？），已保留原来的字体"
+      if [ "${_DIRWRITE:-0}" = 1 ]; then
+        echo "ERROR:生成字体文件失败（/data 剩余 ${_dfree:-?} KB——接近 0 就是真的没空间了，请先清理）。这次是就地更新，个别槽位可能已换成新字体——重新应用一次即可恢复一致"
+      else
+        echo "ERROR:生成字体文件失败（/data 剩余 ${_dfree:-?} KB——接近 0 就是真的没空间了，请先清理），已保留原来的字体"
+      fi
       exit 1
+    fi
+    # ★ 2026-10-31：**预热模式到此为止** —— 计划已生成（或命中）并写入缓存，
+    #   但**不提交**：不写 slots.map / pending_font / last_selection，当前选择分毫不动。
+    if [ "${CFS_PREWARM:-0}" = 1 ]; then
+      printf 'stage=done id=%s count=%s\n' "$sel" "$COUNT" > "$LIB/.pw.$sel.state" 2>/dev/null
+      rm -rf "$stage" "$stage.list" "$stage.map" 2>/dev/null
+      echo "OK:prewarm:$COUNT:$([ "${PC_HIT:-0}" = 1 ] && echo hit || echo miss)"
+      exit 0
     fi
   else
     # 没选字体（none）：也留一行，报告里能看出"这次是什么都没选"，而不是"记录没写"
@@ -1219,9 +1676,18 @@ do_apply() {
     printf '%s\n' "$sel" > "$LIB/.last_good" 2>/dev/null
   fi
   refresh_prop
+  # ★ 2026-10-31：计时收尾 —— 耗时写进 ttc.log（诊断报告会打印），
+  #   并追加到 OK 返回行（界面解析 t= 字段显示给用户）
+  _cfs_t1=$(cut -d' ' -f1 /proc/uptime 2>/dev/null | tr -d ' ')
+  _cfs_el=$(awk -v a="${_cfs_t0:-0}" -v b="${_cfs_t1:-0}" \
+    'BEGIN { d = b - a; if (d < 0 || a == 0 || b == 0) d = 0; printf "%.2f", d }' 2>/dev/null)
+  case "${_cfs_el:-}" in ''|*[!0-9.]*) _cfs_el="?" ;; esac
+  {
+    echo "apply耗时=${_cfs_el}s 缓存=$([ "${PC_HIT:-0}" = 1 ] && echo 命中 || echo 生成) 槽位=$COUNT"
+  } >> "$LIB/ttc.log" 2>/dev/null
   # ★ 2026-10-17：返回值后面带上"这次实际用的 keep_lockscreen"。
   #   用户反馈"切了开关没反应"时，这一项能直接分辨是"设置没写进去"还是"过滤没生效"。
-  echo "OK:$(label_of "$sel"):$COUNT:$scope:$KLLAST"
+  echo "OK:$(label_of "$sel"):$COUNT:$scope:$KLLAST,t=${_cfs_el}s"
 }
 
 do_report() {
@@ -1381,60 +1847,46 @@ case "${1:-}" in
     # ★ 2026-10-16：改成**实时算**（读 slots.map + slots.marks）。
     #   原来读 slots.sources，而那是"计划生成那一刻"的存档 —— 真机上它比
     #   slots.marks 旧，界面就显示成"系统配置里引用的 0 个"。
-    if command -v slot_sources_report >/dev/null 2>&1; then
-      _xss=$(slot_sources_report "$MODDIR" 2>/dev/null)
-      # ★ 2026-10-17 提速：原来是 5 条 sed|head|tr 管道（15 个进程），
-      #   合并成一次 awk —— 只 1 个进程，取的值完全一样。
-      eval "$(printf '%s\n' "$_xss" | awk '
-        /^[a-z]+=/ {
-          k = substr($0, 1, index($0, "=") - 1)
-          v = substr($0, index($0, "=") + 1)
-          gsub(/[^0-9]/, "", v)
-          if (v != "" && (k == "x" || k == "a" || k == "s" || k == "o" || k == "d"))
-            printf "_%s=%s\n", (k == "s" ? "xss2" : "xs" k), v
-        }')"
-      if [ -n "$_xsx" ]; then
-        # ★ 四路都输出（界面按这四路分别显示）
-        # ★ 2026-10-16：再带上两个数（界面用它显示"模块额外补的"）
-        _xextra=0; _xsym=0
-        # ★ 2026-10-17 提速（作者实测 1分50秒）：
-        #   **这里不再调 slot_extra_report** —— 它会扫 XML + targets + OEM 三路，
-        #   只为了算"模块额外补了几个"。而界面现在显示的是「机型清单里的 / 本机扫描补的」，
-        #   那两个数直接来自安装时生成的 scanned/slots.meta（见下面几行），读文件即可。
-        #   保留 `extra`/`symskip` 两个字段是为了不破坏老界面的解析（值给 0 也无害）。
-        # ★ 2026-10-17（新架构）：现在不再每次解析 XML，来源分成两类才有意义 ——
-        #   tj = 机型清单（targets）提供的
-        #   jb = 本机扫描补的（targets 没覆盖、这台设备特有的）
-        _tjn=0; _tjt=0
-        _mt="${LIB:-/data/adb/custom_font_lib}/scanned/slots.meta"
-        [ -s "$_mt" ] && _tjn=$(sed -n 's/^targets=//p' "$_mt" 2>/dev/null)
-        [ -s "$_mt" ] && _tjt=$(sed -n 's/^total=//p' "$_mt" 2>/dev/null)
-        [ -n "$_tjn" ] || _tjn=0
-        [ -n "$_tjt" ] || _tjt=0
-        # 本机扫描补的数量直接读 extra=（安装时算好的，不用在这里做减法）
-        _jbn=$(sed -n 's/^extra=//p' "$_mt" 2>/dev/null)
-        case "${_jbn:-}" in ''|*[!0-9]*) _jbn=$(( ${_tjt:-0} - ${_tjn:-0} )) ;; esac
-        [ "${_jbn:-0}" -lt 0 ] && _jbn=0
-        echo "SP4=x=${_tjn:-0},s=${_jbn:-0},o=0,d=0,extra=${_xextra:-0},symskip=${_xsym:-0}"
-        # ★ 2026-10-17：把「保留锁屏时钟」的当前值也返回给界面。
-        #   界面靠它决定下次点击要写 0 还是 1；不回传的话，界面只能靠本地缓存，
-        #   一旦某次没回写就会"交替失败"（用户实测过）。
-        echo "KL=$(cfg_get keep_lockscreen 0)"
-        # ★ 2026-10-24：把「中文合集替换」的**生效值**也给界面（1/0），
-        #   界面新增的开关靠它回显；没有这一行，开关就只能靠猜。
-        echo "TR=$(ttc_effective 2>/dev/null)"
-        echo "SPF=$(cfg_get skip_product 0)"
-        # 三个新开关默认都是 0（关），只能人为打开
-        echo "KS=$(cfg_get keep_samsung 0)"
-        echo "SVF=$(cfg_get skip_vf 0)"
-        echo "SP=x=${_xsx:-0},a=$(( ${_xss2:-0} + ${_xso:-0} + ${_xsd:-0} ))"
-      else
-        echo "SP="
-        echo "SP4="
-      fi
+    # ★ 2026-10-31（性能）：直接读安装时算好的 slots.meta ——
+    #   原来这里还要调 slot_sources_report（起子进程）+ awk 再解析一遍，
+    #   而它给的字段本来就来自这个文件，全是重复劳动。现在零子进程。
+    #   （status 已不再加载 slots.sh，这个依赖就此解除。）
+    #   口径不变：
+    #     x = 机型清单（targets）里、本机真实存在的名字数 = targets=
+    #     s = 本机扫描补的 = extra=
+    _mt="${LIB:-/data/adb/custom_font_lib}/scanned/slots.meta"
+    _tjn=0; _tjt=0; _jbn=0
+    if [ -s "$_mt" ]; then
+      while IFS='=' read -r _mk _mv; do
+        case "${_mk:-}" in
+          targets) _tjn="${_mv:-0}" ;;
+          total)   _tjt="${_mv:-0}" ;;
+          extra)   _jbn="${_mv:-0}" ;;
+        esac
+      done < "$_mt"
+      case "${_tjn:-}" in ''|*[!0-9]*) _tjn=0 ;; esac
+      case "${_tjt:-}" in ''|*[!0-9]*) _tjt=0 ;; esac
+      case "${_jbn:-}" in ''|*[!0-9]*) _jbn=0 ;; esac
+      [ "${_jbn:-0}" -lt 0 ] 2>/dev/null && _jbn=0
+      echo "SP4=x=${_tjn:-0},s=${_jbn:-0},o=0,d=0,extra=0,symskip=0"
+      echo "SP=x=${_tjn:-0},a=${_jbn:-0}"
     else
       echo "SP="
+      echo "SP4="
     fi
+    # ★ 开关回显行不依赖 slots.meta，无论有没有清单都要输出（否则首次安装时
+    #   界面开关拿不到当前值，只能靠本地缓存 —— 以前的老毛病"交替失败"会回来）
+    # ★ 2026-10-17：把「保留锁屏时钟」的当前值也返回给界面。
+    #   界面靠它决定下次点击要写 0 还是 1；不回传的话，界面只能靠本地缓存，
+    #   一旦某次没回写就会"交替失败"（用户实测过）。
+    echo "KL=$(cfg_get keep_lockscreen 0)"
+    # ★ 2026-10-24：把「中文合集替换」的**生效值**也给界面（1/0），
+    #   界面新增的开关靠它回显；没有这一行，开关就只能靠猜。
+    echo "TR=$(ttc_effective 2>/dev/null)"
+    echo "SPF=$(cfg_get skip_product 0)"
+    # 三个新开关默认都是 0（关），只能人为打开
+    echo "KS=$(cfg_get keep_samsung 0)"
+    echo "SVF=$(cfg_get skip_vf 0)"
     echo "S=$(effective_scope "$P" 2>/dev/null)"
     echo "M=$(mount_mode)"
     echo "PM=$(cat "$MODDIR/payload.mode" 2>/dev/null | tr -d '[:space:]')"
@@ -1446,6 +1898,28 @@ case "${1:-}" in
     _ttcn=$(awk '$2 ~ /\.ttc$/ { c++ } END { print c + 0 }' "$MODDIR/slots.map" 2>/dev/null)
     case "${_ttcn:-}" in ''|*[!0-9]*) _ttcn=0 ;; esac
     echo "TT=$_ttcn"
+    # ★ 2026-11-01：PD=1 = 计划比本次开机新（改了开关/换了字体还没重启）
+    #   ★ 2026-11-01（作者反馈"A切B再切A应该变回正常"）：mtime 新还不够 ——
+    #     再比一次**内容**：与开机快照逐字节一致（A→B→A、开关开→关→开）= 实际
+    #     没有变化，不算待生效，横幅不出。cmp 只在 mtime 更新时才跑（一次 fork）。
+    _pd=0
+    if [ -s "$MODDIR/slots.map" ] && [ -f "$LIB/.boot.mark" ]; then
+      if [ "$MODDIR/slots.map" -nt "$LIB/.boot.mark" ] 2>/dev/null; then
+        if [ ! -s "$MODDIR/slots.boot.map" ] || \
+           ! cmp -s "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null; then
+          _pd=1
+        fi
+      fi
+    fi
+    echo "PD=$_pd"
+    # ★ 2026-11-01（作者要求）：「当前实际生效」的数字来源 = **开机快照**。
+    #   service.sh 开机时把当时的 slots.map 存成 slots.boot.map —— 那是这次
+    #   开机真正挂载的计划；之后的 apply 只改 slots.map 不动快照，
+    #   所以"已生效"在重启前纹丝不动，不会跟着新计划一起变。
+    _bn=$(wc -l 2>/dev/null < "$MODDIR/slots.boot.map" | tr -d ' ')
+    case "${_bn:-}" in ''|*[!0-9]*) _bn="" ;; esac
+    [ -n "$_bn" ] || _bn=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')
+    echo "BN=${_bn:-0}"
     echo "MO=$(mount_result | tr ' ' ',')"
     echo "VF=$(payload_verify "$MODDIR" | tr ' ' ',')"
     if [ -f "$MODDIR/mount_missed" ]; then echo "MM=1"; else echo "MM=0"; fi
@@ -1489,6 +1963,48 @@ case "${1:-}" in
     done
     ;;
 
+  export)
+    # ★ 2026-11-01：导出字体文件 —— 把字体库里的 ttf 复制一份到手机存储。
+    #   界面走模块自带的文件浏览器选目标文件夹（和导入是同一套，反着用）。
+    #   用法: export <id-b64> <目标目录-b64> <显示名-b64>
+    #   返回: OK:<完整路径>|<字节数>   或   ERROR:<原因>
+    #   安全边界：目标必须在手机存储（$STORAGE）里；重名自动加 (2) (3)；
+    #   复制完核对字节数，不一致就删掉半截文件报错。
+    _ex_id=$(printf '%s' "$2" | base64 -d 2>/dev/null)
+    _ex_dir=$(printf '%s' "$3" | base64 -d 2>/dev/null)
+    _ex_name=$(printf '%s' "$4" | base64 -d 2>/dev/null)
+    case "$_ex_id" in
+      f[0-9]*|builtin_*) [ -s "$LIB/$_ex_id.ttf" ] || { echo "ERROR:字体文件不存在（$_ex_id）"; exit 1; } ;;
+      *) echo "ERROR:不是字体库里的字体"; exit 1 ;;
+    esac
+    [ -n "$_ex_dir" ] || _ex_dir="$STORAGE/Download"
+    bad_path "$_ex_dir" && { echo "ERROR:路径不允许"; exit 1; }
+    _ex_r=$(to_real "$_ex_dir")
+    case "$_ex_r" in "$STORAGE"|"$STORAGE"/*) ;; *) echo "ERROR:只能导出到手机存储里"; exit 1 ;; esac
+    mkdir -p "$_ex_r" 2>/dev/null
+    [ -d "$_ex_r" ] || { echo "ERROR:目标文件夹建不了：$_ex_dir"; exit 1; }
+    # 文件名去掉对 FAT/存储无意义的字符；显示名清空就退回用 id
+    _ex_base=$(printf '%s' "$_ex_name" | sed 's/[\/:*?"<>|]/_/g; s/^\.+//; s/[[:space:]]*$//')
+    [ -n "$_ex_base" ] || _ex_base="$_ex_id"
+    _ex_out="$_ex_r/$_ex_base.ttf"
+    _ex_n=1
+    while [ -e "$_ex_out" ]; do
+      _ex_n=$((_ex_n + 1))
+      _ex_out="$_ex_r/$_ex_base ($_ex_n).ttf"
+    done
+    if ! cp -f "$LIB/$_ex_id.ttf" "$_ex_out" 2>/dev/null; then
+      echo "ERROR:复制失败（存储空间不足，或目录是只读的）"; exit 1
+    fi
+    _ex_sz=$(stat -c %s "$_ex_out" 2>/dev/null)
+    _ex_srcsz=$(stat -c %s "$LIB/$_ex_id.ttf" 2>/dev/null)
+    if [ -z "$_ex_sz" ] || [ -z "$_ex_srcsz" ] || [ "$_ex_sz" != "$_ex_srcsz" ]; then
+      rm -f "$_ex_out" 2>/dev/null
+      echo "ERROR:复制不完整（$_ex_sz / $_ex_srcsz 字节），已删除半截文件"; exit 1
+    fi
+    chmod 644 "$_ex_out" 2>/dev/null
+    echo "OK:$_ex_out|$_ex_sz"
+    ;;
+
 
 
   index)
@@ -1521,6 +2037,23 @@ case "${1:-}" in
     _ttcn=$(awk '$2 ~ /\.ttc$/ { c++ } END { print c + 0 }' "$MODDIR/slots.map" 2>/dev/null)
     case "${_ttcn:-}" in ''|*[!0-9]*) _ttcn=0 ;; esac
     echo "TT=$_ttcn"
+    # ★ 2026-11-01：PD=1 = 计划比本次开机新（改了开关/换了字体还没重启）
+    #   ★ 内容与开机快照一致（A→B→A）→ 不算待生效（同 status 分支）
+    _pd=0
+    if [ -s "$MODDIR/slots.map" ] && [ -f "$LIB/.boot.mark" ]; then
+      if [ "$MODDIR/slots.map" -nt "$LIB/.boot.mark" ] 2>/dev/null; then
+        if [ ! -s "$MODDIR/slots.boot.map" ] || \
+           ! cmp -s "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null; then
+          _pd=1
+        fi
+      fi
+    fi
+    echo "PD=$_pd"
+    # ★ 2026-11-01（作者要求）：「当前实际生效」= 开机快照（见 status 分支同注释）
+    _bn=$(wc -l 2>/dev/null < "$MODDIR/slots.boot.map" | tr -d ' ')
+    case "${_bn:-}" in ''|*[!0-9]*) _bn="" ;; esac
+    [ -n "$_bn" ] || _bn=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')
+    echo "BN=${_bn:-0}"
     echo "@@L@@"
     # ★ 2026-10-22（底层优化）：优先读永久索引 —— 单文件、单次读，不再现场 glob。
     #   索引不存在或 schema 不符 → 现场建一次（只发生一次）。
@@ -1583,6 +2116,9 @@ case "${1:-}" in
     [ -f "$src" ] || src="$2"
     [ -f "$src" ] || { echo "ERROR:找不到文件：$2"; exit 1; }
     out=$(store_font "$src" "$3" cp); rc=$?
+    # ★ 2026-10-31：预热改由调用方在「档案探测完成后」显式触发（prewarm-bg）——
+    #   旧版在这里就后台开跑，会和 UI 的字体档案写入（fam/覆盖率）赛跑：
+    #   计划按"半成品档案"生成，探测写完 meta 后钥匙又变 → 缓存白做。
     echo "$out"; exit $rc
     ;;
   upload-start)
@@ -1592,12 +2128,14 @@ case "${1:-}" in
   upload-finish)
     mark_dirty
     [ -f "$PART" ] || { echo "ERROR:没有待处理的上传"; exit 1; }
-    if [ -n "$2" ] && [ "$(wc -c < "$PART" | tr -d ' ')" != "$2" ]; then
+    # ★ 2026-10-31：stat 只读元数据（原来 wc -c 把整份上传的字体读一遍）
+    if [ -n "$2" ] && [ "$(stat -c %s "$PART" 2>/dev/null | tr -d ' ')" != "$2" ]; then
       rm -f "$PART"
       echo "ERROR:传输不完整，请重试（或改用「扫描」导入）"
       exit 1
     fi
     out=$(store_font "$PART" "$3" mv); rc=$?
+    # ★ 2026-10-31：预热改由调用方显式触发（prewarm-bg，同 import 的说明）
     echo "$out"; exit $rc
     ;;
   rename)
@@ -1623,6 +2161,67 @@ case "${1:-}" in
     done
     echo "OK:$DEL:$SKIP"
     ;;
+  prewarm)
+    # -------------------------------------------------------------------
+    # ★ 2026-10-31：**预热** —— 只把"这个字体的最终计划"生成好并写入缓存，
+    #   不改任何当前状态（不写 pending/slots.map/last_selection）。
+    #   调用方：导入字体后 / 改开关后（后台）。效果：下一次——也就是**第一次**——
+    #   真正切换这个字体时直接命中计划缓存，秒级完成。
+    # -------------------------------------------------------------------
+    sel=$(check_sel "$2") || { echo "$sel"; exit 1; }
+    [ "$sel" = none ] && { echo "OK:none"; exit 0; }
+    # ★ 2026-10-31：manager 挂载也预热（计划缓存与挂载方式无关）
+    CFS_PREWARM=1
+    export CFS_PREWARM
+    # ★ 状态文件：给 UI 轮询显示进度（stage=plan → ttc → done）
+    printf 'stage=plan id=%s\n' "$sel" > "$LIB/.pw.$sel.state" 2>/dev/null
+    do_apply "$sel"
+    ;;
+  prewarm-bg)
+    # -------------------------------------------------------------------
+    # ★ 2026-10-31：**后台预热（立即返回）** —— 给 UI 的导入流程用：
+    #   导入 + 档案探测完成后调用。本命令把状态文件标成 queued 后立即返回
+    #   （不阻塞 ksuExec），真正的预热在后台跑；
+    #   UI 轮询 $LIB/.pw.<id>.state 显示「现在在干嘛」。
+    # -------------------------------------------------------------------
+    sel=$(check_sel "$2") || { echo "$sel"; exit 1; }
+    [ "$sel" = none ] && { echo "OK:none"; exit 0; }
+    printf 'stage=queued id=%s\n' "$sel" > "$LIB/.pw.$sel.state" 2>/dev/null
+    ( sh "$MODDIR/fontctl.sh" prewarm "$sel" ) >/dev/null 2>&1 &
+    echo "OK:prewarm-bg:$sel"
+    ;;
+  prewarm-all)
+    # -------------------------------------------------------------------
+    # ★ 2026-10-31：给字体库里**全部已有字体**预热计划缓存 + 合集产物。
+    #   解决"字体是以前导入的，第一次切换永远未命中"的问题。
+    #   逐字体输出进度（安装脚本会把这些行转成 ui_print 显示给用户）。
+    # -------------------------------------------------------------------
+    # 顺手清掉 v3 过渡期的哈希名缓存产物（现行命名可读且永久）
+    rm -f "$LIB"/.ttc.cache/*_g1.ttc 2>/dev/null
+    # ★ 2026-10-31：manager 挂载也预热（不再跳过）
+    _pwn=0; _pwh=0
+    for _pwf in "$LIB"/f*.ttf "$LIB"/builtin_*.ttf; do
+      [ -f "$_pwf" ] || continue
+      case "$_pwf" in *'*'*) continue ;; esac
+      _pwid=${_pwf##*/}; _pwid=${_pwid%.ttf}
+      _pwo=$(sh "$MODDIR/fontctl.sh" prewarm "$_pwid" 2>/dev/null); _pwr=$?
+      if [ "$_pwr" != 0 ]; then
+        echo "  $_pwid：跳过（没有可替换的槽位）"
+        continue
+      fi
+      case "$_pwo" in
+        *":hit")
+          _pwh=$((_pwh + 1))
+          echo "  $_pwid：计划已是最新（命中缓存，零耗时）" ;;
+        OK:prewarm:*)
+          _pwn=$((_pwn + 1))
+          echo "  $_pwid：计划已生成并缓存（已有合集产物直接复用）" ;;
+        *)
+          echo "  $_pwid：$_pwo" ;;
+      esac
+    done
+    echo "OK:prewarm-all 本次生成 $_pwn 份，已缓存 $_pwh 份"
+    ;;
   apply)
     mark_dirty
     do_apply "$2"
@@ -1632,8 +2231,9 @@ case "${1:-}" in
     # ★ 2026-10-17：重新扫描本机字体并覆盖设备清单。
     #   什么时候用：换了系统大版本、装了新字体但界面没显示、或诊断建议你重扫。
     #   平时**不需要**跑 —— apply/reapply 只读清单，不扫描。
-    # 2026-10-28：判成功看清单内容，不看退出码（Flyme 会误报）
-    [ -s "$LIB/scanned/device.list" ] || slot_device_scan "$MODDIR" >/dev/null 2>&1
+    # ★ 2026-10-27（Flyme）：成功与否看"清单有没有内容"，不看退出码。
+    #   某些 ROM 上装配过程会返回非 0，但 slots.list / slots.meta 已经写好了，
+    #   以前会误报「扫描失败」，用户以为不能用了。
     slot_build_slots "$MODDIR" 2>/dev/null
     _rc=$?
     _rn=$(sed -n 's/^total=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
@@ -1642,7 +2242,8 @@ case "${1:-}" in
     case "${_rn:-}" in ''|*[!0-9]*) _rn=0 ;; esac
     case "${_ln:-}" in ''|*[!0-9]*) _ln=0 ;; esac
     if [ "$_ln" -gt 0 ] || [ "$_rn" -gt 0 ]; then
-      [ "$_rc" != 0 ] && echo "[rescan] rc=$_rc 但清单已生成" >> "$LIB/ttc.log" 2>/dev/null
+      # 退出码不为 0 只记进日志，不再当失败
+      [ "$_rc" != 0 ] && echo "[rescan] slot_build_slots rc=$_rc，但清单已生成（total=$_rn lines=$_ln）" >> "$LIB/ttc.log" 2>/dev/null
       [ "$_rn" -gt 0 ] || _rn=$_ln
       echo "OK:已重新扫描，${_rn} 个字体槽位（机组清单 ${_tn:-0} + 本机补）"
     else
@@ -1653,6 +2254,26 @@ case "${1:-}" in
   reapply)
     mark_dirty
     do_apply "$(cur_pending)"
+    ;;
+  apply-bg)
+    # -------------------------------------------------------------------
+    # ★ 2026-11-02：**异步应用** —— 立即返回，结果落状态文件供界面轮询。
+    #   为什么要有它：KernelSU 的 exec 是同步的，界面等一次 apply/reapply 的
+    #   全过程里 JS 线程整个被冻住 —— 提示条挂着、点卡片没反应，"像被冻结"。
+    #   改成后台跑：
+    #     sh fontctl.sh apply-bg [字体id]   → 立刻回 OK:bg
+    #     界面每 0.5 秒读 $LIB/.reapply.state，读到 OK:/ERROR: 开头即收工。
+    #   $2 缺省 = 重应用当前待生效（等价 reapply）。
+    # -------------------------------------------------------------------
+    _rb="$LIB/.reapply.state"
+    rm -f "$_rb" "$_rb.tmp" 2>/dev/null
+    printf 'stage=running\n' > "$_rb" 2>/dev/null
+    if [ -n "${2:-}" ]; then
+      ( sh "$MODDIR/fontctl.sh" apply "$2" > "$_rb.tmp" 2>&1; mv -f "$_rb.tmp" "$_rb" ) >/dev/null 2>&1 &
+    else
+      ( sh "$MODDIR/fontctl.sh" reapply > "$_rb.tmp" 2>&1; mv -f "$_rb.tmp" "$_rb" ) >/dev/null 2>&1 &
+    fi
+    echo "OK:bg"
     ;;
   plan)
     sel=$(check_sel "${2:-none}") || { echo "$sel"; exit 1; }
@@ -1711,6 +2332,8 @@ case "${1:-}" in
             rm -f "$LIB/.cand.cache" "$LIB/.marks.cache" "$LIB/.skipscan.cache" \
                   "$LIB/.extra.cache" "$LIB/.xmlnames.cache" "$LIB/.dirnames.cache" \
                   "$LIB/.oemnames.cache" "$LIB/.verify.cache" 2>/dev/null
+            # ★ 2026-10-30：计划缓存也一并清掉（其实指纹变化会自动失效，这里顺手清干净）
+            rm -rf "$LIB/.plancache" 2>/dev/null
             rm -f "$LIB/.scan/lockscreen.txt" "$LIB/.scan/lockscreen.key" \
                   "$LIB/.scan/scan.cache" "$LIB/.scan/scan.key" 2>/dev/null
             rm -f "$MODDIR/slots.marks" 2>/dev/null
@@ -1741,6 +2364,8 @@ case "${1:-}" in
           skip_vendor_dirs|whitelist|blacklist|exclude_dirs|force_list)
             # 文本型：逗号/分号分隔；空串表示不生效
             ;;
+          symlink_payload)
+            case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
           mount_retry|mount_delay)
             case "$4" in ''|*[!0-9]*) echo "ERROR:取值必须是数字"; exit 1 ;; esac ;;
           keep_misans|keep_flyme|no_theme_phys|keep_mitype|keep_oppo|keep_vivo|keep_harmony|keep_roboto|flyme_core|chcon_fonts|flyme_scan|hotboot_watchdog|hotboot_kill|\
@@ -1750,7 +2375,23 @@ case "${1:-}" in
             case "$4" in self|manager) ;; *) echo "ERROR:取值只能是 self 或 manager"; exit 1 ;; esac ;;
           *) echo "ERROR:未知设置项"; exit 1 ;;
         esac
-        cfg_set "$3" "$4"; echo "OK"
+        cfg_set "$3" "$4"
+        # ★ 2026-11-02（红魔用户实锤"黑名单填了无效"）：角色是**扫描时**烤进
+        #   4 份清单的 —— 装好模块之后才改黑/白名单，清单里的角色还是旧的，
+        #   设置看起来就"永远无效"。这几项一改就**当场重扫**（几秒），
+        #   新名单立刻参与角色判定；紧接着下面的预热会用新清单重算计划。
+        case "$3" in
+          whitelist|blacklist|exclude_dirs|force_list)
+            ( sh "$MODDIR/fontctl.sh" rescan ) >/dev/null 2>&1
+            ;;
+        esac
+        # ★ 2026-10-31：开关变了 → 计划缓存全部失效 → 后台把当前待生效字体的计划
+        #   重新预热好（下一次切换仍然"第一次就命中"）。不阻塞本次返回。
+        _pwp=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font" 2>/dev/null)
+        case "$_pwp" in ""|none) ;; *)
+          ( sh "$MODDIR/fontctl.sh" prewarm "$_pwp" ) >/dev/null 2>&1 &
+        ;; esac
+        echo "OK"
         ;;
       dump)
         # ★ 2026-10-24：把高级设置里的所有开关一次性吐出来（界面回显用）
@@ -1768,6 +2409,7 @@ case "${1:-}" in
             # ★ 2026-10-25：回显不用「生效值」，避免 dump 去扫字体配置（手机上要几秒，
             #   会把整个界面卡住）。界面只显示用户设置过的值即可。
             ttc_replace) _v=$(cfg_get ttc_replace auto) ;;
+            symlink_payload) _v=$(cfg_get "$_k" 0) ;;
             skip_vf|keep_samsung|skip_product) _v=$(cfg_get "$_k" 0) ;;
             skip_vendor_dirs|whitelist|blacklist|exclude_dirs) _v=$(cfg_get "$_k" "") ;;
             mount_retry) _v=$(cfg_get "$_k" 3) ;;
@@ -1781,7 +2423,7 @@ case "${1:-}" in
         ;;
       *)
         # ttc_replace 回显的是**生效值**：这类机型即使没手动设过，界面开关也该是亮的
-        echo "keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0) keep_lockscreen=$(cfg_get keep_lockscreen 0) "
+        echo "keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0) keep_lockscreen=$(cfg_get keep_lockscreen 0) symlink_payload=$(cfg_get symlink_payload 0) "
         ;;
     esac
     ;;
@@ -1970,7 +2612,7 @@ case "${1:-}" in
     refresh_prop
     ;;
   *)
-    echo "用法: sh fontctl.sh status|list|import|upload-start|upload-finish|ls|rename|delete|apply|reapply|plan|setmeta|settings|verify|relink|conflicts|report|diag|sync|prop|ack"
+    echo "用法: sh fontctl.sh status|list|import|upload-start|upload-finish|ls|rename|delete|apply|reapply|plan|setmeta|settings|verify|relink|conflicts|report|diag|sync|prop|ack|prewarm|prewarm-bg|prewarm-all"
     exit 2
     ;;
 esac

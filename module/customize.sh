@@ -1,10 +1,22 @@
 #!/system/bin/sh
-# ★ 2026-10-26 清掉上一版遗留的壁纸文件（管理器覆盖安装不会删旧文件）
-rm -f "$MODPATH/webroot/bg.jpg" "$MODPATH/webroot/bg.b64" 2>/dev/null
+# ★ 2026-10-31：壁纸的持久正本在 $LIB/bg.jpg，webroot 里的副本在下面（LIB 赋值后）恢复。
+#   （旧版这里是把 webroot/bg.jpg 删掉 —— 那正是"更新模块后壁纸消失、二级界面卡片重叠"的原因）
 # 自定义字体切换模块 - 安装脚本（Magisk / KernelSU / APatch 通用）
 # 刷机包里的文件已由管理器解压到 $MODPATH
 
 LIB=/data/adb/custom_font_lib
+
+# ★ 2026-10-31：把用户壁纸从永久目录还原到 webroot（更新模块 = webroot 整个被换掉）
+if [ -s "$LIB/bg.jpg" ]; then
+  cp -f "$LIB/bg.jpg" "$MODPATH/webroot/bg.jpg" 2>/dev/null
+  chmod 644 "$MODPATH/webroot/bg.jpg" 2>/dev/null
+fi
+
+# ★ 2026-10-31：**安装号只在首次安装生成**（覆盖安装 / 升级不变）。
+#   WebUI 用它判断"是不是重装"来决定要不要重置界面设置 ——
+#   旧版每次安装都重写，升级一次就把用户的壁纸/配色/高级解锁全清了（真机反馈）。
+#   卸载时 $LIB 整体删除 → 重装会生成新号 → 那种情况照旧重置（语义正确）。
+[ -s "$LIB/.install_id" ] || date +%s > "$LIB/.install_id" 2>/dev/null
 MODID=$(sed -n 's/^id=//p' "$MODPATH/module.prop" | head -n1 | tr -d '\r')
 OLD="/data/adb/modules/$MODID"
 
@@ -393,7 +405,7 @@ mk_need() {  # mk_need <key> → 返回 0 表示需要扫
 
 mk_set() {   # mk_set <key> <value>
   mkdir -p "$LIB" 2>/dev/null
-date +%s > "$LIB/.install_id" 2>/dev/null
+  # ★ 2026-10-31：安装号改为"首次安装才写"（见文件开头），mk_set 不再每次碰它
   [ -f "$MARKS" ] || : > "$MARKS" 2>/dev/null
   grep -v "^$1=" "$MARKS" > "$MARKS.tmp" 2>/dev/null
   echo "$1=$2" >> "$MARKS.tmp"
@@ -412,10 +424,10 @@ fi
 # 槽位扫描（贵，只在槽位逻辑变过时扫）
 # ---------------------------------------------------------------------------
 if mk_need slot; then
-  # 清掉可能过期的原始清单，让 rescan 真正重扫
-  rm -f "$LIB/scanned/device.list" "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" \
-        "$LIB/scanned/skip.list" "$LIB/scanned/ttc.list" "$LIB/scanned/env.list" \
-        "$LIB/scanned/.schema" 2>/dev/null
+  # ★ 2026-10-31：只删 device.list + .schema（强制真重扫本机字体）。
+  #   派生清单（slots.list 等）交给 slot_build_slots 重算后"内容一致就不替换"——
+  #   旧版这里全删 → 每次刷入 mtime 全变 → 计划缓存必然失效（恢复选型慢的元凶）。
+  rm -f "$LIB/scanned/device.list" "$LIB/scanned/.schema" 2>/dev/null
   if [ -f "$MODPATH/fontctl.sh" ]; then
     sh "$MODPATH/fontctl.sh" rescan >/dev/null 2>&1 && {
       mk_set slot "$MCUR"
@@ -464,79 +476,84 @@ else
   ui_print "- 字体档案已是最新（无需重扫）"
 fi
 
+# ---------------------------------------------------------------------------
+# ★ 2026-10-31（作者要求）：**刷入时就把切换计划 + 中文合集一次性做完**
+#   旧版：用户从旧版升级上来，第一次切换要现场合成几十 MB 的合集（30 秒级）。
+#   现在：装的时候一次做完并永久保存（$LIB/.ttc.cache），装完之后切任何字体都是秒级。
+#   每一步都有输出，不让用户对着"正在安装"猜进展。
+# ---------------------------------------------------------------------------
+ui_print "- 正在预生成切换计划与中文合集（一次性，做完后切换就是秒级）…"
+if [ -f "$MODPATH/fontctl.sh" ]; then
+  sh "$MODPATH/fontctl.sh" prewarm-all 2>/dev/null | while IFS= read -r _l; do
+    [ -n "$_l" ] && ui_print "$_l"
+  done
+fi
+ui_print "- 预生成结束（以后导入新字体 / 改开关也会在后台自动做）"
+
 ui_print "- 扫描与档案更新结束，正在写入文件权限…"
 
 # ===========================================================================
-# 刷入日志（作者要求：分区 + 分割线 + 内容尽量全）
-#   顺序：检测 → 扫描 → 汇总，扫描在汇总之前完成，不会出现"完成之后还在扫"
+# 刷入日志（2026-10-31 重排）：过程在前、汇总在后；键值对齐，不再重复信息
 # ===========================================================================
-ui_print "========================================================"
-ui_print " 自定义字体切换模块  $(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')"
-ui_print "========================================================"
-ui_print " "
-ui_print "[1/4] 设备与门禁"
-ui_print "- 设备：$(getprop ro.product.brand 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
-ui_print "- 系统：Android $(getprop ro.build.version.release 2>/dev/null)   内核 $(uname -r 2>/dev/null)"
-ui_print "- 系统识别：$(tr -d '[:space:]' < "$MODPATH/current_rom" 2>/dev/null | head -c 40)"
+_BV=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
+ui_print ""
+ui_print "============================================================"
+ui_print "  汇总 · 自定义字体切换模块 $_BV"
+ui_print "============================================================"
+ui_print "[1/5] 设备与门禁"
+ui_print "  设备      $(getprop ro.product.brand 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
+ui_print "  系统      Android $(getprop ro.build.version.release 2>/dev/null) · 内核 $(uname -r 2>/dev/null)"
+ui_print "  识别      $(tr -d '[:space:]' < "$MODPATH/current_rom" 2>/dev/null | head -c 40)"
 _RM="KernelSU 系"
 command -v magisk >/dev/null 2>&1 && _RM="Magisk"
 [ -d /data/adb/ksu ] && _RM="KernelSU 系"
-ui_print "- Root 管理器：$_RM"
-ui_print "- 挂载方式：模块自带挂载（无需元模块）"
+ui_print "  Root      $_RM"
+ui_print "  挂载      模块自带挂载（无需元模块）"
 GD="无"; [ -f "$OLD/disable" ] && GD="有"
 GU="无"; [ -f "$OLD/update" ] && GU="有（上次安装未被激活）"
 GS="无"; case "$(getprop persist.sys.safemode)$(getprop ro.sys.safemode)" in *1*) GS="有" ;; esac
 GM="无"; { command -v magisk >/dev/null 2>&1 || [ -e /data/adb/magisk ]; } && GM="有"
-ui_print "- 门禁：已禁用=$GD  待激活=$GU  安全模式=$GS  Magisk共存=$GM"
-ui_print "--------------------------------------------------------"
-ui_print " "
-ui_print "[2/4] 字体库与上次选择"
+ui_print "  门禁      已禁用=$GD · 待激活=$GU · 安全模式=$GS · Magisk共存=$GM"
+ui_print "[2/5] 字体库与上次选择"
 _LIBN=$(ls -1 "$LIB"/*.ttf 2>/dev/null | wc -l | tr -d ' ')
 _LIBKB=$(du -sk "$LIB" 2>/dev/null | awk '{print $1}')
-ui_print "- 字体库：${_LIBN:-0} 个字体，占用 ${_LIBKB:-0} KB"
-ui_print "  路径：$LIB"
+ui_print "  字体库    ${_LIBN:-0} 个 · ${_LIBKB:-0} KB（$LIB）"
 _ACT=$(sed -n 's/^active=//p' "$LIB/.index" 2>/dev/null | head -n1 | tr -d '\r')
-_PEND=$(sed -n 's/^pending=//p' "$LIB/.index" 2>/dev/null | head -n1 | tr -d '\r')
 if [ -n "$_ACT" ] && [ "$_ACT" != "none" ]; then
   _AN=$(head -n1 "$LIB/$_ACT.name" 2>/dev/null)
-  ui_print "- 上次选择：${_AN:-$_ACT}"
+  ui_print "  上次选择  ${_AN:-$_ACT}"
 else
-  ui_print "- 上次选择：无字体（系统默认）"
+  ui_print "  上次选择  无字体（系统默认）"
 fi
 _GRP=$(grep -l '^group=' "$LIB"/*.meta 2>/dev/null | wc -l | tr -d ' ')
-[ "${_GRP:-0}" -gt 0 ] 2>/dev/null && ui_print "- 字重组：${_GRP} 份字体参与分组（按字重自动配对）"
+[ "${_GRP:-0}" -gt 0 ] 2>/dev/null && ui_print "  字重组    ${_GRP} 份参与分组"
 if [ -d "$LIB/.orig" ]; then
   _OKB=$(du -sk "$LIB/.orig" 2>/dev/null | awk '{print $1}')
-  ui_print "- 主题字体原件备份：${_OKB:-0} KB（卸载时自动还原）"
+  ui_print "  主题备份  ${_OKB:-0} KB（卸载时自动还原）"
 fi
-ui_print "--------------------------------------------------------"
-ui_print " "
-ui_print "[3/4] 扫描与档案"
-ui_print "- 槽位总数 ${_an:-?} 个（机型清单 ${_tn:-0} 个 + 本机扫描补 ${_en:-0} 个）"
+ui_print "[3/5] 槽位与扫描"
+ui_print "  槽位      总数 ${_an:-?} = 机型清单 ${_tn:-0} + 本机补 ${_en:-0}"
 _TCN=$(awk '$2 ~ /\.ttc$/ {c++} END {print c+0}' "$MODPATH/slots.map" 2>/dev/null)
 _SLOTN=$(grep -c . "$MODPATH/slots.map" 2>/dev/null | tr -d ' ')
-ui_print "- 槽位计划：${_SLOTN:-0} 个，其中中文合集槽位 ${_TCN:-0} 个"
+ui_print "  计划      ${_SLOTN:-0} 个 · 中文合集 ${_TCN:-0} 个"
 _SF=$(ls -1 /system/fonts 2>/dev/null | grep -c . )
 _PF=$(ls -1 /product/fonts 2>/dev/null | grep -c . )
-ui_print "- 系统字体：/system/fonts ${_SF:-0} 个，/product/fonts ${_PF:-0} 个"
+ui_print "  系统字体  /system/fonts ${_SF:-0} 个 · /product/fonts ${_PF:-0} 个"
 _CFG=$(ls -1 /system/etc/fonts.xml /system/etc/fonts_fallback.xml 2>/dev/null | head -n1)
 if [ -n "$_CFG" ]; then
   _CFGKB=$(du -k "$_CFG" 2>/dev/null | awk '{print $1}')
-  ui_print "- 字体配置：$_CFG（${_CFGKB:-?} KB）"
+  ui_print "  字体配置  $_CFG（${_CFGKB:-?} KB）"
 fi
 if [ -d /data/system/theme/fonts ]; then
   _THN=$(ls -1 /data/system/theme/fonts 2>/dev/null | wc -l | tr -d ' ')
-  ui_print "- 主题字体（个性化）：${_THN:-0} 个文件（默认不替换）"
+  ui_print "  主题字体  ${_THN:-0} 个文件（默认不替换）"
 fi
-ui_print "- 扫描印记：slot=$(mk_cur slot 2>/dev/null)   font=$(mk_cur font 2>/dev/null)"
-ui_print "--------------------------------------------------------"
-ui_print " "
-ui_print "[4/4] 完成"
-ui_print "- 模块版本：$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')   安装位置：$MODPATH"
+ui_print "  印记      slot=$(mk_cur slot 2>/dev/null) · font=$(mk_cur font 2>/dev/null)"
+ui_print "[4/5] 结果"
 if [ -n "${CONFLICTS:-}" ]; then
-  ui_print "- ⚠ 冲突字体模块：$CONFLICTS   （建议先停用，避免互相覆盖）"
+  ui_print "  冲突      ⚠ $CONFLICTS（建议先停用，避免互相覆盖）"
 else
-  ui_print "- 冲突字体模块：无"
+  ui_print "  冲突      无"
 fi
 _UM="不适用"
 if [ -d /data/adb/ksu ]; then
@@ -546,22 +563,20 @@ if [ -d /data/adb/ksu ]; then
     _UM="关闭（App 里也能看到字体）"
   fi
 fi
-ui_print "- 管理器卸载机制：$_UM"
+ui_print "  卸载机制  $_UM"
 if [ -n "$_ACT" ] && [ "$_ACT" != "none" ]; then
-  ui_print "- ⏳ 重启后生效（现在还是系统原字体）"
+  ui_print "  生效      ⏳ 重启后生效（现在还是系统原字体）"
+else
+  ui_print "  生效      未选择字体，无需重启"
 fi
-ui_print " "
-ui_print "- 使用方法："
+ui_print "[5/5] 使用方法"
 ui_print "  1. 管理器里点本模块 → 打开（WebUI）"
-ui_print "  2. 导入自己的 TTF/OTF（可多选），点卡片切换"
-ui_print "  3. 重启生效；选「无字体」即恢复系统默认"
+ui_print "  2. 点卡片切换字体；选「无字体」即恢复系统默认"
+ui_print "  3. 出问题：WebUI「诊断报告」→ 生成 → 上传（也可存 Download 手动发）"
 if [ "${_RM:-}" = "Magisk" ]; then
   ui_print "  · Magisk 没有 WebUI 入口：先装 KsuWebUI，再点模块卡片的「操作」"
 fi
-ui_print " "
-ui_print "- 出问题时：界面「诊断报告」→ 生成（约 5~6 分钟）"
-ui_print "  生成完点「上传」可直接发我；报告也会存到 Download/完整体检报告.txt"
-ui_print " "
-ui_print "- 注意：更新模块不会丢字体库；卸载模块会一并删除字体库"
-ui_print "- 保险：若选字体后没能开机，下次开机会自动恢复为「无字体」"
-ui_print "========================================================"
+ui_print ""
+ui_print "  注意  更新模块不丢字体库/设置/壁纸；卸载会一并删除字体库"
+ui_print "  保险  若选字体后没能开机，下次开机会自动恢复为「无字体」"
+ui_print "============================================================"
