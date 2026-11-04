@@ -1771,7 +1771,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1103-1030</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1104-1520</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -8529,6 +8529,29 @@ const UI_ACTIONS = {
   advAccentHelp,
   advRelock,
 };
+
+
+// ★ 2026-11-04（红魔用户实锤"黑白名单保存不了"）：
+//   高级设置里所有文本项的「保存」按钮调用的是 advSaveText()，但这个函数从来没定义过，
+//   点了就抛异常 → 看起来"保存不了"。这里补上。
+async function advSaveText(key) {
+  const el = document.getElementById("adv_in_" + key);
+  if (!el) { showToast("找不到输入框", true); return; }
+  const v = String(el.value || "").trim();
+  const heavy = (key === "whitelist" || key === "blacklist" || key === "exclude_dirs" || key === "force_list");
+  showToast(heavy ? "正在保存并重扫（几秒，别退出）…" : "正在保存…", false, 8000);
+  try {
+    const out = String(await ksuExec(`sh ${MODDIR}/fontctl.sh settings set ${shq(key)} ${shq(v)}`) || "").trim();
+    if (out.indexOf("OK") === 0) {
+      showToast(v ? ("已保存：" + key + " = " + v) : ("已保存：" + key + "（已清空）"));
+      try { await refreshAll(true); } catch (e) {}
+    } else {
+      showToast("保存失败：" + out.slice(0, 90), true, 9000);
+    }
+  } catch (e) {
+    showToast("保存失败：" + (e && e.message ? e.message : e), true, 9000);
+  }
+}
 
 async function advRun(cmd, hintEnc, name) {
   // 界面类命令直接调 JS，不经过 shell
