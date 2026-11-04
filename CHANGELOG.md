@@ -1,5 +1,33 @@
 # 更新日志
 
+## v4.5.8.3
+
+### 一、修 WebView / 主题字体覆盖层换不到
+
+```
+· /system/fonts/MiSansVF_Overlay.ttf 指向 /data/system/fonts/theme_webview/Roboto-Regular.ttf
+· 现在对 theme_webview / theme/fonts 做 bind 挂载（不写盘）
+```
+
+---
+
+## v4.5.8.2
+
+### 一、修正"PID 1 看不到挂载"的误报
+
+```
+· 符号链接槽位（DroidSans.ttf -> Roboto-Regular.ttf 等）按真实路径比对，
+  不再误报"看不到"
+```
+
+### 二、新增：主题锁屏时钟探测
+
+```
+· 诊断报告会检测 /data/system/theme/clock_*，并说明这类主题时钟换不到
+```
+
+---
+
 ## v4.5.8.1
 
 ### 一、红魔时钟恢复 1.5.0 的行为

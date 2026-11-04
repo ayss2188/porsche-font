@@ -422,6 +422,13 @@ payload_mount() {
     #   以前这里无条件 datafont_swap，会把 43MB 字体真写进用户主题目录。
     if [ "$_pv_theme_phys" != 1 ]; then
       case "$dst" in
+        # ★ 2026-11-04：HyperOS 的 WebView 字体覆盖层
+        #   /system/fonts/MiSansVF_Overlay.ttf 是指向
+        #   /data/system/fonts/theme_webview/Roboto-Regular.ttf 的符号链接。
+        #   以前所有 /data 槽位整支跳过（theme_phys=0），于是这个目标文件一直没被换，
+        #   WebView / 米家 H5 读到的还是原来的 Roboto —— 表现就是"个别界面字体没变"。
+        #   这两类目录只做 bind 挂载（不写用户盘），不动其它 /data 槽位。
+        /data/system/fonts/theme_webview/*|/data/system/theme/fonts/*) : ;;
         /data/*) skip=$((skip+1)); continue ;;
       esac
     fi
@@ -565,16 +572,36 @@ pid1_visible() {   # $1=moddir
   [ -s "$plan" ] || plan="${LIB:-/data/adb/custom_font_lib}/slots.map"
   [ -s "$plan" ] || return 1
   [ -r "$mi" ] || return 1
-  awk 'NR == FNR { if (NF >= 2) want["/" $2] = 1; next }
-       { if (NF >= 5) seen[$5] = 1 }
-       END {
-         v = 0; m = 0; list = ""
-         for (p in want) {
-           if (p in seen) v++
-           else { m++; if (m <= 8) list = list " " p }
-         }
-         printf "PID1 %d %d%s\n", v, m, list
-       }' "$plan" "$mi" 2>/dev/null
+  # ★ 2026-11-04：计划里的槽位可能是**符号链接**（DroidSans.ttf -> Roboto-Regular.ttf、
+  #   MiSansVF_Overlay.ttf -> theme_webview/xxx 这类），挂载时是跟随链接挂到真实路径的，
+  #   mountinfo 里只会出现真实路径。这里先把每个槽位解析成真实路径再比对，
+  #   否则会把已经挂上的槽位误报成"PID 1 看不到"。
+  _pv_want=$(mktemp 2>/dev/null || echo "$LIB/.pv.want.$$")
+  _pv_seen=$(mktemp 2>/dev/null || echo "$LIB/.pv.seen.$$")
+  : > "$_pv_want"
+  _pv_theme_phys=$(cfg_get theme_phys 0 2>/dev/null)
+  while read -r _r _p _n; do
+    [ -n "$_n" ] || continue
+    case "$_p" in /*) _full="$_p/$_n" ;; *) _full="/$_p/$_n" ;; esac
+    _real=$(readlink -f "$_full" 2>/dev/null)
+    [ -n "$_real" ] || _real="$_full"
+    # 策略性跳过的 /data 槽位（theme_phys 未开）不算"看不到"
+    if [ "${_pv_theme_phys:-0}" != 1 ]; then
+      case "$_real" in
+        /data/system/fonts/theme_webview/*|/data/system/theme/fonts/*) : ;;
+        /data/*) continue ;;
+      esac
+    fi
+    printf '%s\n' "$_real" >> "$_pv_want"
+  done < "$plan"
+  awk 'NF >= 5 { print $5 }' "$mi" 2>/dev/null | sort -u > "$_pv_seen" 2>/dev/null
+  sort -u "$_pv_want" -o "$_pv_want" 2>/dev/null
+  _pv_v=$(comm -12 "$_pv_want" "$_pv_seen" 2>/dev/null | grep -c . )
+  _pv_t=$(grep -c . "$_pv_want" 2>/dev/null)
+  _pv_m=$(( ${_pv_t:-0} - ${_pv_v:-0} ))
+  _pv_list=$(comm -23 "$_pv_want" "$_pv_seen" 2>/dev/null | head -n 8 | tr '\n' ' ')
+  rm -f "$_pv_want" "$_pv_seen" 2>/dev/null
+  printf 'PID1 %s %s %s\n' "${_pv_v:-0}" "${_pv_m:-0}" "$_pv_list"
 }
 
 payload_verify() {

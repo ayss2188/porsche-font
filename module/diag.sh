@@ -2353,7 +2353,22 @@ printf '%s\n' $DATAFONT_LIST | while IFS= read -r _df; do
     #   魅族那台 dumpsys 显示框架读的是 /system/fonts/FlymeSansVF.ttf（我们已替换）、
     #   字体配置里也没有任何指向 customizecenter 的引用 → 实际是"部分界面才用它"。
     #   不能拿没验证过的判断去下结论，改成"它是什么 + 我们做没做 + 怎么自己验"。
-    echo "   这是什么：魅族这类机器上，你在主题商店下主题 / 在设置里选个性字体时，"
+  
+  # ★ 2026-11-04（用户实锤：锁屏大时钟换不掉）：主题包里的锁屏时钟资源
+  #   /data/system/theme/clock_2x4、clock_3x4 这类，是主题自带的时钟样式，
+  #   多数是图片或主题内的字体，不读 /system/fonts 的 MiClock/MitypeClock。
+  #   不把这条写进报告，用户会一直以为"模块没换时钟"。
+  _tc_any=""
+  for _tc in /data/system/theme/clock_*; do
+    [ -e "$_tc" ] && _tc_any="$_tc_any $(basename "$_tc")"
+  done
+  if [ -n "$_tc_any" ]; then
+    echo "  ★ 检测到主题自带的锁屏时钟：$_tc_any"
+    echo "    这说明你套了第三方锁屏时钟样式：它的数字来自主题资源（图片或主题内字体），"
+    echo "    不读 /system/fonts 里的 MiClock / MitypeClock —— 模块换的是系统字体，换不到它。"
+    echo "    想验证：设置 → 锁屏 → 锁屏时钟样式 换回「默认 / 经典」，时钟就会跟着你的字体变。"
+  fi
+  echo "   这是什么：魅族这类机器上，你在主题商店下主题 / 在设置里选个性字体时，"
     echo "   厂商会把那份字体写到这个目录（真机例子：Flyme 的 using_font_name=静静字体 → flymeFont.ttf）。"
     echo "   它到底会不会盖过 /system/fonts —— **各机型不一样，本报告不替你下结论**；"
     echo "   想自己确认：看第 3 节的「框架读取的路径」是不是 /system/fonts 里的文件（是 → 我们已生效）。"
