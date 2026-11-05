@@ -516,3 +516,16 @@ beat() {
   rm -f "$tmp" 2>/dev/null
   return 0
 }
+
+# ★ 2026-11-05（ColorOS 16 用户反馈）：把时钟数字字体换掉后，锁屏/桌面时钟排版会错位。
+#   ColorOS 的 OSans-Solid-Digits 是专门给时钟用的数字字体，宽度和间距都是按原字体调的。
+#   所以：**用户没显式改过这个开关时，ColorOS 默认保留锁屏时钟**；改过就按用户的来。
+keep_lockscreen_val() {
+  # ★ 2026-11-05（作者要求）：ColorOS 的时钟数字字体（OSans-Solid-Digits）宽度是专门调的，
+  #   换掉一定错位；所以 ColorOS 上**强制保留**，开关点了也不生效（界面会说明）。
+  #   其它系统仍按用户的开关值来。
+  case "$(tr -d '[:space:]' 2>/dev/null < "${MODDIR:-}/current_rom")" in
+    coloros) echo 1; return 0 ;;
+  esac
+  cfg_get keep_lockscreen 0 2>/dev/null
+}

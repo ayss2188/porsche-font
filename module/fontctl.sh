@@ -573,7 +573,7 @@ make_plan() {
   #     精确判据在 slots.sh 的 slot_lockscreen_files（看 family 名带不带 clock），
   #     实测一台小米机认出 34 个锁屏文件，正正好好。
   #   keep_lang / keep_special 仍然保留读取只为兼容老配置文件。
-  klk=$(cfg_get keep_lockscreen 0)
+  klk=$(keep_lockscreen_val)
   KLLAST="kl=$klk"      # 给 do_apply 的返回值用（诊断用，看模块实际读到几）
   # 1.0.9：界面已删掉那两个开关（默认全替换）；保留读取只为兼容老配置文件。
   SEL_FONT="$sel"            # 给 slot_plan/_meta_have 用：拿这个字体的 meta 判字形覆盖
@@ -1034,7 +1034,7 @@ plan_cache_key() {   # $1=sel（调用方须已算好 $EFF_SCOPE）
   #    （真机实锤：开关 A→B→A 一次之后，切字体 3 秒 → 8 秒）。
   #    现在只取计划真正依赖的那几个开关的**值**，格式/顺序怎么变都无所谓；
   #    这些键全走 cfg_get 的内存缓存（本进程首次读盘一次，之后零进程）。
-  _pc_ssv="$(cfg_get keep_lang 0),$(cfg_get keep_special 0),$(cfg_get keep_lockscreen 0),$(cfg_get keep_samsung 0),$(cfg_get skip_product 0),$(cfg_get skip_vf 0),$(cfg_get theme_fonts 0),$(cfg_get ttc_replace 0),$(cfg_get ttc_no_mix 0),$(cfg_get ttc_all_faces 0),$(cfg_get main_only 0)"
+  _pc_ssv="$(cfg_get keep_lang 0),$(cfg_get keep_special 0),$(keep_lockscreen_val),$(cfg_get keep_samsung 0),$(cfg_get skip_product 0),$(cfg_get skip_vf 0),$(cfg_get theme_fonts 0),$(cfg_get ttc_replace 0),$(cfg_get ttc_no_mix 0),$(cfg_get ttc_all_faces 0),$(cfg_get main_only 0)"
   _pc_ss=$(printf '%s' "$_pc_ssv" | md5sum 2>/dev/null | awk '{ printf "%s", substr($1, 1, 8) }')
   case "${_pc_ss:-}" in '') _pc_ss="nosettings" ;; esac
   # ③ 槽位清单（**内容哈希进 key**）+ 脚本版本。
@@ -1711,7 +1711,7 @@ do_report() {
     [ -f "$LIB/$id.ttf" ] || continue
     echo "  $(name_of "$id"): $(( $(wc -c < "$LIB/$id.ttf") / 1024 )) KB | 范围 $(effective_scope "$id") | 元数据 $(meta_compact "$id")"
   done
-  echo "设置: keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) keep_lockscreen=$(cfg_get keep_lockscreen 0)"
+  echo "设置: keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) keep_lockscreen=$(keep_lockscreen_val)"
   echo "字体库: $(ls "$LIB"/f*.ttf 2>/dev/null | wc -l) 个，占用 $(du -sk "$LIB" 2>/dev/null | cut -f1) KB"
   echo "---- 槽位 ----"
   echo "字体目录: $(slot_dirs | tr '\n' ' ')"
@@ -1881,7 +1881,7 @@ case "${1:-}" in
     # ★ 2026-10-17：把「保留锁屏时钟」的当前值也返回给界面。
     #   界面靠它决定下次点击要写 0 还是 1；不回传的话，界面只能靠本地缓存，
     #   一旦某次没回写就会"交替失败"（用户实测过）。
-    echo "KL=$(cfg_get keep_lockscreen 0)"
+    echo "KL=$(keep_lockscreen_val)"
     # ★ 2026-10-24：把「中文合集替换」的**生效值**也给界面（1/0），
     #   界面新增的开关靠它回显；没有这一行，开关就只能靠猜。
     echo "TR=$(ttc_effective 2>/dev/null)"
@@ -2035,7 +2035,7 @@ case "${1:-}" in
     echo "PM=$(cat "$MODDIR/payload.mode" 2>/dev/null | tr -d '[:space:]')"
     echo "RM=$(root_manager)"
     echo "V=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)"
-    echo "KL=$(cfg_get keep_lockscreen 0)"
+    echo "KL=$(keep_lockscreen_val)"
     _ttcn=$(awk '$2 ~ /\.ttc$/ { c++ } END { print c + 0 }' "$MODDIR/slots.map" 2>/dev/null)
     case "${_ttcn:-}" in ''|*[!0-9]*) _ttcn=0 ;; esac
     echo "TT=$_ttcn"
@@ -2425,7 +2425,7 @@ case "${1:-}" in
         ;;
       *)
         # ttc_replace 回显的是**生效值**：这类机型即使没手动设过，界面开关也该是亮的
-        echo "keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0) keep_lockscreen=$(cfg_get keep_lockscreen 0) symlink_payload=$(cfg_get symlink_payload 0) "
+        echo "keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0) mount_mode=$(mount_mode) ttc_replace=$(ttc_effective) theme_fonts=$(cfg_get theme_fonts 0) keep_lockscreen=$(keep_lockscreen_val) symlink_payload=$(cfg_get symlink_payload 0) "
         ;;
     esac
     ;;
