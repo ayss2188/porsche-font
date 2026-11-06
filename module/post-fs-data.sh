@@ -151,3 +151,9 @@ if [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/payload.mode")" = manager ]; th
   exit 0
 fi
 payload_mount "$MODDIR" post-fs-data
+
+# ★ 2026-11-06：混合挂载 —— manager 模式下补挂 /data 主题字体（管理器挂不到）
+# ★ 2026-11-06：用 mount_mode（payload.mode 文件可能缺失/为空），并且任何 /data 槽位都补挂
+if [ -s "$MODDIR/slots.map" ] && [ "$(mount_mode 2>/dev/null)" = manager ]; then
+  ( . "$MODDIR/mount.sh" 2>/dev/null; mount_data_slots_only ) >/dev/null 2>&1
+fi

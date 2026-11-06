@@ -1129,6 +1129,8 @@ plan_cache_save() {   # $1=sel $2=stage.map $3=stage.list $4=scope $5=kllast $6=
 }
 
 do_apply() {
+  # ★ 2026-11-06：记录切换历史（诊断报告【22】会显示）
+  printf '%s %s%s\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "${1:-?}" "${CFS_PREWARM:+ (prewarm)}" >> "${LIB:-/data/adb/custom_font_lib}/switch.log" 2>/dev/null
   local sel scope plan role rel id src dest stage mode COUNT=0 fail=0 wid
   GRP_LAST=""; GRP_PAIRS=""     # 多字重配对的缓存（见 grp_load）
   sel=$(check_sel "$1") || { echo "$sel"; exit 1; }
@@ -1173,7 +1175,18 @@ do_apply() {
   KLLAST=""
   plan="$LIB/.plan.$$"
   stage="$MODDIR/.stage.$$"
-  rm -rf "$MODDIR"/.stage.* 2>/dev/null
+  # ★ 2026-11-06（真机：开关主题字体时报 can't open .stage.<pid>.map）：
+  #   打开/关闭开关会同时拉起 rescan / apply / prewarm 多个 fontctl，
+  #   原来的 `rm -rf $MODDIR/.stage.*` 会把**别的进程正在用的** stage 一起删掉。
+  #   现在只清理「对应 pid 已经不在了」的旧 stage。
+  mkdir -p "$stage" 2>/dev/null
+  for _sd in "$MODDIR"/.stage.*; do
+    [ -e "$_sd" ] || continue
+    [ "$_sd" = "$stage" ] && continue
+    _spid=${_sd##*/.stage.}
+    case "$_spid" in ''|*[!0-9]*) rm -rf "$_sd" 2>/dev/null; continue ;; esac
+    kill -0 "$_spid" 2>/dev/null || rm -rf "$_sd" 2>/dev/null
+  done
   scope=none
   GRP_LAST=""; GRP_PAIRS=""     # 多字重配对的缓存（见 grp_load）
   # .ttc 合集替换 + 替换范围的"决策记录"（诊断报告会原样打印）。
@@ -1900,6 +1913,14 @@ case "${1:-}" in
     _ttcn=$(awk '$2 ~ /\.ttc$/ { c++ } END { print c + 0 }' "$MODDIR/slots.map" 2>/dev/null)
     case "${_ttcn:-}" in ''|*[!0-9]*) _ttcn=0 ;; esac
     echo "TT=$_ttcn"
+    # ★ 2026-11-06：混合挂载状态（元模块挂系统分区 + 模块 bind 补挂 /data）
+    _hy19=0
+    if [ "$(mount_mode 2>/dev/null)" = manager ] && grep -qE '^[^ ]+ (/?data/)' "$MODDIR/slots.map" 2>/dev/null; then
+      # 挂到的可能是符号链接的真实路径（/system/fonts/…），所以只看 .mounted 是否有记录
+      [ -s "${LIB:-/data/adb/custom_font_lib}/.mounted" ] && _hy19=1
+    fi
+    echo "HY=$_hy19"
+
     # ★ 2026-11-01：PD=1 = 计划比本次开机新（改了开关/换了字体还没重启）
     #   ★ 2026-11-01（作者反馈"A切B再切A应该变回正常"）：mtime 新还不够 ——
     #     再比一次**内容**：与开机快照逐字节一致（A→B→A、开关开→关→开）= 实际
@@ -2227,6 +2248,12 @@ case "${1:-}" in
   apply)
     mark_dirty
     do_apply "$2"
+
+  # ★ 2026-11-06：manager 模式 + 主题字体槽位 → 每次应用后立刻补挂 /data，
+  #   不用等下一次开机（原来只在 post-fs-data 跑，用户切完开关看不到效果）。
+  if [ "$(mount_mode 2>/dev/null)" = manager ] && [ -s "$MODDIR/slots.map" ]; then
+    ( . "$MODDIR/mount.sh" 2>/dev/null; mount_data_slots_only ) >/dev/null 2>&1
+  fi
     ;;
   rescan)
     mark_dirty

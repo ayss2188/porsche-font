@@ -425,9 +425,68 @@ _lang_is() {   # $1=语言标签串  $2=要找的码（如 ko / ja）
 # 性能：整份 XML 只起 2 个进程（tr + sed），结果在同一进程里缓存（SCAN_NAMES_CACHE）。
 # ---------------------------------------------------------------------------
 slot_scan_names() {
+  # ★ 2026-11-06（真机 Y2 96 秒）：awk 快速通道 —— 一次扫完整份 XML，
+  #   按 family 提取 name/lang 和 <font> 文件名，规则与下面的 shell 版一致。
+  if [ -z "${SCAN_NAMES_CACHE+x}" ] || [ -z "$SCAN_NAMES_CACHE" ]; then
+    _sn_awk='{
+      buf = buf " " $0
+    }
+    END {
+      n = split(buf, parts, "<family")
+      for (i = 2; i <= n; i++) {
+        chunk = parts[i]
+        gt = index(chunk, ">")
+        if (gt <= 0) continue
+        hdr = substr(chunk, 1, gt - 1)
+        body = substr(chunk, gt + 1)
+        name = ""
+        if (match(hdr, /name="[^"]*"/)) name = substr(hdr, RSTART + 6, RLENGTH - 7)
+        lang = ""
+        if (match(hdr, /lang="[^"]*"/)) lang = tolower(substr(hdr, RSTART + 6, RLENGTH - 7))
+        low = tolower(name)
+        if (low ~ /emoji|symbol|mono|cursive|casual|math|music|clock/) continue
+        if (low ~ /serif/ && low !~ /sans-serif|sansserif/) continue
+        role = ""
+        if (lang ~ /zh-hant|zh-bopo|zh-hk|zh-tw|zh-mo/) role = "lang"
+        else if (lang ~ /zh/) role = "cjk"
+        else if (lang == "") role = "main"
+        else if (lang ~ /en|und-latn/) role = "latin"
+        else if (lang ~ /(^|-|_)ja($|-|_)/) role = "kana"
+        else if (lang ~ /(^|-|_)ko($|-|_)/) role = "hangul"
+        if (role == "") continue
+        dl = (lang == "" ? "und" : lang)
+        b = body
+        while (match(b, /[A-Za-z0-9_.-]+\.(ttf|otf|TTF|OTF|ttc|TTC)/)) {
+          f = substr(b, RSTART, RLENGTH)
+          m = split(f, seg, "/")
+          print role " " seg[m] " " dl
+          b = substr(b, RSTART + RLENGTH)
+        }
+      }
+    }'
+    _sn_fast=""
+    for _x in $(slot_xml_files 2>/dev/null); do
+      [ -f "$_x" ] || continue
+      _sn_fast="$_sn_fast$(awk "$_sn_awk" "$_x" 2>/dev/null)
+"
+    done
+    _sn_fast=$(printf '%s\n' "$_sn_fast" | sed '/^[[:space:]]*$/d' | sort -u)
+    if [ -n "$_sn_fast" ]; then
+      SCAN_NAMES_CACHE="$_sn_fast"
+      printf '%s\n' "$SCAN_NAMES_CACHE" | grep .
+      return 0
+    fi
+  fi
   local x fam hdr body rest name n l role
   # ★ 2026-10-16 修：空结果不许当缓存（同上）
   if [ -z "${SCAN_NAMES_CACHE+x}" ] || [ -z "$SCAN_NAMES_CACHE" ]; then
+    # ★ 2026-11-06（真机报告 Y2 占 96 秒）：XML 解析结果落盘缓存，
+    #   键 = 所有 XML 文件的「路径:大小:修改时间」；没变就直接 cat。
+    _sn_cf="${LIB:-/data/adb/custom_font_lib}/.scan_names.cache"
+    _sn_key=$(stat -c '%n:%s:%Y' $(slot_xml_files 2>/dev/null) 2>/dev/null | tr '\n' '|')
+    if [ -s "$_sn_cf" ] && [ -n "$_sn_key" ] && [ "$(head -n 1 "$_sn_cf" 2>/dev/null)" = "$_sn_key" ]; then
+      SCAN_NAMES_CACHE=$(tail -n +2 "$_sn_cf" 2>/dev/null)
+    else
     SCAN_NAMES_CACHE=$(
       for x in $(slot_xml_files); do
         [ -f "$x" ] || continue
@@ -482,6 +541,11 @@ slot_scan_names() {
             done
       done | sort -u
     )
+    if [ -n "$SCAN_NAMES_CACHE" ] && [ -n "$_sn_key" ]; then
+      { printf '%s\n' "$_sn_key"; printf '%s\n' "$SCAN_NAMES_CACHE"; } > "$_sn_cf.tmp.$$" 2>/dev/null \
+        && mv -f "$_sn_cf.tmp.$$" "$_sn_cf" 2>/dev/null
+    fi
+    fi
   fi
   printf '%s\n' "$SCAN_NAMES_CACHE" | grep -v '^[[:space:]]*$'
 }

@@ -604,6 +604,48 @@ pid1_visible() {   # $1=moddir
   printf 'PID1 %s %s %s\n' "${_pv_v:-0}" "${_pv_m:-0}" "$_pv_list"
 }
 
+
+# ★ 2026-11-06（混合挂载）：manager 模式下，管理器 / 元模块只挂系统分区，
+#   /data 上的主题字体（theme_webview、theme/fonts）它挂不到 —— 用户在管理器模式下
+#   开「也替换主题里选的字体」就会一直不生效。这里由模块自己补挂这两类目录，
+#   系统分区仍然交给管理器，互不冲突。
+mount_data_slots_only() {
+  local map="${MODDIR:-}/slots.map" id rel src dst n=0 ok=0
+  [ -s "$map" ] || return 0
+  while read -r id rel src || [ -n "${rel:-}" ]; do
+    case "$id" in ""|*[!A-Za-z0-9_]*) continue ;; esac
+    case "$rel" in ""|/*|*..*) continue ;; esac
+    dst="/$rel"
+    # 计划里所有 /data 槽位都归模块补挂（管理器/元模块挂不到 /data）
+    case "$dst" in
+      /data/*) ;;
+      *) continue ;;
+    esac
+    [ -n "${src:-}" ] || src="${LIB:-/data/adb/custom_font_lib}/$id.ttf"
+    [ -f "$src" ] && [ -f "$dst" ] || continue
+    n=$((n + 1))
+    if [ "$(stat -L -c '%d:%i' "$src" 2>/dev/null)" = "$(stat -L -c '%d:%i' "$dst" 2>/dev/null)" ]; then
+      continue
+    fi
+    # ★ 主题字体常是符号链接（-> /system/fonts/xxx 或同目录其它文件），
+    #   bind mount 会跟到真实路径：按真实路径挂，并把真实路径记下来。
+    _rdst=$(readlink -f "$dst" 2>/dev/null)
+    [ -n "$_rdst" ] || _rdst="$dst"
+    if mount --bind "$src" "$_rdst" 2>/dev/null; then
+      ok=$((ok + 1))
+      printf '%s\n' "$_rdst" >> "${LIB:-/data/adb/custom_font_lib}/.mounted" 2>/dev/null
+    elif [ "$(stat -L -c '%d:%i' "$src" 2>/dev/null)" = "$(stat -L -c '%d:%i' "$_rdst" 2>/dev/null)" ]; then
+      # 目标已经指向我们的字体（可能被管理器挂了，或指向同一个已替换的文件）
+      ok=$((ok + 1))
+      printf '%s\n' "$_rdst" >> "${LIB:-/data/adb/custom_font_lib}/.mounted" 2>/dev/null
+    else
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 混合挂载失败：$_rdst" >> "${LIB:-/data/adb/custom_font_lib}/mount.log" 2>/dev/null
+    fi
+  done < "$map"
+  echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 混合挂载：/data 主题字体 $ok/$n" >> "${LIB:-/data/adb/custom_font_lib}/mount.log" 2>/dev/null
+  return 0
+}
+
 payload_verify() {
   # 逐个核对 slots.map 里的槽位到底生效了没有，输出 "命中数 总数"。
   #

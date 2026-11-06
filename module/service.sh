@@ -434,3 +434,8 @@ _ota_guard() {
 }
 # 后台跑，别拖慢开机
 ( _ota_guard ) >/dev/null 2>&1 &
+
+# ★ 2026-11-06：service 阶段再补挂一次 /data 主题字体（防止 post-fs-data 时计划还没就绪）
+if [ -s "$MODDIR/slots.map" ] && [ "$(mount_mode 2>/dev/null)" = manager ]; then
+  ( . "$MODDIR/mount.sh" 2>/dev/null; mount_data_slots_only ) >/dev/null 2>&1 &
+fi

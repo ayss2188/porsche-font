@@ -562,6 +562,7 @@ body { min-height: 100%; }
               padding: 10px; margin-bottom: 12px; font-size: 12.5px; line-height: 1.65; }
   .rep-view.show { display: block; }
   .rep-view::-webkit-scrollbar { width: 6px; }
+  .rv-grp{margin:14px 0 6px;padding:6px 10px;border-radius:8px;background:rgba(124,92,255,.12);color:var(--text);font-size:13px;font-weight:600}
   .rep-view::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   /* 结论卡：最上面的"结论"，最该被看到 */
   .rv-concl { border-radius: 12px; padding: 11px 12px; margin-bottom: 10px; line-height: 1.7;
@@ -1629,18 +1630,18 @@ try {
   <div class="section-title fade"><span>替换范围</span></div>
   <div class="g-hint" style="margin-bottom:8px">日文、韩文、繁体、时钟、代码、斜体 —— 全部都会换成你的字体，不用设置。<br>如果某个字没变、或者显示成方块（□），那是<b>你的字体里没有那个字</b>；诊断报告里会列出是哪些。</div>
   <div class="switch-row fade" onclick="toggleSetting('theme_fonts')">
-    <div><div class="t">也替换主题里选的字体</div><div class="d">有些机型会把「设置 → 字体样式」或主题商店里选的那份字体单独存一份，它比系统字体优先，不换它就不生效。<br><b>开</b>：那份也换成你的字体，设置里的选择会失效。<br><b>关</b>：只换系统字体。</div></div>
+    <div><div class="t">也替换主题里选的字体</div><div class="d">有些机型会把「设置 → 字体样式」或主题商店里选的那份字体单独存一份，它比系统字体优先，不换它就不生效。<br><b>开</b>：那份也换成你的字体，设置里的选择会失效。<br><b>关</b>：只换系统字体。<br><b>注意</b>：主题字体在 /data 上，元模块本身挂不到。如果「自带挂载」是关的（交给元模块），打开这个开关后会自动用<b>「混合挂载」</b>：元模块挂系统分区、模块补挂 /data（诊断报告里会写「混合挂载」）。</div></div>
     <div class="sw" id="sw_theme_fonts"></div>
   </div>
   <div class="switch-row fade" onclick="toggleSetting('keep_lockscreen')">
-    <div><div class="t">保留锁屏时钟字体</div><div class="d">已知这几家把<b>时钟字体单独放一族</b>：<br>· 小米 / 红米 / POCO（miclock、mitype-clock）<br>· 红魔 / 努比亚 / 中兴（RedMagicDigit、ZDigit）<br>· 三星 One UI（SECNum 数字族）<br>默认会连它们一起换成你的字体。<br><b>开</b>：这些保留原样，你还能在系统里换时钟样式。<br><b>关</b>：连锁屏时钟也一起换。<br>（其他品牌没有单独的时钟字体，开关无影响）<br><b>ColorOS 强制保留</b>：时钟数字字体宽度是专门调的，换掉会错位，这个开关在 ColorOS 上不起作用。</div></div>
+    <div><div class="t">保留锁屏时钟字体</div><div class="d">已知这几家把<b>时钟字体单独放一族</b>：<br>· 小米 / 红米 / POCO（miclock、mitype-clock）<br>· 红魔 / 努比亚 / 中兴（RedMagicDigit、ZDigit）<br>· 三星 One UI（SECNum 数字族）<br>默认会连它们一起换成你的字体。<br><b>开</b>：这些保留原样，你还能在系统里换时钟样式。<br><b>关</b>：连锁屏时钟也一起换。<br>（其他品牌没有单独的时钟字体，开关无影响）</div></div>
     <div class="sw" id="sw_keep_lockscreen"></div>
   </div>
 
   </div>
 
   <div class="switch-row fade" onclick="toggleSetting('mount_mode')">
-    <div><div class="t">自带挂载</div><div class="d"><b>开</b>：模块自己把字体挂上去（推荐，不用装元模块）。<br><b>关</b>：交给 Root 管理器 / 元模块来挂。</div></div>
+    <div><div class="t">自带挂载</div><div class="d"><b>开</b>：模块自己挂全部字体（系统分区 + /data）。<br><b>优点</b>：不用额外安装元模块，对临时 root 用户更方便。<br><b>缺点</b>：部分 App 可能存在闪退。bind mount 挂载会漏一点环境，正常不影响使用；对环境要求较高请用元模块挂载。<br><b>关</b>：交给元模块挂载，不漏环境，更稳。<br>关着时如果又打开了「也替换主题里选的字体」，会使用<b>「混合挂载」</b>：元模块挂系统分区，自带 bind mount 挂载补 /data 上的主题字体（元模块挂不到 /data）。对「不漏环境」有要求的，不要开这个开关。</div></div>
     <div class="sw on" id="sw_mount_mode"></div>
   </div>
   <div class="g-hint">改完会自动重新生成，重启生效。</div>
@@ -1771,7 +1772,7 @@ try {
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1105-1620</div>
+  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1106-1920</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -2471,7 +2472,7 @@ function applyStatus(st) {
     //    （= mount.state 是本次开机写的）。
     const moOk = +(mo[0] || 0), moFail = +(mo[1] || 0);
     const moSame = +(mo[3] || 0), moSkip = +(mo[4] || 0);
-    if (g("PM") === "manager") setValue("mountLabel", "交给管理器挂载");
+    if (g("PM") === "manager") setValue("mountLabel", g("HY") === "1" ? "混合挂载" : "交给管理器挂载");
     else if (activeId === "none") setValue("mountLabel", "无需挂载");
     else if (moOk || moSame || moFail || moSkip) {
       // 这行只报挂载动作本身，写短一点（一行放得下）；"到底生效没有"由下面那行逐个核对负责
@@ -8763,7 +8764,9 @@ async function toggleSetting(key) {
            + "开：那份也换成你的字体。\n"
            + "不开：只换系统字体。\n\n"
            + "注意：开了之后，你在设置里选的那个字体会失效 —— 如果那个字体是你用来调「字体粗细」的，粗细也会跟着失效。\n"
-           + "想还原：关掉这个开关（或到设置里重新选一次字体）。",
+           + "想还原：关掉这个开关（或到设置里重新选一次字体）。\n\n"
+           + "主题字体在 /data 上：如果「自带挂载」是关的（交给元模块），\n"
+           + "打开这个开关后会走「混合挂载」：元模块挂系统分区、模块补挂 /data。",
         okText: "仍然打开", danger: true
       });
       if (!ok) return;
@@ -8940,6 +8943,18 @@ const repTxt = () => repEl("reportText");
     if (warn) return { text: warn + " 处注意", cls: "warn" };
     return null;
   }
+    // ★ 2026-11-06：结构化视图按类别分组，默认全部收起
+  function rvGroupOf(idx) {
+    if (idx === undefined || idx === null || idx === "") return "附录（耗时 / 可信度）";
+    const n = +idx;
+    if (n <= 2) return "一、概览与结论";
+    if (n <= 6) return "二、挂载与槽位";
+    if (n <= 10) return "三、字体配置与来源";
+    if (n <= 14) return "四、字体文件与合集";
+    if (n <= 18) return "五、记录与账本";
+    if (n <= 22) return "六、模块全量 / 环境 / 历史";
+    return "七、其他";
+  }
   function repRenderView(text, partial) {
     const host = repView();
     if (!host) return;
@@ -8950,6 +8965,7 @@ const repTxt = () => repEl("reportText");
       out.push('<div class="rv-concl warn"><div class="rv-line">⚠ 这一份是<b>未完成</b>的（生成被中断或超时），' +
                '下面只是已经写好的部分。</div><div class="rv-line">点「重生成」可以拿到完整的报告。</div></div>');
     }
+    let _lastGrp = "";
     for (const sec of secs) {
       if (sec.concl) {
         const joined = sec.lines.join("\n");
@@ -8961,8 +8977,10 @@ const repTxt = () => repEl("reportText");
       }
       const flag = rvSummaryOf(sec);
       const flagHtml = flag ? '<span class="rv-flag ' + flag.cls + '">' + flag.text + "</span>" : "";
-      const open = (sec.idx && sec.idx <= 3) ? " open" : "";     // 前 3 节默认展开
+      const open = "";                                       // ★ 默认全部收起
       const body = sec.lines.map(l => (l.trim() === "" ? "" : rvLine(l))).join("\n");
+      const _grp = sec.concl ? "一、概览与结论" : rvGroupOf(sec.idx);
+      if (_grp !== _lastGrp) { _lastGrp = _grp; out.push('<div class="rv-grp">' + repEsc(_grp) + '</div>'); }
       out.push('<details class="rv-sec"' + open + '><summary>' + repEsc(sec.title) + flagHtml + "</summary>" +
                '<div class="rv-body">' + (body.trim() ? body : '<span class="rv-empty">（本节没有内容）</span>') +
                "</div></details>");
@@ -8987,6 +9005,14 @@ const repTxt = () => repEl("reportText");
   function repPutText(text, partial) {
     const t = repTxt();
     if (t) { t.value = text; t.scrollTop = 0; }
+    // ★ 2026-11-06：不管从哪条路进来，都统计一次已生成的节数
+    try {
+      window.__repSecs = window.__repSecs || new Set();
+      (String(text || "").match(/【(\d+)】/g) || []).forEach(function (x) {
+        var n = +(x.match(/\d+/) || [0])[0];
+        if (!isNaN(n)) window.__repSecs.add(n);
+      });
+    } catch (e) {}
     repRenderView(text, !!partial);
     repShowView(repViewMode);
     // 有内容了就把"原样文本 / 结构化视图"切换按钮显示出来
@@ -9077,7 +9103,8 @@ function repPhase(phase) {
 }
 function setRepBar(step, label, ratio, sub) {
   const r = Math.max(0, Math.min(1, ratio || 0));
-  repEl("reportStepText").textContent = (step ? "第 " + step + " 步 · " : "") + (label || "处理中");
+  repEl("reportStepText").textContent = (step ? "第 " + step + " 步 · " : "") + (label || "处理中")
+      + (window.__repSecs && window.__repSecs.size ? " ｜ 已生成 " + window.__repSecs.size + "/" + (window.__repTotalSecs || 24) + " 节" : "");
   repEl("reportPct").textContent = Math.round(r * 100) + "%";
   repEl("reportProgressBar").style.width = Math.round(r * 100) + "%";
   if (sub !== undefined) repEl("reportSubText").textContent = sub;
@@ -9478,6 +9505,10 @@ function loadEstimate() {
   }).catch(() => {});
 }
 
+  // ★ 2026-11-06：报告分节计数（进度条按“已生成多少节”显示）
+  window.__repSecs = window.__repSecs || new Set();
+  window.__repTotalSecs = 24;   // 【0】~【22】 + 耗时表 + 数据可信度
+
 // "看更多"：分段取正文（一次 60 KB），避免把几百 KB 一次性塞进输入框
 async function reportMore() {
   const btn = repEl("reportMoreBtn");
@@ -9493,6 +9524,13 @@ async function reportMore() {
     repDisp.offset = next || (repDisp.offset + body.length);
     repDisp.size = total || repDisp.size;
     repDisp.shown += body.length;
+    // 统计已生成的节（【N】）
+    try {
+      (body.match(/【(\d+)】/g) || []).forEach(function (x) {
+        var n = +(x.match(/\d+/) || [0])[0];
+        if (!isNaN(n)) window.__repSecs.add(n);
+      });
+    } catch (e) {}
     repPutText(repTxt().value + body, false);   // 同步两种视图
     repTxt().scrollTop = repTxt().scrollHeight;
     if (repDisp.shown >= REP_VIEW_MAX) {

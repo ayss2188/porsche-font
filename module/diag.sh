@@ -516,7 +516,9 @@ fp_cache_hit() {
   #   于是键跟缓存里存的真实 mtime 永远对不上（1731 条缓存，命中 0 次）。
   #   现在 mtime 命中后再比：不一致才当 miss，既可靠又不会漏。
   _mt3=${3:-}
-  key="${1}${FP_TAB}${2}${FP_TAB}"
+  # ★ 2026-11-06：路径里可能带 \r 或行尾空白（真机 447 条缓存全部 miss 的原因之一）
+  _st_p=$(printf '%s' "$1" | tr -d '\r' | sed 's/[[:space:]]*$//')
+  key="${_st_p}${FP_TAB}${2}${FP_TAB}"
   case "$FP_CACHE" in
     *"$key"*)
       v=${FP_CACHE#*"$key"}
@@ -654,23 +656,13 @@ fp_cache_compact_if_big() {
 
 fp_of() {
   local f="$1" sz mt
-  # ★ 2026-10-14：先查批量 stat 建好的表（load_meta），查不到再回退去 stat。
-  #   原来这里每文件 2 次 stat（%s + %Y）—— 一加 218 个文件、三星 274 个，
-  #   就是 400~550 次 fork/exec，而真机上每次 stat 都要动那个几十 MB 文件的目录项。
-  #   调用方（第 6 步的两遍循环）现在会先 load_meta "$d"，
-  #   所以这两个查询命中的是纯 shell 字符串匹配，零进程。
+  # ★ 2026-11-06（作者要求：报告要快，哈希没用）：
+  #   指纹改成「大小 + 修改时间」，不再读头尾 64KB 算 sha256。
+  #   报告里每个字体仍有：大小、修改时间、魔数、表标签、是否可变、字形数…
+  #   只是不再提供“内容级哈希”。这样几百个字体省掉几百次 sha256。
   sz=$(sz_lookup "$f"); mt=$(mt_lookup "$f")
-  if [ -z "$sz" ]; then printf '%s' "-"; return 0; fi
-  # ★ 先查指纹缓存：大小与修改时间都对得上 → 直接复用，不读盘
-  if fp_cache_hit "$f" "$sz" "$mt"; then printf '%s' "$FP_HIT"; return 0; fi
-  # tail -c 可能因 busybox 版本差异不支持，兜底只取头部（一样能判变化）
-  # ★ 2026-10-18（提速）：取哈希首字段不再多起一个 cut 进程，改用 read 拆字段。
-  #   这个函数每个字体都会跑一次（真机 300 个左右），省下来就是 300 个进程。
-  {
-    printf 'sz=%s mt=%s\n' "$sz" "$mt"
-    head -c 65536 "$f" 2>/dev/null
-    tail -c 65536 "$f" 2>/dev/null
-  } | sha256sum 2>/dev/null | { read -r _h _rest; printf '%s' "${_h}"; }
+  [ -n "$sz" ] || { printf '%s' "-"; return 0; }
+  printf 's:%s-%s' "$sz" "$mt"
 }
 
 # 带缓存的指纹（计算后写回缓存）—— 第 6 步统一走这个
@@ -2164,6 +2156,14 @@ conclusion() {
       echo "   这个模式下本模块只负责把文件放进模块目录，真正挂载由管理器 / 元模块负责 ——"
       echo "   它没挂，本模块替代不了（第 3 节能看到 /system/fonts 里没有任何本模块的挂载）。"
       echo "   → 到 WebUI 把挂载方式改回「自带挂载」，重启一次即可（实测这条能生效）。"
+
+  # ★ 2026-11-06：管理器模式 + 开了主题字体替换时，直接提醒（不然看起来像 bug）
+  if [ "$(mount_mode 2>/dev/null)" = manager ] && [ "$(cfg_get theme_fonts 0 2>/dev/null)" = 1 ]; then
+    echo "ℹ 当前是「交给管理器挂载」：系统分区由管理器挂，"
+    echo "   /data 上的主题字体由模块补挂（混合挂载）。"
+    echo "   若主题字体没变，看 $LIB/mount.log 里有没有「混合挂载」这一行（成功/失败数）。"
+  fi
+
     fi
   elif [ "$PFD_THIS" != 0 ] && [ -z "$MS_BOOT" ]; then
     echo "❌ 结论：开机脚本跑了，但「挂载阶段」没有留下任何记录。"
@@ -2250,7 +2250,7 @@ conclusion() {
   fi
 
         echo "本次口径: 完整报告（唯一口径）"
-        echo "本次指纹: 稀疏指纹（大小+修改时间+头尾各 64KB 的 sha256）—— 用于判断字体有没有被替换；同一份文件只算一次"
+        echo "本次指纹: 轻量指纹（大小+修改时间）—— 用于判断字体有没有被替换；同一份文件只算一次"
   echo "挂载实测: $MT_RESULT"
   echo "待生效: ${PEND:-none}    当前生效: ${ACT:-none}"
   echo "（两个不一致 = 这次的选择还没被任何一次开机处理过）"
@@ -3234,52 +3234,25 @@ pack_extra() {
   HASH_MAP=""          # "|dev:inode=指纹|..."（去重后的唯一文件）
   HASH_KEY=""; HASH_SEEN=""; HASH_DONE=0; HASH_TOTAL=0
   HASH_BATCH=""; HASH_BN=0
-  # 第一遍：算出所有**唯一文件**的指纹
-  # ★★ 1.0.9.2 定稿：**就用每文件一次 stat**（原版写法）。
-  #   我试过"整个目录一次 stat 建表 + 内存查表"，真机实测**更慢**：
-  #     每文件 stat：288 秒   →   批量建表 + 大字符串查表：**314 秒**
-  #   原因：`case "$INODE_MAP" in *";$f|"*` 要在**上万字符**的表里逐个匹配，
-  #   293 个文件 × 表越来越长，纯 shell 的字符串匹配比直接起一次 `stat` 还贵。
-  #   教训：**"少起进程"不等于"更快"** —— 大字符串查表在 shell 里也是 O(n·m)。
-  #   要提速得换思路（批量 sha256sum 之类），不能靠"把进程换成字符串匹配"。
+  # ★ 2026-11-06（真机第 6 步 27 分钟）：第一遍指纹改成纯 stat ——
+  #   每个文件一次 stat 拿 dev:inode + 大小 + mtime，不走指纹缓存、不读文件内容。
   for d in $HDIRS; do
     [ -d "$d" ] || continue
     for f in "$d"/*; do
       [ -f "$f" ] || continue
-      _hk=$(stat -c '%d:%i' "$f" 2>/dev/null)
-      if [ -n "$_hk" ]; then
-        case "$HASH_SEEN" in *"|$_hk|"*) continue ;; esac    # 这份内容算过了
-        HASH_SEEN="$HASH_SEEN|$_hk|"
-      fi
+      _st=$(stat -c '%d:%i %s %Y' "$f" 2>/dev/null) || continue
+      set -- $_st
+      _hk="${1:-}"; _hsz="${2:-0}"; _hmt="${3:-0}"
+      [ -n "$_hk" ] || continue
+      case "$HASH_SEEN" in *"|$_hk|"*) continue ;; esac
+      HASH_SEEN="$HASH_SEEN|$_hk|"
       HASH_TOTAL=$((HASH_TOTAL + 1))
-      # ★ 门牌号快判：这个文件就是我们挂上去的那份 → 不用读盘算指纹
-      if [ "$FP_FAST" = 1 ] && [ -n "$_hk" ]; then
-        case "$OUR_INO" in
-          *"|$_hk="*)
-            _oid=${OUR_INO#*"|$_hk="}; _oid=${_oid%%|*}
-            HASH_MAP="$HASH_MAP|$_hk=o:$_oid"
-            HASH_DONE=$((HASH_DONE + 1))
-            FP_FAST_N=$((FP_FAST_N + 1))
-            continue ;;
-        esac
-      fi
-      case "$f" in
-        *" "*)
-          hash_flush
-          # 文件名带空格：单独算，并且立刻记进表（hash_one 自己会打印一行，这里改用只算不打印）
-          _h1=$(sha256sum "$f" 2>/dev/null); _h1=${_h1%% *}
-          [ -n "$_h1" ] || _h1="-"
-          [ -n "$_hk" ] && HASH_MAP="$HASH_MAP|$_hk=$_h1"
-          HASH_DONE=$((HASH_DONE + 1))
-          continue ;;
-      esac
-      HASH_KEY="$HASH_KEY $_hk"      # 与 HASH_BATCH 位置一一对应
-      HASH_BATCH="$HASH_BATCH $f"
-      HASH_BN=$((HASH_BN + 1))
-      [ "$HASH_BN" -ge 20 ] && hash_flush
+      HASH_MAP="$HASH_MAP|$_hk=s:$_hsz-$_hmt"
+      HASH_DONE=$((HASH_DONE + 1))
+      [ $((HASH_DONE % 25)) -eq 0 ] && breathe "指纹 $HASH_DONE/$HASH_TOTAL" "$HASH_DONE" "$HASH_TOTAL" 2>/dev/null
     done
-    hash_flush
   done
+
   # 第二遍：每个路径各输出一行（重复的复用指纹），这样报告里路径一行不少
   HN=0
   for d in $HDIRS; do
@@ -3325,6 +3298,11 @@ pack_extra() {
     fi
     for f in "$d"/*; do
       [ -f "$f" ] || continue
+      # ★ 2026-11-06：表信息阶段最多 60 秒，超时就跳过剩余（先保证报告能出）
+      if [ $(( $(now_s) - _PZ_T )) -gt 60 ]; then
+        echo "  （表信息超过 60 秒：剩余文件已跳过，报告仍可用于定位问题）"
+        break 2
+      fi
       b=${f##*/}
       if want_tags "$b"; then
         tags=$(sfnt_tags "$f")
@@ -3420,7 +3398,7 @@ pack_extra() {
     # 字体库文件也在闪存上：轻量模式同样只读前 1 MB（自己的字体常有几十 MB，全读太伤盘）
     # 1.0.9.2：字体库文件走同一个稀疏指纹口径（和字体目录保持一致，便于互相比对），
     # 用于判断“库里这个文件有没有被动过”；不再需要轻量分支。
-    printf '%s  %s  %s\n' "$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)" "$(stat -c %s "$f" 2>/dev/null)" "$f"
+    printf '%s  %s  %s\n' "-" "$(stat -c %s "$f" 2>/dev/null)" "$f"
   done
   for f in $LIB_FONTS; do
     i=${f##*/}; i=${i%.ttf}
@@ -3958,7 +3936,8 @@ report_full() {
   echo "  说明：这是**加速手段**，不影响任何结论；不一致时会自动退回慢速但可靠的路径。"
 
   echo
-  echo "【数据可信度】指纹缓存自检（抽样重算比对）"
+
+    echo "【数据可信度】指纹缓存自检（抽样重算比对）"
   hr
   fp_cache_verify
   echo
@@ -4401,7 +4380,7 @@ kit_report() {
   _TT=$(now_s); { sec18; } >> "$tmpf" 2>&1; timing_add 'Y sec18 决策记录' "$_TT"
   export_part "$tmpf"
   _PH_T0=$(now_s)
-  dphase '6/7 逐文件指纹（稀疏：大小+mtime+头尾 64KB，同一份只算一次）'
+  dphase '6/7 逐文件指纹（大小+修改时间，同一份只算一次）'
   pack_extra >> "$tmpf" 2>&1
   timing_add '6 打包原始配置与哈希清单' "$_PH_T0"
   {
@@ -4411,7 +4390,256 @@ kit_report() {
     printf '%s' "$TIMING_LIST"
     echo "合计|$(( $(now_s) - ${_KR_T0:-$(now_s)} ))"
     echo
-    echo "【数据可信度】指纹缓存自检（抽样重算比对）"
+  # ★ 2026-11-06：新增【19】新功能现状 —— 用户反馈"某个新功能不好用"时，
+  #   作者一眼能看到：导入格式模块在不在、最近备份、OTA 适配记录、挂载方式、主题时钟。
+  echo "【19】新功能现状（导入格式 / 备份 / OTA / 挂载方式）"
+  hr
+  echo "  挂载方式：$(mount_mode 2>/dev/null)（self=自带挂载；manager=交给管理器/元模块）"
+  _n19=0
+  for _f19 in fontconv.js woff2.js; do
+    [ -f "$MODDIR/webroot/$_f19" ] && _n19=$((_n19+1))
+  done
+  echo "  导入格式支持：$([ "$_n19" -ge 2 ] && echo 'WOFF / WOFF2 / ZIP 可用' || echo '缺少转换器文件（请重装模块）')"
+  _fb19=$(ls -1t /sdcard/Download/fontlib-*.tar.gz 2>/dev/null | head -n 1)
+  if [ -n "$_fb19" ]; then
+    echo "  最近备份：${_fb19##*/}（$(du -h "$_fb19" 2>/dev/null | awk '{print $1}')）"
+  else
+    echo "  最近备份：没有（Download 里没有 fontlib-*.tar.gz）"
+  fi
+  if [ -s "$LIB/ota.log" ]; then
+    echo "  OTA 适配记录（最近 3 行）："
+    tail -n 3 "$LIB/ota.log" 2>/dev/null | sed 's/^/    /'
+  else
+    echo "  OTA 适配记录：无（还没遇到过系统更新，或没触发）"
+  fi
+  _tc19=""
+  for _x19 in /data/system/theme/clock_*; do
+    [ -e "$_x19" ] && _tc19="$_tc19 $(basename "$_x19")"
+  done
+  # ★ 2026-11-06：管理器模式下 /data 槽位挂不到 —— 直接点出来，避免用户以为模块有 bug
+  _d19=$(grep -cE '^[^ ]+ /?data/' "$MODDIR/slots.map" 2>/dev/null | tr -d ' ')
+  case "${_d19:-}" in ''|*[!0-9]*) _d19=0 ;; esac
+  if [ "$_d19" -gt 0 ] 2>/dev/null; then
+    if [ "$(mount_mode 2>/dev/null)" = manager ]; then
+      echo "  /data 槽位：$_d19 个 —— 当前是「交给管理器挂载」：系统分区由管理器挂，"
+      echo "              这些 /data 主题字体由模块补挂（混合挂载）；若显示未生效，看 mount.log 的「混合挂载」行"
+    else
+      echo "  /data 槽位：$_d19 个（自带挂载会处理 theme_webview / theme/fonts 两类）"
+    fi
+  else
+    echo "  /data 槽位：0 个"
+  fi
+  echo "  主题锁屏时钟：$([ -n "$_tc19" ] && echo "有（$_tc19）—— 这类时钟不跟系统字体" || echo '无')"
+  echo "  锁屏时钟开关：$(keep_lockscreen_val 2>/dev/null)$([ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")" = coloros ] && echo '（ColorOS 强制保留）')"
+  hr
+
+
+  # ★ 2026-11-06（作者要求）：完整报告加【20】模块全量快照 —— 一看就知道这台机器上
+  #   模块的全部设置、字体库、计划、日志、Root 管理器与已装模块。全部只读现成文件，不读字体内容。
+  echo "【20】模块全量快照（设置 / 字体库 / 计划 / 日志 / Root 管理器）"
+  hr
+  echo "  ── 当前状态 ──"
+  echo "  当前生效: $(cur_active 2>/dev/null)   待生效: $(cur_pending 2>/dev/null)"
+  echo "  上次选择: $(cat "$LIB/last_selection" 2>/dev/null | tr -d '[:space:]')"
+  echo "  挂载方式: $(mount_mode 2>/dev/null)   实际挂载: $(cat "$MODDIR/payload.mode" 2>/dev/null | tr -d '[:space:]')"
+  echo "  识别系统: $(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')   Root: $(root_manager 2>/dev/null)"
+  echo "  模块版本: $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1) ($(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1))"
+  echo
+  echo "  ── 全部设置（settings.conf 原样）──"
+  sed 's/^/    /' "$LIB/settings.conf" 2>/dev/null | head -n 120
+  echo
+  echo "  ── 模块目录文件 ──"
+  ls -l "$MODDIR" 2>/dev/null | sed 's/^/    /' | head -n 80
+  echo
+  echo "  ── 字体库（$LIB）──"
+  _nf20=0
+  for _f20 in "$LIB"/f*.ttf; do
+    [ -f "$_f20" ] || continue
+    _id20=${_f20##*/}; _id20=${_id20%.ttf}
+    _sz20=$(stat -c '%s' "$_f20" 2>/dev/null)
+    _mt20=$(stat -c '%y' "$_f20" 2>/dev/null | cut -d. -f1)
+    _nm20=$(cat "$LIB/$_id20.name" 2>/dev/null | tr -d '\r\n')
+    echo "    $_id20  ${_sz20} 字节  $_mt20  名称=${_nm20:-?}"
+    _nf20=$((_nf20 + 1))
+  done
+  [ "$_nf20" = 0 ] && echo "    （字体库为空）"
+  echo
+  echo "  ── 每个字体的 meta ──"
+  for _m20 in "$LIB"/*.meta; do
+    [ -f "$_m20" ] || continue
+    echo "    [${_m20##*/}]"
+    tr '\n' ' ' < "$_m20" 2>/dev/null | sed 's/  */ /g' | cut -c1-600 | sed 's/^/      /'
+    echo
+  done
+  echo
+  echo "  ── 槽位计划统计 ──"
+  if [ -s "$MODDIR/slots.map" ]; then
+    echo "    总行数: $(grep -c . "$MODDIR/slots.map" 2>/dev/null)"
+    echo "    /data 槽位: $(grep -cE '^[^ ]+ /?data/' "$MODDIR/slots.map" 2>/dev/null)"
+    echo "    ttc 槽位: $(grep -c '\.ttc' "$MODDIR/slots.map" 2>/dev/null)"
+    echo "    按目录统计:"
+    awk '{ d = $2; sub(/\/[^\/]*$/, "", d); printf "%s\n", d }' "$MODDIR/slots.map" 2>/dev/null \
+      | sort | uniq -c | sort -rn | head -n 20 | sed 's/^/      /'
+    echo "    /data 槽位明细:"
+    grep -E '^[^ ]+ /?data/' "$MODDIR/slots.map" 2>/dev/null | head -n 30 | sed 's/^/      /'
+  else
+    echo "    （没有 slots.map）"
+  fi
+  echo
+  echo "  ── 关键文件 ──"
+  for _k20 in "$MODDIR/active_font" "$MODDIR/pending_font" "$MODDIR/payload.mode" "$MODDIR/current_rom" \
+              "$LIB/.mounted" "$LIB/.boot.mark" "$LIB/.sysfp"; do
+    [ -e "$_k20" ] && echo "    $_k20: $(head -n 3 "$_k20" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
+  done
+  echo
+  echo "  ── 日志尾部 ──"
+  for _l20 in "$LIB/mount.log" "$LIB/ota.log" "$LIB/ttc.log" "$LIB/boot_events.log" "$LIB/update.log"; do
+    [ -s "$_l20" ] || continue
+    echo "    [${_l20##*/} 最后 12 行]"
+    tail -n 12 "$_l20" 2>/dev/null | sed 's/^/      /'
+  done
+  echo
+  echo "  ── 已装模块（含元模块）──"
+  for _d20 in /data/adb/modules/*; do
+    [ -d "$_d20" ] || continue
+    _mid20=${_d20##*/}
+    _mv20=$(sed -n 's/^version=//p' "$_d20/module.prop" 2>/dev/null | head -n1)
+    _mn20=$(sed -n 's/^name=//p' "$_d20/module.prop" 2>/dev/null | head -n1)
+    _st20="启用"
+    [ -f "$_d20/disable" ] && _st20="已停用"
+    [ -f "$_d20/remove" ] && _st20="待卸载"
+    echo "    $_mid20  $_st20  $_mv20  ${_mn20:-}"
+  done
+  echo
+  echo "  ── Root / 系统 ──"
+  echo "    Root 管理器: $(root_manager_name "$(root_manager)" 2>/dev/null)"
+  echo "    SELinux: $(getenforce 2>/dev/null)"
+  echo "    内核: $(uname -r 2>/dev/null)"
+  echo "    Android: $(getprop ro.build.version.release 2>/dev/null) / SDK $(getprop ro.build.version.sdk 2>/dev/null)"
+  echo "    指纹: $(getprop ro.build.fingerprint 2>/dev/null)"
+  echo "    字体配置数: $(printf '%s\n' "$XMLFOUND" | grep -c . 2>/dev/null)   字体目录数: $(printf '%s\n' "$FONTDIRS" | grep -c . 2>/dev/null)"
+  hr
+
+
+  # ★ 2026-11-06（作者要求：齐全优先）：【21】槽位 / targets 差异 + 本地全量记录
+  echo "【21】槽位与 targets 差异 + 本地全量记录"
+  hr
+  echo "  ── 字体目录（全量）──"
+  printf '%s\n' "$FONTDIRS" 2>/dev/null | sed '/^$/d; s/^/    /'
+  echo
+  echo "  ── 字体配置（全量）──"
+  printf '%s\n' "$XMLFOUND" 2>/dev/null | sed '/^$/d; s/^/    /'
+  echo
+  echo "  ── 设备上有、targets 里没有的字体名（完整）──"
+  if [ -n "${DISC_NEW_NAMES:-}" ]; then
+    printf '%s\n' "$DISC_NEW_NAMES" | tr ' ' '\n' | sed '/^$/d' | head -n 400 | sed 's/^/    /'
+    echo "    （共 $(printf '%s\n' "$DISC_NEW_NAMES" | tr ' ' '\n' | grep -c . ) 个）"
+  else
+    echo "    （没有：设备上的字体都在 targets 里）"
+  fi
+  echo
+  echo "  ── slots.map 全量（最多 400 行）──"
+  if [ -s "$MODDIR/slots.map" ]; then
+    head -n 400 "$MODDIR/slots.map" 2>/dev/null | sed 's/^/    /'
+    echo "    （总 $(grep -c . "$MODDIR/slots.map" 2>/dev/null) 行）"
+  else
+    echo "    （没有）"
+  fi
+  echo
+  echo "  ── 槽位来源统计（targets / 本机扫描 / 主题 / ttc）──"
+  for _sf21 in "$MODDIR/slots.sources" "$MODDIR/slots.marks" "$MODDIR/scanned/slots.meta"; do
+    [ -s "$_sf21" ] || continue
+    echo "    [${_sf21##*/}]"
+    head -n 200 "$_sf21" 2>/dev/null | sed 's/^/      /'
+  done
+  echo
+  echo "  ── 字体库目录全量（$LIB）──"
+  ls -la "$LIB" 2>/dev/null | sed 's/^/    /' | head -n 200
+  echo
+  echo "  ── 扫描缓存（scanned/）──"
+  for _s21 in device.list slots.list slots.meta skip.list ttc.list env.list; do
+    _p21="$LIB/scanned/$_s21"
+    [ -s "$_p21" ] || continue
+    echo "    [$_s21] $(grep -c . "$_p21" 2>/dev/null) 行"
+  done
+  echo
+  echo "  ── 计划缓存 ──"
+  if [ -d "$LIB/.plancache" ]; then
+    echo "    条目数: $(ls -1 "$LIB/.plancache" 2>/dev/null | grep -c . )"
+    ls -lt "$LIB/.plancache" 2>/dev/null | head -n 15 | sed 's/^/    /'
+  else
+    echo "    （无 .plancache）"
+  fi
+  echo
+  echo "  ── 更新 / OTA 状态 ──"
+  for _u21 in "$LIB/.update/state" "$LIB/.update/worker.log" "$LIB/.ota.adapted" "$LIB/.sysfp"; do
+    [ -e "$_u21" ] || continue
+    echo "    [${_u21##*/}]"
+    tail -n 15 "$_u21" 2>/dev/null | sed 's/^/      /'
+  done
+  echo
+  echo "  ── 最近切换痕迹（ttc.log 尾部已在【20】，这里补 active/pending 链）──"
+  for _c21 in "$MODDIR/active_font" "$MODDIR/pending_font" "$LIB/last_selection" "$MODDIR/last_good_font"; do
+    [ -f "$_c21" ] && echo "    ${_c21##*/}: $(tr -d '\n' < "$_c21" 2>/dev/null)"
+  done
+  hr
+
+
+  # ★ 2026-11-06（作者要求补全）：【22】运行环境与历史
+  echo "【22】运行环境与历史（App 字体 / SELinux / Root 名单 / 备份 / 切换记录）"
+  hr
+  echo "  ── 运行中 App 实际加载的字体（前 25 个进程，每进程最多 6 个文件）──"
+  _pid22=0
+  for _p22 in /proc/[0-9]*; do
+    _pid22=$((_pid22 + 1))
+    [ "$_pid22" -le 25 ] || break
+    _n22=$(cat "$_p22/comm" 2>/dev/null)
+    [ -n "$_n22" ] || continue
+    _fl22=$(tr '\0' '\n' < "$_p22/maps" 2>/dev/null | awk '{print $NF}' \
+      | grep -Ei '\.(ttf|otf|ttc)$' | sort -u | head -n 6 | tr '\n' ' ')
+    [ -n "$_fl22" ] || continue
+    echo "    ${_p22##*/} $_n22:"
+    for _x22 in $_fl22; do echo "      $_x22"; done
+  done
+  echo
+  echo "  ── SELinux 拒绝（avc）──"
+  _av22=$(dmesg 2>/dev/null | grep -i 'avc:' | tail -n 15)
+  if [ -n "$_av22" ]; then printf '%s\n' "$_av22" | sed 's/^/    /'
+  else echo "    （dmesg 不可读或没有 avc 记录）"; fi
+  echo
+  echo "  ── Root 管理器 / 名单 ──"
+  echo "    Root: $(root_manager_name "$(root_manager)" 2>/dev/null)  SELinux: $(getenforce 2>/dev/null)"
+  if command -v magisk >/dev/null 2>&1; then
+    echo "    magisk: $(magisk -v 2>/dev/null)"
+    echo "    denylist（前 30）："
+    tmo 10 magisk --denylist ls 2>/dev/null | head -n 30 | sed 's/^/      /'
+  fi
+  if [ -d /data/adb/ksu ]; then
+    echo "    KernelSU 目录：$(ls -1 /data/adb/ksu 2>/dev/null | tr '\n' ' ' | cut -c1-300)"
+  fi
+  echo "    zygisk 模块：$(ls -1 /data/adb/modules 2>/dev/null | grep -iE 'zygisk|shamiko|hide' | tr '\n' ' ')"
+  echo
+  echo "  ── 备份文件（Download）──"
+  _bk22=$(ls -1t /sdcard/Download/fontlib-*.tar.gz 2>/dev/null | head -n 10)
+  if [ -n "$_bk22" ]; then
+    printf '%s\n' "$_bk22" | while IFS= read -r _b22; do
+      echo "    ${_b22##*/}  $(stat -c '%s' "$_b22" 2>/dev/null) 字节  $(stat -c '%y' "$_b22" 2>/dev/null | cut -d. -f1)"
+    done
+  else echo "    （没有备份）"; fi
+  echo
+  echo "  ── 字体库文件 inode / 硬链接数 ──"
+  for _i22 in "$LIB"/f*.ttf; do
+    [ -f "$_i22" ] || continue
+    _l22=$(stat -c '%i %h %s' "$_i22" 2>/dev/null)
+    echo "    ${_i22##*/}  inode=links=size: $_l22"
+  done
+  echo
+  echo "  ── 切换历史（$LIB/switch.log 最近 30 行）──"
+  if [ -s "$LIB/switch.log" ]; then tail -n 30 "$LIB/switch.log" 2>/dev/null | sed 's/^/    /'
+  else echo "    （还没有记录；从本版开始，每次应用会写一行）"; fi
+  hr
+
+  echo "【数据可信度】指纹缓存自检（抽样重算比对）"
     fp_cache_verify 2>&1
     echo
     echo "【加速说明】门牌号快判（dev:inode 相同 ⇒ 就是模块挂上去的那份文件）"
