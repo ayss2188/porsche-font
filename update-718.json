@@ -1,7 +1,7 @@
 {
-  "version": "v4.5.8.3",
-  "versionCode": 450803,
-  "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v4.5.8.3/porsche-font-718-v4.5.8.3.zip",
-  "changelog": "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/CHANGELOG.md",
-  "sha256": "3c3710e263edd9e2c1079f9f3f0c433ac009daf1129571cabb9fe77696447351"
+  "version": "v4.5.9",
+  "versionCode": 450900,
+  "zipUrl": "https://github.com/ayss2188/porsche-font/releases/download/v4.5.9/porsche-font-718-v4.5.9.zip",
+  "changelog": "https://raw.githubusercontent.com/ayss2188/porsche-font/main/CHANGELOG-latest.md",
+  "sha256": "44646005efed84dc4c6781c7446b41a016ee8779e43f9109466fb2ac588cf750"
 }
