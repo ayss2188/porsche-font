@@ -27,6 +27,8 @@ slot_dirs() {
   #   `"$FSROOT"/*/fonts "$FSROOT"/*/*/fonts` 要展开根目录下所有子目录/二级子目录，
   #   而这个函数在一次 apply 里被调用 5~10 次 —— 每次重新 glob 就是几十秒。
   local _el="${LIB:-/data/adb/custom_font_lib}/scanned/env.list"
+  # ★ 2026-11-07：重扫时强制重新发现目录（旧 env.list 可能只记了 1~2 个目录）
+  [ "${CFS_FORCE_DIRS:-0}" = 1 ] && _el=""
   if [ -s "$_el" ]; then
     local _hit
     _hit=$(sed -n 's/^dir=//p' "$_el" 2>/dev/null)
@@ -749,8 +751,8 @@ SLOT_META="$SLOT_SCAN_DIR/slots.meta"
 #         所以这里保持 1 即可。
 SLOT_SCAN_SCHEMA=1
 
-slot_scan_cache_valid() {   # $1=moddir
-  local moddir="${1:-${MODDIR:-}}"
+slot_scan_cache_valid() {
+local moddir="${1:-${MODDIR:-}}"
   local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
   local mark="$_sd/.schema" sch rom fp
   [ -s "$_sd/device.list" ] || return 1
@@ -828,6 +830,16 @@ slot_device_scan() {   # $1=moddir → 生成 device.list
          rank=(src=="x")?1:(src=="s")?2:(src=="o")?3:4
          if (!(nm in R) || rank < R[nm]) { R[nm]=rank; L[nm]=nm } }
        END { for (nm in L) print L[nm] }' "$tmp.raw" > "$tmp.names" 2>/dev/null
+  # ★ 2026-11-07：来源计数（排查“为什么只剩几十个”）
+  {
+    echo "xml=$(grep -c '^x ' "$tmp.raw" 2>/dev/null | tr -dc '0-9')"
+    echo "static=$(grep -c '^s ' "$tmp.raw" 2>/dev/null | tr -dc '0-9')"
+    echo "oem=$(grep -c '^o ' "$tmp.raw" 2>/dev/null | tr -dc '0-9')"
+    echo "dir=$(grep -c '^d ' "$tmp.raw" 2>/dev/null | tr -dc '0-9')"
+    echo "names=$(grep -c . "$tmp.names" 2>/dev/null | tr -dc '0-9')"
+    echo "dirs=$(printf '%s\n' "$(slot_dirs 2>/dev/null)" | grep -c . | tr -dc '0-9')"
+    echo "xmlfiles=$(slot_xml_files 2>/dev/null | grep -c . | tr -dc '0-9')"
+  } > "${LIB:-/data/adb/custom_font_lib}/.scan.stat" 2>/dev/null
   rm -f "$tmp.raw" 2>/dev/null
   : > "$tmp"
   local dirs d role l name
@@ -1112,7 +1124,20 @@ slot_build_slots() {   # $1=moddir
     #   targets = targets 清单里、这台设备上真实存在的名字数
     #   extra   = 扫描发现、但 targets 清单里没有的（兜底那一部分）
     #   total   = targets + extra
-    printf 'targets=%s\n' "${tgt_n:-0}"
+    # ★ 2026-11-07：重新算一次来源计数（前面的分支在真机上可能没跑到，导致 0/0）
+  if [ -s "$_sd/device.list" ]; then
+    slot_static_names "$moddir" 0 0 0 2>/dev/null | sort -u > "$_sd/.tn.$$" 2>/dev/null
+    if [ -s "$_sd/.tn.$$" ]; then
+      _cc=$(awk 'FNR==NR { t[$0]=1; next }
+                 { if ($3 != "" && ($3 in t)) h++; else if ($3 != "") e++ }
+                 END { print h+0, e+0 }' "$_sd/.tn.$$" "$_sd/device.list" 2>/dev/null)
+      case "$_cc" in
+        *" "*) tgt_n=${_cc%% *}; _extra_n=${_cc#* } ;;
+      esac
+    fi
+    rm -f "$_sd/.tn.$$" 2>/dev/null
+  fi
+  printf 'targets=%s\n' "${tgt_n:-0}"
     printf 'extra=%s\n' "${_extra_n:-0}"
     printf 'total=%s\n' "$dev_n"
   } > "$_meta" 2>/dev/null
@@ -2315,10 +2340,9 @@ slot_dir_names() {
 }
 
 slot_dir_names_raw() {
-  # ★ 2026-10-16 修（作者真机：界面显示"本机目录 0 个"）：
-  #   **空结果不许当缓存** —— 这个函数在 customize.sh 很早就会被调用
-  #   （detect_rom → _xm_exclusive_font），那一刻分区可能还没就绪，
-  #   算出来是空，空缓存就把整场运行锁死了。
+  # ★ 2026-11-07（真机：切系统后 dir=1，槽位从 159 掉到 79）：
+  #   原来用 `ls -ln | awk` 解析，真机上只出了 1 个名字（字段/格式差异）。
+  #   改回 glob + stat：慢一点，但目录里有多少字体就收多少。
   if [ -n "${DIR_NAMES_CACHE+x}" ] && [ -n "$DIR_NAMES_CACHE" ]; then
     printf '%s\n' "$DIR_NAMES_CACHE" | grep -v '^[[:space:]]*$'
     return 0
@@ -2326,47 +2350,26 @@ slot_dir_names_raw() {
   DIR_NAMES_CACHE=$(
     for d in $(slot_dirs); do
       [ -d "$FSROOT$d" ] || continue
-      # ★ 只收 Android 的厂商分区路径。
-      #   容器/沙箱环境里 slot_dirs 的"未知分区自动发现"会把宿主机的目录
-      #   （/Windows/fonts、/Users/... 之类）也列进来 —— 那些不是 Android 槽位。
-      #   真机上这条不会命中，但加上它：① 沙箱测试才准 ② 多一道防御。
       case "$d" in
         /system/*|/system_ext/*|/product/*|/vendor/*|/odm/*|/oem/*|/my_*/*|/mi_ext/*|\
         /hw_product/*|/prism/*|/optics/*|/oplus_*/*) ;;
         *) continue ;;
       esac
-      # ★ 2026-10-17 提速（实测快 49 倍）：
-      #   原来对每个文件跑 `wc -c < "$f"` —— 那会**把文件从头读到尾**，
-      #   还要起一个进程。真机上 291 个字体文件 = 291 次完整读盘，就为了拿大小。
-      #   现在用 `ls -ln` 一次把整个目录的大小都拿回来，过滤全在 awk 里做：
-      #     · -n 强制数字 uid/gid → 字段位置固定（用户名带空格也不会错位）
-      #     · 大小是第 5 个字段，文件名是最后一个（可能带空格，所以从尾部取）
-      #   判断规则跟原来**一模一样**（大小 <32KB 跳过、按文件名排除特殊字体）。
-      ls -ln "$FSROOT$d" 2>/dev/null | awk '
-        {
-          if ($1 ~ /^d/) next                      # 目录
-          if ($1 ~ /^total$/) next                 # 有的 ls 会打 total
-          if (NF < 9) next
-          sz = $5 + 0
-          if (sz < 32768) next                     # 占位/替身小文件 → 跳过
-          name = $NF                               # 文件名（最后一段）
-          if (name ~ /\*/) next                    # glob 残留
-          low = tolower(name)
-          if (low !~ /\.(ttf|otf)$/) next
-          # \u8ddf _xml_family_ok 保持同一套准入标准
-          if (low ~ /sans-serif/ || low ~ /sansserif/) { print name; next }
-          if (low ~ /emoji/ || low ~ /symbol/ || low ~ /mono/ || low ~ /cursive/ || \
-              low ~ /casual/ || low ~ /math/ || low ~ /music/ || low ~ /clock/ || \
-              low ~ /serif/) next
-          print name
-        }'
-      continue
-      # ↓ 下面是原来的逐文件版本，已被上面的批量版本取代（保留注释说明，不再执行）
-      : <<'OLD_LOOP'
       for f in "$FSROOT$d"/*.ttf "$FSROOT$d"/*.otf "$FSROOT$d"/*.TTF "$FSROOT$d"/*.OTF; do
-        :
+        [ -f "$f" ] || continue
+        _sz=$(stat -c %s "$f" 2>/dev/null)
+        case "$_sz" in ''|*[!0-9]*) continue ;; esac
+        [ "$_sz" -ge 32768 ] || continue
+        _nm=${f##*/}
+        _low=$(_lc "$_nm")
+        case "$_low" in
+          *sans-serif*|*sansserif*) echo "$_nm"; continue ;;
+        esac
+        case "$_low" in
+          *emoji*|*symbol*|*mono*|*cursive*|*casual*|*math*|*music*|*clock*|*serif*) continue ;;
+        esac
+        case "$_low" in *.ttf|*.otf) echo "$_nm" ;; esac
       done
-OLD_LOOP
     done | sort -u
   )
   printf '%s\n' "$DIR_NAMES_CACHE" | grep -v '^[[:space:]]*$'

@@ -37,6 +37,8 @@ ROM_ID=$(detect_rom)
 ROM_NAME=$(rom_name "$ROM_ID")
 RM=$(root_manager)
 echo "$ROM_ID" > "$MODPATH/current_rom"
+_rov_inst=$(cfg_get rom_override auto 2>/dev/null)
+case "$_rov_inst" in auto|"") ;; *) ROM_NAME="$ROM_NAME（手动指定）" ;; esac
 ui_print "- 已识别：$ROM_NAME"
 
 # ★ 2026-10-17（作者定的架构）：**扫描只在这里做一次，之后永远读文件**

@@ -11,6 +11,11 @@
 #   （只是标记没删掉），这种情况绝不能误清用户的字体。
 
 MODDIR=${0%/*}
+
+# ★ 2026-11-07：开机清掉「重启生效」标记（放在最前面，避免提前 exit 跳过）
+LIB=${LIB:-/data/adb/custom_font_lib}
+( tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom" > "$LIB/.rom_active" ) 2>/dev/null
+rm -f "$LIB/.rom_pending" 2>/dev/null
 # 商店缓存桥接：必须在 zygote 起来之前挂，应用（含商店）才看得到
 # ★ 2026-10-21：桥接功能已摘除（对 Play 商店无效，且会让部分 Google 应用异常）
 #   这行不再执行，只留注释说明历史原因。
@@ -154,6 +159,7 @@ payload_mount "$MODDIR" post-fs-data
 
 # ★ 2026-11-06：混合挂载 —— manager 模式下补挂 /data 主题字体（管理器挂不到）
 # ★ 2026-11-06：用 mount_mode（payload.mode 文件可能缺失/为空），并且任何 /data 槽位都补挂
+
 if [ -s "$MODDIR/slots.map" ] && [ "$(mount_mode 2>/dev/null)" = manager ]; then
   ( . "$MODDIR/mount.sh" 2>/dev/null; mount_data_slots_only ) >/dev/null 2>&1
 fi

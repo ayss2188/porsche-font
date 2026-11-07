@@ -126,6 +126,12 @@ _rom_has_dir() {
 }
 
 detect_rom() {
+  # ★ 2026-11-07：手动指定系统（高级设置）优先于自动识别
+  _rov=$(cfg_get rom_override auto 2>/dev/null)
+  case "$_rov" in
+    auto|"") ;;
+    *) printf '%s' "$_rov"; return 0 ;;
+  esac
   local vname vdisplay vbrand vmanu strong weak gen
 
   # 读一次通用属性（品牌/厂商/显示版本），后面每家都用

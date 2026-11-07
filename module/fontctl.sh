@@ -1854,6 +1854,8 @@ case "${1:-}" in
     echo "A=$A"
     echo "P=$P"
     echo "R=$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')"
+    echo "RO=$(cfg_get rom_override auto 2>/dev/null)"
+    echo "RP=$(tr -d '[:space:]' 2>/dev/null < "$LIB/.rom_pending")"
     if [ -f "$MODDIR/rescued" ]; then echo "X=1"; else echo "X=0"; fi
     echo "N=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')"
     # ★ 2026-10-16：槽位来源拆分（界面显示「系统配置里引用的 / 本模块补充的」）
@@ -2049,6 +2051,8 @@ case "${1:-}" in
     echo "A=$A"
     echo "P=$P"
     echo "R=$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')"
+    echo "RO=$(cfg_get rom_override auto 2>/dev/null)"
+    echo "RP=$(tr -d '[:space:]' 2>/dev/null < "$LIB/.rom_pending")"
     if [ -f "$MODDIR/rescued" ]; then echo "X=1"; else echo "X=0"; fi
     echo "N=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')"
     echo "S=$(effective_scope "$P" 2>/dev/null)"
@@ -2255,8 +2259,43 @@ case "${1:-}" in
     ( . "$MODDIR/mount.sh" 2>/dev/null; mount_data_slots_only ) >/dev/null 2>&1
   fi
     ;;
+  rescanall)
+    # ★ 2026-11-07：重扫 + 重算合并（高级设置入口）
+    mark_dirty
+    date '+%s' > "$LIB/.romset.start" 2>/dev/null
+    rm -f "$LIB/.romset.done" 2>/dev/null
+    : > "$LIB/.romset.running"
+    rm -rf "$LIB/.plancache" "$LIB/.scan" 2>/dev/null
+    rm -f "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" \
+          "$LIB/scanned/slots.kl1.list" "$LIB/scanned/slots.th1.list" \
+          "$LIB/scanned/slots.kl1th1.list" 2>/dev/null
+    rm -f "$LIB/.cand.cache" "$LIB/.marks.cache" "$LIB/.skipscan.cache" \
+          "$LIB/.extra.cache" "$LIB/.xmlnames.cache" "$LIB/.dirnames.cache" \
+          "$LIB/.oemnames.cache" "$LIB/.verify.cache" "$MODDIR/slots.marks" 2>/dev/null
+    (
+      CFS_FORCE_DIRS=1; export CFS_FORCE_DIRS
+      sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
+      _asel=$(cur_pending 2>/dev/null)
+      case "$_asel" in ""|none) _asel=$(cur_active 2>/dev/null) ;; esac
+      case "$_asel" in ""|none) ;; *) sh "$MODDIR/fontctl.sh" apply "$_asel" >/dev/null 2>&1 ;; esac
+      rm -f "$LIB/.romset.running" 2>/dev/null
+      date '+%s' > "$LIB/.romset.done" 2>/dev/null
+    ) >/dev/null 2>&1 &
+    echo "STARTED"
+    ;;
+
   rescan)
     mark_dirty
+    # ★ 2026-11-07（真机：点“重新数一遍”后还是旧清单/只有 targets）：
+    #   原来直接 slot_build_slots，它看缓存有效就不扫 —— 用户点的“重扫”根本没扫。
+    #   这里先强制丢掉扫描缓存与设备清单，保证真的重新扫目录。
+    CFS_FORCE_DIRS=1; export CFS_FORCE_DIRS
+    slot_scan_cache_drop >/dev/null 2>&1
+    rm -rf "$LIB/.scan" 2>/dev/null
+    rm -f "$LIB/scanned/device.list" "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" \
+          "$LIB/scanned/slots.kl1.list" "$LIB/scanned/slots.th1.list" \
+          "$LIB/scanned/slots.kl1th1.list" 2>/dev/null
+    rm -f "$LIB/.dirnames.cache" "$LIB/.xmlnames.cache" 2>/dev/null
     # ★ 2026-10-17：重新扫描本机字体并覆盖设备清单。
     #   什么时候用：换了系统大版本、装了新字体但界面没显示、或诊断建议你重扫。
     #   平时**不需要**跑 —— apply/reapply 只读清单，不扫描。
@@ -2313,6 +2352,112 @@ case "${1:-}" in
     echo "PLAN:$sc:$(wc -l < "$p" | tr -d ' ')"
     rm -f "$p"
     ;;
+  romset)
+    # ★ 2026-11-07：切换系统识别 → 异步重扫 + 重算计划（targets + 本机扫描一起）
+    case "${2:-}" in
+      auto|aosp|coloros|flyme|hyperos|oneui|originos|redmagic|honor|huawei|samsung) ;;
+      *) echo "ERROR:取值不合法"; exit 1 ;;
+    esac
+    # 本次开机实际用的系统（首次更新模块后可能还没写过）先补一份，后面比较才有基准
+    if [ ! -s "$LIB/.rom_active" ]; then
+      tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom" > "$LIB/.rom_active" 2>/dev/null
+    fi
+    cfg_set rom_override "$2"
+    refresh_rom >/dev/null 2>&1
+    rm -rf "$LIB/.plancache" "$LIB/.scan" 2>/dev/null
+    rm -f "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" "$LIB/scanned/slots.kl1.list" \
+          "$LIB/scanned/slots.th1.list" "$LIB/scanned/slots.kl1th1.list" 2>/dev/null
+    rm -f "$LIB/.cand.cache" "$LIB/.marks.cache" "$LIB/.skipscan.cache" \
+          "$LIB/.extra.cache" "$LIB/.xmlnames.cache" "$LIB/.dirnames.cache" \
+          "$LIB/.oemnames.cache" "$LIB/.verify.cache" "$MODDIR/slots.marks" 2>/dev/null
+    mark_dirty
+    date '+%s' > "$LIB/.romset.start" 2>/dev/null
+    rm -f "$LIB/.romset.done" 2>/dev/null
+    # ★ 2026-11-07：严格 A/B 语义 —— 切到与“本次开机实际用的系统”不同 → 记 1；
+    #   切回同一个（或重启后）→ 清 0。
+    # ★ 直接用 detect_rom 算当前生效值（auto 时就是自动识别结果），并写回
+    _newrom=$(detect_rom 2>/dev/null)
+    [ -n "$_newrom" ] || _newrom=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")
+    printf '%s' "$_newrom" > "$MODDIR/current_rom" 2>/dev/null
+    _av=$(tr -d '[:space:]' 2>/dev/null < "$LIB/.rom_active")
+    if [ -n "$_av" ] && [ "$_newrom" = "$_av" ]; then
+      rm -f "$LIB/.rom_pending" 2>/dev/null
+    else
+      printf '%s' "$_newrom" > "$LIB/.rom_pending" 2>/dev/null
+    fi
+    : > "$LIB/.romset.running"
+    rm -f "$LIB/.romset.done" 2>/dev/null
+    (
+      # 备份旧清单：新扫结果明显变少时回滚，避免 159 掉成 81
+      mkdir -p "$LIB/.romset.bak" 2>/dev/null
+      cp -f "$LIB/scanned/slots.list" "$LIB/.romset.bak/slots.list" 2>/dev/null
+      cp -f "$LIB/scanned/slots.meta" "$LIB/.romset.bak/slots.meta" 2>/dev/null
+      cp -f "$MODDIR/slots.map" "$LIB/.romset.bak/slots.map" 2>/dev/null
+      _old_sl=$(grep -c . "$LIB/.romset.bak/slots.list" 2>/dev/null | tr -dc '0-9')
+      case "$_old_sl" in ''|*[!0-9]*) _old_sl=0 ;; esac
+      sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
+      _dl=$(grep -c . "$LIB/scanned/device.list" 2>/dev/null | tr -dc '0-9')
+      _sl=$(grep -c . "$LIB/scanned/slots.list" 2>/dev/null | tr -dc '0-9')
+      case "$_dl" in ''|*[!0-9]*) _dl=0 ;; esac
+      case "$_sl" in ''|*[!0-9]*) _sl=0 ;; esac
+      # 扫描没产出（device.list 太小）→ 丢掉扫描缓存，再强扫一次
+      if [ "$_dl" -lt 10 ]; then
+        rm -rf "$LIB/.scan" 2>/dev/null
+        rm -f "$LIB/scanned/device.list" 2>/dev/null
+        sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
+        _dl=$(grep -c . "$LIB/scanned/device.list" 2>/dev/null | tr -dc '0-9')
+        _sl=$(grep -c . "$LIB/scanned/slots.list" 2>/dev/null | tr -dc '0-9')
+        case "$_dl" in ''|*[!0-9]*) _dl=0 ;; esac
+        case "$_sl" in ''|*[!0-9]*) _sl=0 ;; esac
+      fi
+      {
+        echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null)"
+        echo "rom=$(_rom_cached 2>/dev/null)"
+        echo "device_list=$_dl"
+        echo "slots_list=$_sl"
+        echo "targets_only=$(cfg_get targets_only 0 2>/dev/null)"
+        echo "slots_meta: $(tr '\n' ' ' < "$LIB/scanned/slots.meta" 2>/dev/null)"
+        echo "restored=$_restored"
+        echo "old_slots=$_old_sl"
+        sed 's/^/scan_/' "$LIB/.scan.stat" 2>/dev/null
+      } > "$LIB/.romset.debug" 2>/dev/null
+      _restored=0
+      if [ "$_old_sl" -ge 50 ] && [ "$_sl" -gt 0 ] && [ "$_sl" -lt $((_old_sl / 2)) ]; then
+        # 新结果比原来少一半以上 → 判定扫描失败，回滚旧清单
+        cp -f "$LIB/.romset.bak/slots.list" "$LIB/scanned/slots.list" 2>/dev/null
+        cp -f "$LIB/.romset.bak/slots.meta" "$LIB/scanned/slots.meta" 2>/dev/null
+        cp -f "$LIB/.romset.bak/slots.map" "$MODDIR/slots.map" 2>/dev/null
+        _sl=$_old_sl
+        _restored=1
+      fi
+      _rsel=$(cur_pending 2>/dev/null)
+      case "$_rsel" in ""|none) _rsel=$(cur_active 2>/dev/null) ;; esac
+      if [ "$_sl" -gt 0 ] && [ "$_restored" = 0 ]; then
+        case "$_rsel" in ""|none) ;; *) sh "$MODDIR/fontctl.sh" apply "$_rsel" >/dev/null 2>&1 ;; esac
+      fi
+      date '+%s' > "$LIB/.romset.done" 2>/dev/null
+    ) >/dev/null 2>&1 &
+    echo "STARTED"
+    ;;
+
+  romstate)
+    _rs=$(stat -c %Y "$LIB/.romset.start" 2>/dev/null)
+    _rd=$(stat -c %Y "$LIB/.romset.done" 2>/dev/null)
+    _rn=$(date +%s 2>/dev/null)
+    case "$_rs" in ''|*[!0-9]*) _rs=0 ;; esac
+    case "$_rd" in ''|*[!0-9]*) _rd=0 ;; esac
+    case "$_rn" in ''|*[!0-9]*) _rn=0 ;; esac
+    if [ "$_rd" -gt 0 ] && [ "$_rd" -ge "$_rs" ]; then
+      :
+    elif [ "$_rs" -gt 0 ] && [ $((_rn - _rs)) -lt 600 ]; then
+      echo "RUNNING"
+      exit 0
+    fi
+    _rsl=$(sed -n 's/^slots_list=//p' "$LIB/.romset.debug" 2>/dev/null | head -n1)
+    _rdl=$(sed -n 's/^device_list=//p' "$LIB/.romset.debug" 2>/dev/null | head -n1)
+    echo "DONE ${_rsl:-0} ${_rdl:-0}"
+    ;;
+
   setmeta)
     mark_dirty
     check_id "$2"
@@ -2402,6 +2547,8 @@ case "${1:-}" in
             case "$4" in 0|1) ;; *) echo "ERROR:取值只能是 0 或 1"; exit 1 ;; esac ;;
           mount_mode)
             case "$4" in self|manager) ;; *) echo "ERROR:取值只能是 self 或 manager"; exit 1 ;; esac ;;
+          rom_override)
+            case "$4" in auto|aosp|coloros|flyme|hyperos|oneui|originos|redmagic|honor|huawei|nothing|samsung) ;; *) echo "ERROR:取值不合法"; exit 1 ;; esac ;;
           *) echo "ERROR:未知设置项"; exit 1 ;;
         esac
         cfg_set "$3" "$4"
@@ -2411,6 +2558,15 @@ case "${1:-}" in
         #   新名单立刻参与角色判定；紧接着下面的预热会用新清单重算计划。
         case "$3" in
           whitelist|blacklist|exclude_dirs|force_list)
+            ( sh "$MODDIR/fontctl.sh" rescan ) >/dev/null 2>&1
+            ;;
+          rom_override)
+            # 换了系统识别 → 重算 current_rom，清掉计划/扫描缓存，后台重扫
+            refresh_rom >/dev/null 2>&1
+            rm -rf "$LIB/.plancache" "$LIB/.scan" 2>/dev/null
+            rm -f "$LIB/.cand.cache" "$LIB/.marks.cache" "$LIB/.skipscan.cache" \
+                  "$LIB/.extra.cache" "$LIB/.xmlnames.cache" "$LIB/.dirnames.cache" \
+                  "$LIB/.oemnames.cache" "$LIB/.verify.cache" "$MODDIR/slots.marks" 2>/dev/null
             ( sh "$MODDIR/fontctl.sh" rescan ) >/dev/null 2>&1
             ;;
         esac

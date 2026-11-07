@@ -1630,7 +1630,7 @@ try {
   <div class="section-title fade"><span>替换范围</span></div>
   <div class="g-hint" style="margin-bottom:8px">日文、韩文、繁体、时钟、代码、斜体 —— 全部都会换成你的字体，不用设置。<br>如果某个字没变、或者显示成方块（□），那是<b>你的字体里没有那个字</b>；诊断报告里会列出是哪些。</div>
   <div class="switch-row fade" onclick="toggleSetting('theme_fonts')">
-    <div><div class="t">也替换主题里选的字体</div><div class="d">有些机型会把「设置 → 字体样式」或主题商店里选的那份字体单独存一份，它比系统字体优先，不换它就不生效。<br><b>开</b>：那份也换成你的字体，设置里的选择会失效。<br><b>关</b>：只换系统字体。<br><b>注意</b>：主题字体在 /data 上，元模块本身挂不到。如果「自带挂载」是关的（交给元模块），打开这个开关后会自动用<b>「混合挂载」</b>：元模块挂系统分区、模块补挂 /data（诊断报告里会写「混合挂载」）。</div></div>
+    <div><div class="t">也替换主题里选的字体</div><div class="d">有些机型会把「设置 → 字体样式」或主题商店里选的那份字体单独存一份，它比系统字体优先，不换它就不生效。<br><b>开</b>：那份也换成你的字体，设置里的选择会失效。<br><b>关</b>：只换系统字体。<br><b>注意</b>：主题字体在 /data 上，元模块本身挂不到。如果「自带挂载」是关的（交给元模块），打开这个开关后会自动用<b>「混合挂载」</b>：元模块挂系统分区、模块补挂 /data （诊断报告里会写「混合挂载」 ）。</div></div>
     <div class="sw" id="sw_theme_fonts"></div>
   </div>
   <div class="switch-row fade" onclick="toggleSetting('keep_lockscreen')">
@@ -2356,6 +2356,8 @@ function applyStatus(st) {
     activeId = g("A").trim() || "none";
     pendingId = g("P").trim() || activeId;
     const rom = g("R").trim();
+  settings.rom_override = ((g("RO") || "auto").trim()) || "auto";
+  settings.rom_pending = ((g("RP") || "").trim());
     const nSlots = g("N").trim();
     // ★ 2026-11-01（作者反馈"已替换槽位没跟着一起改"，与主项目同版）：
     //   计划比本次开机新时按「当前」口径 —— 显示开机快照的替换数（BN），
@@ -2431,7 +2433,23 @@ function applyStatus(st) {
         }
       }
     }
-    setValue("romLabel", ROM_NAMES[rom] || rom || "未知");
+    (function () {
+  const el = document.getElementById("romLabel");
+  if (!el) { setValue("romLabel", ROM_NAMES[rom] || rom || "未知"); return; }
+  el.textContent = (ROM_NAMES[rom] || rom || "未知");
+  if (settings.rom_pending) {
+    const sp = document.createElement("span");
+    sp.textContent = " · 重启生效";
+    sp.style.color = "var(--warn)";
+    sp.style.fontWeight = "600";
+    el.appendChild(sp);
+  } else if (settings.rom_override && settings.rom_override !== "auto") {
+    const sp = document.createElement("span");
+    sp.textContent = "（手动指定）";
+    sp.style.color = "var(--text-dim)";
+    el.appendChild(sp);
+  }
+})();
     setValue("curVerLabel", g("V") || "-");
     mountMode = g("M") === "manager" ? "manager" : "self";
     // ★ 2026-10-17：把后端真实值同步回本地 settings —— 界面下次点开关时
@@ -7452,19 +7470,25 @@ const ADV_TREE = [
           desc: "把刚才撤掉的字体重新弄回来，跟上面那条对着试。",
           hint: "挂回去之后问题又出现 = 两次都印证，可以确定是字体问题。",
           safe: 2, cmd: "remount" },
-        { id: "rescan", name: "重新数一遍系统的字体",
-          desc: "把之前记的清单全删掉、重新扫一遍（刚升级过系统、或者数量看着不对时用）。",
-          hint: "扫完再回来点「一眼看概况」，看准备换的数量有没有变；然后重新应用一次字体。",
-          safe: 3, cmd: "rescan" },
-        { id: "replan", name: "重新算一遍「准备换哪些」",
-          desc: "清单是空的时候、或者明显不对的时候，重新算一遍。",
-          hint: "算完看「一眼看概况」：准备换的数量不是 0 就说明好了，重启生效。",
-          safe: 3, cmd: "replan" },
+        { id: "rescan_all", name: "重新扫描并重算（推荐）",
+          desc: "删掉旧清单，重新扫一遍本机字体，并用当前字体重新生成计划。"
+              + "系统升级过、数量不对、或切完系统识别后用这个。",
+          hint: "会显示进度，完成后界面自动刷新；重启生效。",
+          safe: 3, cmd: "rescanAll" },
         { id: "prewarm_all", name: "预生成切换计划 + 中文合集（秒切准备）",
           desc: "把字体库里每份字体的切换计划和中文合集产物提前做好并永久保存（每字体几秒到几十秒）。",
           hint: "做完之后切任何字体都是秒级。升级模块 / 改开关 / 导入新字体后点一次即可（平时会自动做）。",
           safe: 2, cmd: "prewarm-all" },
       ]},
+    ]
+  },
+  {
+    id: "rom", name: "系统识别（机型适配）",
+    desc: "自动识别不准时（比如类原生被认成别的 OS），可以手动指定成目标系统的字体清单。",
+    children: [
+      { id: "rom_pick", name: "手动选择系统",
+        desc: "点一下选择目标系统；选「自动识别」恢复默认。",
+        hint: "选完会重扫并重新生成计划，重启生效。", cmd: "pickRom" }
     ]
   },
   {
@@ -7682,6 +7706,153 @@ const ADV_TREE = [
 
 let __advTaps = 0, __advTimer = null;
 let __advPath = [];          // 当前路径（节点 id 数组）
+
+const ROM_OPTS = [
+  ["auto", "自动识别（推荐）"],
+  ["hyperos", "澎湃OS / HyperOS / MIUI"],
+  ["coloros", "ColorOS / OPPO / 一加 / realme"],
+  ["originos", "OriginOS / vivo / iQOO"],
+  ["flyme", "Flyme / 魅族"],
+  ["oneui", "三星 One UI"],
+  ["redmagic", "红魔 / 努比亚"],
+  ["honor", "荣耀 MagicOS"],
+  ["huawei", "华为 EMUI / 鸿蒙"],
+  ["aosp", "原生 / 类原生 / Pixel"]
+];
+function closeRom() {
+  const m = document.getElementById("romMask");
+  if (m) m.remove();
+}
+function pickRom() {
+  closeRom();
+  const cur = (settings.rom_override || "auto");
+  let h = '<div class="modal" style="max-height:72vh;overflow:auto">' +
+          '<h3>选择系统</h3>' +
+          '<div style="font-size:13px;color:var(--text-dim);margin-bottom:10px">' +
+          '当前：' + (cur === "auto" ? "自动识别" : (ROM_NAMES[cur] || cur)) + '</div>';
+  ROM_OPTS.forEach(function (o) {
+    const on = (o[0] === cur);
+    h += '<button class="g-btn" style="display:block;width:100%;margin:6px 0;text-align:left' +
+         (on ? ';border-color:var(--accent);color:var(--accent)' : '') +
+         '" onclick="setRom(\'' + o[0] + '\')">' + (on ? "✅ " : "") + o[1] + '</button>';
+  });
+  h += '<button class="g-btn" style="width:100%;margin-top:10px" onclick="closeRom()">取消</button></div>';
+  const m = document.createElement("div");
+  m.id = "romMask";
+  m.className = "modal-mask show";
+  m.innerHTML = h;
+  m.onclick = function (e) { if (e.target === m) closeRom(); };
+  document.body.appendChild(m);
+}
+function romBusyText(t) {
+  const el = document.getElementById("romBusyText");
+  if (el) el.textContent = t;
+}
+function showRomBusy(label) {
+  closeRomBusy();
+  const m = document.createElement("div");
+  m.id = "romBusyMask";
+  m.className = "modal-mask show";
+  m.innerHTML = '<div class="modal" style="text-align:center">' +
+    '<h3>正在切换系统</h3>' +
+    '<div style="padding:14px 0"><span class="spin" style="display:inline-block;vertical-align:-3px;margin-right:8px"></span>' +
+    '<span id="romBusyText">正在按「' + label + '」重新扫描并生成槽位…</span></div>' +
+    '<div style="font-size:12px;color:var(--text-dim)">会同时计算机型清单和本机扫描，可能需要 10~40 秒</div></div>';
+  document.body.appendChild(m);
+}
+function closeRomBusy() {
+  const m = document.getElementById("romBusyMask");
+  if (m) m.remove();
+}
+async function rescanAll() {
+  if (busy) { showToast("还有操作在进行中，稍等一下"); return; }
+  busy = true;
+  showRomBusy("重新扫描本机字体");
+  await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
+  await new Promise(function (r) { setTimeout(r, 120); });
+  try {
+    const out = await ksuExec(`sh ${MODDIR}/fontctl.sh rescanall`);
+    if (/^\s*ERROR/.test(String(out || ""))) throw new Error(String(out).replace(/^\s*ERROR:?/, "").trim());
+    let ok = false, planN = 0;
+    for (let i = 0; i < 600; i++) {
+      await new Promise(function (r) { setTimeout(r, 1000); });
+      let st = "";
+      try { st = String(await ksuExec(`sh ${MODDIR}/fontctl.sh romstate`) || "").trim(); } catch (e) {}
+      if (st.indexOf("DONE") === 0) {
+        ok = true;
+        planN = +(st.split(/\s+/)[1] || 0);
+        break;
+      }
+    }
+    romBusyText(ok ? "完成，正在刷新界面…" : "重算较慢，先刷新界面…");
+    await new Promise(function (r) { setTimeout(r, 300); });
+    try { __listSig = null; } catch (e) {}
+    try { await refreshAll(true); } catch (e) {}
+    try { await refreshFullStatus(); } catch (e) {}
+    try { await forceReloadFonts(); } catch (e) {}
+    await new Promise(function (r) { setTimeout(r, 900); });
+    try { await refreshFullStatus(); } catch (e) {}
+    showToast(ok && planN > 0 ? ("重扫完成（" + planN + " 个槽位），重启生效")
+                             : "重扫完成，界面稍后自动刷新", false, 6000);
+  } catch (e) {
+    showToast("重扫失败：" + errText(e), false, 6000);
+  } finally {
+    closeRomBusy();
+    busy = false;
+  }
+}
+
+async function setRom(id) {
+  closeRom();
+  if (busy) { showToast("还有操作在进行中，稍等一下"); return; }
+  busy = true;
+  const label = (id === "auto" ? "自动识别" : (ROM_NAMES[id] || id));
+  showRomBusy(label);
+  // 先让浏览器把进度窗画出来，再执行重活
+  await new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); });
+  await new Promise(function (r) { setTimeout(r, 120); });
+  try {
+    const out = await ksuExec(`sh ${MODDIR}/fontctl.sh romset ${id}`);
+    if (/^\s*ERROR/.test(String(out || ""))) {
+      throw new Error(String(out).replace(/^\s*ERROR:?/, "").trim());
+    }
+    settings.rom_override = id;
+    let ok = false, planN = 0, devN = 0;
+    for (let i = 0; i < 600; i++) {
+      await new Promise(function (r) { setTimeout(r, 1000); });
+      let st = "";
+      try { st = String(await ksuExec(`sh ${MODDIR}/fontctl.sh romstate`) || "").trim(); } catch (e) {}
+      if (st.indexOf("DONE") === 0) {
+        ok = true;
+        const m = st.split(/\s+/);
+        planN = +(m[1] || 0);
+        devN = +(m[2] || 0);
+        break;
+      }
+    }
+    romBusyText(ok ? "完成，正在刷新界面…" : "重算较慢，先刷新界面…");
+    await new Promise(function (r) { setTimeout(r, 300); });
+    try { __listSig = null; } catch (e) {}
+    try { await refreshAll(true); } catch (e) {}
+    try { await refreshFullStatus(); } catch (e) {}
+    try { await forceReloadFonts(); } catch (e) {}
+    await new Promise(function (r) { setTimeout(r, 900); });
+    try { await refreshFullStatus(); } catch (e) {}
+    if (ok && planN > 0) {
+      showToast((id === "auto" ? "已改回自动识别" : ("已指定为 " + label)) +
+                "：重算完成（" + planN + " 个槽位），重启生效");
+    } else if (ok) {
+      showToast("重算没产出槽位清单（device=" + devN + "），已保留原计划，请发一份报告", false, 6000);
+    } else {
+      showToast("后台仍在重算，界面稍后会自动刷新；可过一会儿再看", false, 6000);
+    }
+  } catch (e) {
+    showToast("设置失败：" + errText(e));
+  } finally {
+    closeRomBusy();
+    busy = false;
+  }
+}
 
 function advFind(path) {
   let list = ADV_TREE, node = null;
@@ -8529,6 +8700,8 @@ const UI_ACTIONS = {
   uiCycleAccent: () => uiCycleNext("accent"),
   advAccentHelp,
   advRelock,
+  pickRom,
+  rescanAll,
 };
 
 
