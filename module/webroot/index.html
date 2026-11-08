@@ -8,6 +8,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>保时捷字体</title>
 <style>
+  html { background: var(--bg); }
   :root {
     --accent: #D5001C;
     --pending-blue: #3a8bff;
@@ -1343,6 +1344,8 @@ body { min-height: 100%; }
 
   /* ★ 2026-10-25 壁纸尺寸用像素固定，输入法弹出时不重算 */
   #cfsBg {
+    width: max(var(--bg-w, 100vw), 100vw) !important;
+    height: max(var(--bg-h, 100vh), 100vh) !important;
     position: fixed !important;
     top: 0 !important; left: 0 !important;
     width: var(--bg-w, 100vw) !important;
@@ -1491,7 +1494,37 @@ body { min-height: 100%; }
   }
   #advCloseBtn { margin-left: auto !important; }
   #advTitle, #advLockBtn { flex: 0 0 auto !important; }
+
+  @media (max-width: 720px) {
+    #manualSheet .mn-wrap { flex-direction: column; gap: 8px; }
+    #manualToc { flex: 0 0 auto !important; display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden;
+      border-right: 0 !important; border-bottom: 1px solid var(--border); padding: 0 0 8px !important;
+      -webkit-overflow-scrolling: touch; }
+    #manualToc .mn-toc-item { flex: 0 0 auto; width: auto !important; white-space: nowrap;
+      padding: 6px 10px !important; background: rgba(255,255,255,.05); }
+    #manualBody { padding-right: 0 !important; }
+    #manualSheet .modal { height: 94vh !important; }
+    .mn-pre { font-size: 12px; }
+  }
+
+  .mn-toc-nav { display: none; }
+  @media (max-width: 720px) {
+    .mn-toc-nav { display: flex; align-items: center; gap: 8px; padding: 0 14px 8px; }
+    .mn-nav-btn { border: 1px solid var(--border); background: var(--card); color: var(--text);
+      border-radius: 8px; padding: 4px 10px; font-size: 15px; cursor: pointer; }
+    .mn-hint { flex: 1; text-align: center; font-size: 12px; color: var(--text-dim); }
+  }
+
+  /* ★ 说明书：跟「更新日志」一样的朴素样式 */
+  #manualSheet .mn-pre { background: transparent !important; border: 0 !important;
+    border-left: 2px solid var(--border) !important; border-radius: 0 !important;
+    padding: 4px 0 4px 10px !important; }
+  #manualToc .mn-toc-item { background: none !important; }
+  #manualToc .mn-toc-item.on { background: rgba(124, 92, 255, .16) !important; }
+  #manualSheet .mn-table th, #manualSheet .mn-table td { border-color: var(--border) !important; }
+  #manualSheet .mn-sec h3 { border-bottom: 1px solid var(--border); }
 </style>
+<script src="manual.js"></script>
 <script>
   window.__bgW = window.innerWidth;
   window.__bgH = window.innerHeight;
@@ -1664,6 +1697,16 @@ try {
   </div>
 
   <div class="divider"></div>
+  <div class="section-title fade"><span>使用说明</span></div>
+  <div class="switch-row fade" onclick="manualOpen()">
+    <div>
+      <div class="t">打开使用说明书（可搜索）</div>
+      <div class="d">安装 / 导入 / 挂载方式 / 主题字体 / 诊断 / 卸载 / 常见问题</div>
+    </div>
+    <div class="row-arrow">›</div>
+  </div>
+
+<div class="divider"></div>
   <div class="section-title fade"><span>Google 应用改用系统字体</span></div>
   <div class="status-box fade">
     <div class="status-row">
@@ -7222,6 +7265,10 @@ const ADV_TREE = [
         name: "隐藏「模块更新」整块", desc: "不想看到更新提示就打开。", hint: "还能在管理器里手动更新。" },
       { id: "sw_no_update_check", type: "switch", key: "__noUpdateCheck", uiOnly: 1,
         name: "完全关闭更新检查", desc: "连后台检查都不发。", hint: "想更新时去 GitHub 手动下。" },
+      { id: "sw_hide_manual", type: "switch", key: "__hideManual", uiOnly: 1,
+        name: "隐藏使用说明",
+        desc: "不看说明书时把它藏起来（连它上面那条分割线一起藏）。",
+        hint: "随时可以在这里再打开。" },
       { id: "sw_hide_google", type: "switch", key: "__hideGoogle", uiOnly: 1,
         name: "隐藏「Google 兼容」卡片", desc: "用不到可以藏起来。", hint: "设置还在，只是不显示。" },
       { id: "sw_hide_feedback", type: "switch", key: "__hideFeedback", uiOnly: 1,
@@ -7871,7 +7918,7 @@ function advFind(path) {
 const UI_KEY = "cfs_ui";
 const UI_DEF = {
   accent: "", theme: "", titleSize: "", radius: "", density: "", listStyle: "",
-  anim: "1", hideUpdate: "0", hideGoogle: "0", hideFeedback: "0", hideDebug: "0",
+  anim: "1", hideUpdate: "0", hideGoogle: "0", hideManual: "0", hideFeedback: "0", hideDebug: "0",
   simple: "0", longPress: "1", dblclick: "1", noUpdateCheck: "0",
   ab: "0",
   names: {}, bg: "", bgDim: "35", bgBlur: "6",
@@ -8313,11 +8360,36 @@ function uiApply() {
   try { advApplyEntry(); } catch (e) {}
 }
 
+
+function uiHideManual(hide) {
+  let t = null;
+  document.querySelectorAll(".section-title").forEach(function (x) {
+    if (!t && String(x.textContent || "").indexOf("使用说明") >= 0) t = x;
+  });
+  if (!t) return;
+  // 标题上面那条分割线：向前最多找 6 个兄弟，找到就藏（只藏这一条）
+  let p = t.previousElementSibling, k = 0;
+  while (p && k < 6) {
+    if (p.classList && p.classList.contains("divider")) {
+      p.style.display = hide ? "none" : "";
+      break;
+    }
+    p = p.previousElementSibling;
+    k++;
+  }
+  t.style.display = hide ? "none" : "";
+  // 卡片直接按 onclick 找，避免被其它包裹层影响
+  const card = document.querySelector('[onclick="manualOpen()"]');
+  if (card) card.style.display = hide ? "none" : "";
+}
+
 function uiHideRange(titleKey, hide) {
   document.querySelectorAll(".section-title").forEach(t => {
     if (String(t.textContent || "").indexOf(titleKey) < 0) return;
     let el = t, n = 0;
     while (el && n < 120) {
+      // ★ 高级设置入口/它的分割线永远不跟着隐藏，否则锁上就再也进不来
+      if (el.id === "advEntryBtn" || el.id === "advEntryDivider") break;
       el.style.display = hide ? "none" : "";
       el = el.nextElementSibling;
       n++;
@@ -8325,9 +8397,45 @@ function uiHideRange(titleKey, hide) {
     }
   });
 }
+
+function uiNormalizeDividers() {
+  const nodes = Array.prototype.slice.call(document.body.children);
+  nodes.forEach(function (el) {
+    if (el.dataset && el.dataset.autodiv === "1") {
+      el.style.display = "";
+      delete el.dataset.autodiv;
+    }
+  });
+  let lastDiv = null;
+  let between = [];
+  nodes.forEach(function (el) {
+    if (el.tagName === "SCRIPT" || el.tagName === "STYLE") return;
+    const vis = getComputedStyle(el).display !== "none" && !el.hidden;
+    if (el.classList && el.classList.contains("divider")) {
+      if (!vis) return;
+      if (lastDiv) {
+        const onlyHiddenOrAdv = between.every(function (x) {
+          const v = getComputedStyle(x).display !== "none" && !x.hidden;
+          return !v || x.id === "advEntryBtn" || x.id === "advEntryDivider";
+        });
+        if (onlyHiddenOrAdv && between.length > 0) {
+          lastDiv.style.display = "none";
+          lastDiv.dataset.autodiv = "1";
+        }
+      }
+      lastDiv = el;
+      between = [];
+      return;
+    }
+    between.push(el);
+  });
+}
+
 function uiApplySections() {
   uiHideRange("模块更新（GitHub）", UI.hideUpdate === "1" || UI.simple === "1");
   uiHideRange("Google 应用改用系统字体", UI.hideGoogle === "1" || UI.simple === "1");
+  uiHideManual(UI.hideManual === "1" || UI.simple === "1");
+  try { uiNormalizeDividers(); } catch (e) {}
   uiHideRange("遇到问题？抓日志", UI.hideFeedback === "1" || UI.simple === "1");
   uiHideRange("完整报告", UI.simple === "1");
 }
@@ -8685,7 +8793,7 @@ function advRender() {
   // 界面自定义的开关初态
   try {
     const UIMAP = { "__anim": "anim", "__ab": "ab", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
-                    "__hideGoogle": "hideGoogle", "__hideFeedback": "hideFeedback",
+                    "__hideGoogle": "hideGoogle", "__hideManual": "hideManual", "__hideFeedback": "hideFeedback",
                     "__simple": "simple", "__longPress": "longPress", "__dblclick": "dblclick" };
     Object.keys(UIMAP).forEach(k => {
       document.querySelectorAll('[data-key="' + k + '"]').forEach(el =>
@@ -8845,6 +8953,11 @@ async function advLockConfirm() {
 }
 
 function advRelock() {
+  // ★ 互锁：模块更新被隐藏时不允许锁定，否则主界面可能找不到入口
+  if (typeof UI !== "undefined" && UI.hideUpdate === "1") {
+    showToast("先把「模块更新」显示出来，再锁定高级设置", false, 5000);
+    return;
+  }
   try { localStorage.removeItem("cfs_adv_unlocked"); } catch (e) {}
   ksuExec("rm -f " + LIB + "/.adv_unlocked 2>/dev/null").catch(() => {});
   advApplyEntry();
@@ -8909,10 +9022,10 @@ async function toggleSetting(key) {
   if (busy) return;
   if (key.indexOf("__") === 0) {
     const map = { "__anim": "anim", "__ab": "ab", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
-                  "__hideGoogle": "hideGoogle", "__hideFeedback": "hideFeedback",
+                  "__hideGoogle": "hideGoogle", "__hideManual": "hideManual", "__hideFeedback": "hideFeedback",
                   "__simple": "simple", "__longPress": "longPress", "__dblclick": "dblclick" };
     const k2 = map[key];
-    if (k2) { UI[k2] = UI[k2] === "1" ? "0" : "1"; uiSave(); advRender(); }
+    if (k2) { UI[k2] = UI[k2] === "1" ? "0" : "1"; uiSave(); advRender(); try { uiApplySections(); } catch (e) {} }
     return;
   }
   const row = document.querySelector(`.switch-row[onclick*="${key}"]`);
@@ -11603,5 +11716,45 @@ async function updResume() {
       <div class="adv-out" id="advConOut">正在执行…</div>
     </div>
   </div>
+
+<div class="modal-mask" id="manualSheet" style="align-items:stretch">
+  <div class="modal" style="max-width:min(96vw,980px);width:min(96vw,980px);height:92vh;display:flex;flex-direction:column;padding:0">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px 8px">
+      <div style="font-weight:700">使用说明</div>
+      <span id="manualCount" style="font-size:12px;color:var(--text-dim)"></span>
+      <button class="g-btn" style="margin-left:auto;padding:5px 12px" onclick="manualClose()">关闭</button>
+    </div>
+    <div style="padding:0 14px 8px">
+      <input id="manualSearch" placeholder="搜索：挂载 / 主题字体 / 闪退 / 卸载 / 粗细…"
+             oninput="manualFilter(this.value)"
+             style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text)">
+    </div>
+    <div class="mn-toc-nav"><button class="mn-nav-btn" onclick="manualTocScroll(-1)">‹</button><span class="mn-hint">左右滑动目录，或点箭头</span><button class="mn-nav-btn" onclick="manualTocScroll(1)">›</button></div>
+  <div class="mn-wrap" style="display:flex;gap:12px;min-height:0;flex:1;padding:0 14px 14px">
+      <div id="manualToc" style="flex:0 0 210px;overflow:auto;border-right:1px solid var(--border);padding-right:8px"></div>
+      <div id="manualBody" style="flex:1;overflow:auto;padding-right:6px"></div>
+    </div>
+  </div>
+</div>
+<style>
+  #manualSheet { display: none; }
+  #manualSheet.show { display: flex; }
+  .mn-toc-item { display:block;width:100%;text-align:left;background:none;border:0;color:var(--text-dim);
+    padding:7px 8px;border-radius:8px;font-size:13px;cursor:pointer;white-space:normal;line-height:1.35 }
+  .mn-toc-item:hover, .mn-toc-item.on { background:rgba(124,92,255,.15);color:var(--text) }
+  .mn-sec { margin:0 0 26px; }
+  .mn-sec h3 { font-size:16px;margin:6px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border) }
+  .mn-sec h4 { font-size:14px;margin:14px 0 6px;color:var(--accent) }
+  .mn-sec p { font-size:13px;line-height:1.7;margin:6px 0;color:var(--text-dim) }
+  .mn-sec p.mn-note { border-left:3px solid var(--warn);padding-left:10px }
+  .mn-ul { margin:6px 0 10px 18px;padding:0;font-size:13px;line-height:1.7;color:var(--text-dim) }
+  .mn-ul li { margin:2px 0 }
+  .mn-pre { background:rgba(0,0,0,.28);border:1px solid var(--border);border-radius:10px;padding:10px 12px;
+    font-size:12.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word;color:var(--text-dim);margin:8px 0 12px }
+  .mn-table { width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0 14px }
+  .mn-table th, .mn-table td { border:1px solid var(--border);padding:6px 8px;text-align:left;color:var(--text-dim) }
+  .mn-table th { color:var(--text);background:rgba(255,255,255,.04) }
+</style>
+
 </body>
 </html>
