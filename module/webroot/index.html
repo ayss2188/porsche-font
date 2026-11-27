@@ -1779,7 +1779,6 @@ try {
     <button class="g-btn" id="porscheDownloadBtn" onclick="porscheClockUpdate()" style="display:none">下载并安装</button>
   </div>
   <div class="btn-row fade" id="porscheRow2">
-    <button class="g-btn" id="porscheLocalBtn" onclick="porscheClockPickZip()">从本地安装</button>
     <button class="g-btn" id="porscheUninstallBtn" onclick="porscheClockUninstall()">卸载</button>
   </div>
 
@@ -9160,7 +9159,7 @@ function porscheApplyCachedStatus() {
     }
     const toolsBlock = document.getElementById("porscheToolsBlock");
     if (toolsBlock) toolsBlock.classList.add("show");
-    for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn", "porscheLocalBtn", "porscheUninstallBtn"]) {
+    for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn", "porscheUninstallBtn"]) {
       const b = document.getElementById(id);
       if (b) b.style.display = "";
     }
