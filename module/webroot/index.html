@@ -9344,15 +9344,19 @@ async function fontPackCheck(manual) {
   }
 }
 async function fontPackChangelog() {
+  let txt = "";
   try {
     const j = FONT_PACK_LATEST || {};
-    const u = j.changelog || (fontPackMetaBase() + "/FONT-CHANGELOG.md");
-    const rr = await fetch(u + (u.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
-    const o = String(await rr.text() || "");
-    await dialog({ title: "字体更新日志", msg: o.slice(0, 16000) || "还没有字体更新日志。", okText: "知道了" });
-  } catch (e) {
-    await dialog({ title: "字体更新日志", msg: "读取失败：" + errText(e), okText: "知道了" });
-  }
+    const ali = j.changelog || (fontPackMetaBase() + "/FONT-CHANGELOG.md");
+    const gh = "https://raw.githubusercontent.com/ayss2188/porsche-font/main/FONT-CHANGELOG.md";
+    for (const [u, to] of [[ali, 3000], [gh, 5000]]) {
+      try {
+        const rr = await withTimeout(fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), to);
+        if (rr && rr.ok) { txt = String(await rr.text() || ""); if (txt.trim()) break; }
+      } catch (e) {}
+    }
+  } catch (e) {}
+  await dialog({ title: "字体更新日志", msg: txt.trim().slice(0, 16000) || "还没有字体更新日志。", okText: "知道了" });
 }
 async function fontPackInstallMenu() {
   const ans = await dialog({
