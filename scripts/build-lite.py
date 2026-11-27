@@ -24,6 +24,7 @@ def prop(name):
 
 VERSION = prop("version") or "v0.0"
 VERSION_CODE = int(prop("versionCode") or 0)
+TAG = VERSION if VERSION.startswith("v") else "v" + VERSION
 rows = []
 for line in io.open(CFG, encoding="utf-8"):
     line = line.strip()
@@ -66,7 +67,7 @@ for key, mid, up, fonts, disp, zipkey in rows:
     meta = {
         "version": VERSION,
         "versionCode": VERSION_CODE,
-        "zipUrl": GH + "/" + VERSION + "/" + name,
+        "zipUrl": GH + "/" + TAG + "/" + name,
         "aliyunZipUrl": ALI + "/porsche/" + sk + "/" + name,
         "changelog": ALI + "/porsche/" + sk + "/CHANGELOG.md",
         "sha256": h,
