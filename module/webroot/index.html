@@ -87,6 +87,10 @@ body { min-height: 100%; }
   .status-box .value { font-size: 15px; font-weight: 600; text-align: right; word-break: break-all; }
   #fontPackPanel { display: none; }
   #fontPackPanel.show { display: block; }
+  #porscheRow2 { display: none !important; }
+  #porscheRow2.show { display: flex !important; }
+  #porscheToolsBlock { display: none !important; }
+  #porscheToolsBlock.show { display: block !important; }
   .value.active { color: var(--accent); }
   .value.pending { color: var(--pending-blue); }
   .value.ok { color: var(--ok); }
@@ -1743,6 +1747,9 @@ try {
   <div class="divider"></div>
 
   <div class="section-title fade"><span>字体工具箱（可选）</span></div>
+  <div class="g-hint vpn-tip fade" style="margin:-2px 0 10px">
+    <b>字体工具箱：</b>检测更新和更新日志走阿里云，国内可直连；插件包下载走 GitHub 或本地导入，GitHub 可能需要 VPN。
+  </div>
   <div class="status-box fade">
     <div class="status-row">
       <span class="label">当前版本</span>
@@ -1753,9 +1760,6 @@ try {
       <span class="value" id="porscheLatestLabel">未检查</span>
     </div>
   </div>
-  <div class="g-hint vpn-tip fade" style="margin:-2px 0 10px">
-    <b>字体工具箱：</b>检测更新和更新日志走阿里云，国内可直连；插件包下载走 GitHub 或本地导入，GitHub 可能需要 VPN。
-  </div>
   <div class="g-hint" id="porscheInstallStatus" style="display:none;margin:8px 0"></div>
   <div class="btn-row fade">
     <button class="g-btn" id="porscheCheckBtn" onclick="porscheClockCheck()">检测更新</button>
@@ -1763,12 +1767,12 @@ try {
     <button class="g-btn" id="porscheInstallBtn" onclick="porscheClockInstallMenu()">安装插件</button>
     <button class="g-btn" id="porscheDownloadBtn" onclick="porscheClockUpdate()" style="display:none">下载并安装</button>
   </div>
-  <div class="btn-row fade" id="porscheRow2" style="display:none">
+  <div class="btn-row fade" id="porscheRow2">
     <button class="g-btn" id="porscheLocalBtn" onclick="porscheClockPickZip()">从本地安装</button>
     <button class="g-btn" id="porscheUninstallBtn" onclick="porscheClockUninstall()">卸载</button>
   </div>
 
-  <div id="porscheToolsBlock" style="display:none">
+  <div id="porscheToolsBlock">
   <div class="divider" id="porscheToolsDivider"></div>
   <div class="section-title fade" id="porscheToolsSection" style="margin-top:18px"><span>字体工具箱</span></div>
   <div class="switch-row fade" id="porscheToolsEntry" onclick="porscheToolsUI()">
@@ -1784,6 +1788,9 @@ try {
   <div class="divider"></div>
 
   <div class="section-title fade" style="margin-top:18px"><span>字体包更新</span></div>
+  <div class="g-hint vpn-tip fade" style="margin:-2px 0 10px">
+    <b>字体包：</b>检测更新和字体更新日志走阿里云，国内可直连；安装字体包走 GitHub 或本地导入，GitHub 可能需要 VPN。
+  </div>
   <div class="status-box fade">
     <div class="status-row"><span class="label">当前字体包</span><span class="value" id="fontPackCurLabel">读取中…</span></div>
     <div class="status-row"><span class="label">最新字体包</span><span class="value off" id="fontPackLatestLabel">未检查</span></div>
@@ -1797,9 +1804,6 @@ try {
       <span class="spin"></span><span id="fontPackSpinText" class="g-hint" style="margin:0">正在安装…</span>
     </div>
   </div>
-  <div class="g-hint vpn-tip fade" style="margin:-2px 0 10px">
-    <b>字体包：</b>检测更新和字体更新日志走阿里云，国内可直连；安装字体包走 GitHub 或本地导入，GitHub 可能需要 VPN。
-  </div>
   <div class="btn-row fade">
     <button class="g-btn" onclick="fontPackCheck(true)">检查字体更新</button>
     <button class="g-btn" onclick="fontPackChangelog()">字体更新日志</button>
@@ -1810,8 +1814,7 @@ try {
 
   <div class="section-title fade"><span>模块更新</span></div>
   <div class="g-hint vpn-tip fade" style="margin:-2px 0 10px">
-    <b>更新信息走阿里云，国内可直连</b> ——
-    只有下载模块包仍走 GitHub；下载没反应时再连 VPN。
+    <b>模块更新：</b>更新信息和更新日志走阿里云，国内可直连；模块包下载支持阿里云 OSS / GitHub，GitHub 可能需要 VPN。
   </div>
   <div class="status-box fade">
     <div class="status-row">
@@ -8729,7 +8732,7 @@ function uiApplySections() {
     const hideFt = UI.hideFontTools === "1" || UI.simple === "1";
     if (hideFt) {
       const ftBlock = document.getElementById("porscheToolsBlock");
-      if (ftBlock) ftBlock.style.display = "none";
+      if (ftBlock) ftBlock.classList.remove("show");
     }
   }
   uiHideRange("字体工具箱（可选）", UI.hidePlugin === "1" || UI.simple === "1");
@@ -9145,7 +9148,7 @@ function porscheApplyCachedStatus() {
       cur.className = "value";
     }
     const toolsBlock = document.getElementById("porscheToolsBlock");
-    if (toolsBlock) toolsBlock.style.display = "";
+    if (toolsBlock) toolsBlock.classList.add("show");
     for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn", "porscheLocalBtn", "porscheUninstallBtn"]) {
       const b = document.getElementById(id);
       if (b) b.style.display = "";
@@ -9169,7 +9172,7 @@ async function porscheRefreshStatus() {
     cur.className = "value" + (ins ? "" : " off");
   }
   const toolsBlock = document.getElementById("porscheToolsBlock");
-  if (toolsBlock) toolsBlock.style.display = ins ? "" : "none";
+  if (toolsBlock) toolsBlock.classList.toggle("show", ins);
   for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn"]) {
     const b = document.getElementById(id);
     if (b) b.style.display = ins ? "" : (id === "porscheDownloadBtn" ? "none" : "");
@@ -9177,9 +9180,9 @@ async function porscheRefreshStatus() {
   const ib = document.getElementById("porscheInstallBtn");
   if (ib) ib.style.display = ins ? "none" : "";
   const r2 = document.getElementById("porscheRow2");
-  if (r2) r2.style.display = ins ? "flex" : "none";
-  const td = document.getElementById("porscheToolsDivider");
-  if (td) td.style.display = ins ? "" : "none";
+  if (r2) r2.classList.toggle("show", ins);
+  const tb = document.getElementById("porscheToolsBlock");
+  if (tb) tb.classList.toggle("show", ins);
   return { ins, ver };
 }
 async function porscheClockRender() {
