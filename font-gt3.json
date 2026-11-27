@@ -1,0 +1,10 @@
+{
+  "version": "v1.0",
+  "versionCode": 10000,
+  "variant": "flair",
+  "zipUrl": "https://github.com/ayss2188/porsche-font-lite/releases/download/fonts-v1.0/porsche-fontpack-gt3-v1.0.zip",
+  "changelog": "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/gt3/FONT-CHANGELOG.md",
+  "sha256": "fca77d0e905173bfd843534fedba0b8060fda8a2a083955bb68cc44e7698b9e7",
+  "size": 27395591,
+  "minModuleCode": 460000
+}
