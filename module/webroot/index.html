@@ -2173,6 +2173,7 @@ const WORKER_KEY = "se40odifAmODULlNh6yISRqZVwQKBHkPYrntWXM5";
 const R2_WORKER_URL = "https://cfs-report.2188366745q.workers.dev";
 const R2_WORKER_KEY = "up_AIWDsNGqSacruDo4wLnJmEiMvgEMpGtt";
 let UPLOAD_ROUTE = "aliyun";
+function vLabel(x){ x=String(x||"").trim(); return /^v/i.test(x)?x:("v"+x); }
 function uploadBase() { return UPLOAD_ROUTE === "r2" ? R2_WORKER_URL : WORKER_URL; }
 function uploadKey() { return UPLOAD_ROUTE === "r2" ? R2_WORKER_KEY : WORKER_KEY; }
 
@@ -9106,7 +9107,7 @@ function porscheApplyCachedStatus() {
     const ver = (st.match(/^VERSION=(.*)$/m) || [])[1] || "";
     const cur = document.getElementById("porscheCurLabel");
     if (cur) {
-      cur.textContent = "v" + (ver || "?");
+      cur.textContent = vLabel(ver || "?");
       cur.className = "value";
     }
     const toolsTitle = document.getElementById("porscheToolsSection");
@@ -9134,7 +9135,7 @@ async function porscheRefreshStatus() {
   const ver = (st.match(/^VERSION=(.*)$/m) || [])[1] || "";
   const cur = document.getElementById("porscheCurLabel");
   if (cur) {
-    cur.textContent = ins ? ("v" + (ver || "?")) : "未安装";
+    cur.textContent = ins ? vLabel(ver || "?") : "未安装";
     cur.className = "value" + (ins ? "" : " off");
   }
   const toolsTitle = document.getElementById("porscheToolsSection");
@@ -9232,7 +9233,7 @@ async function porscheRefreshLatest(silent) {
       if (!silent) showToast("没有拿到插件版本信息", false, 6000);
       return;
     }
-    ll.textContent = "v" + latest + (has ? "（可更新）" : "（已是最新）");
+    ll.textContent = vLabel(latest) + (has ? "（可更新）" : "（已是最新）");
     ll.className = "value " + (has ? "active" : "off");
     if (!silent) showToast(has ? ("发现插件新版 " + latest) : "插件已是最新版本", false, 5000);
   } catch (e) {
@@ -9489,7 +9490,7 @@ async function porscheToolsUI() {
   });
   const fmt = ui.footerFormat || "字体工具箱 v{version} · 构建 {build}";
   html += '<div class="g-hint" id="porscheToolsFoot" style="text-align:center;margin-top:14px">'
-    + cacheEsc(fmt.replace(/\{version\}/g, "v" + ver).replace(/\{build\}/g, build || "-").replace(/\{author\}/g, author || "")) + '</div>';
+    + cacheEsc(fmt.replace(/\{version\}/g, vLabel(ver)).replace(/\{build\}/g, build || "-").replace(/\{author\}/g, author || "")) + '</div>';
   out.innerHTML = html;
 }
 
@@ -9499,7 +9500,7 @@ async function porscheToolPick(id) {
   if (porscheToolBusy) { showToast("上一个工具还在执行，请稍等", false, 4000); return; }
   let paths = [];
   try {
-    const raw = String(await ksuExecTO(`find ${BUILTINDIR} ${LIB} -maxdepth 1 -type f \\( -name "*.ttf" -o -name "*.otf" \\) 2>/dev/null`, 5000) || "");
+    const raw = String(await ksuExecTO(`find ${BUILTINDIR} ${LIB} -maxdepth 1 -type f \( -name "*.ttf" -o -name "*.otf" \) 2>/dev/null`, 5000) || "");
     paths = raw.split("\n").map(x => x.trim()).filter(Boolean);
   } catch (e) {}
   const seen = {};
@@ -9512,22 +9513,38 @@ async function porscheToolPick(id) {
     const b = baseName(p).replace(/\.[^.]+$/, "");
     if (b === cur || b === "builtin_" + cur || b === "fonts/builtin_" + cur) def = p;
   });
-  const opts = paths.map(p => {
-    const b = baseName(p).replace(/\.[^.]+$/, "");
-    let label = b;
-    try { label = labelOf(b) || b; } catch (e) {}
-    return { value: p, label: label };
-  });
-  const ans = await dialog({
-    title: tool.name,
-    msg: "选择要检查的字体",
-    select: { label: "字体", options: opts.map(x => [x.value, x.label]), value: def },
-    okText: "执行"
-  });
-  if (!ans) return;
-  const path = (ans && typeof ans === "object") ? ans.sel : ans;
+  window.__porschePick = { task: id, paths: paths, def: def };
+  advConFootHide();
+  const sheet = document.getElementById("advConSheet");
+  const title = document.getElementById("advConTitle");
+  const hint = document.getElementById("advConHint");
+  const out = document.getElementById("advConOut");
+  if (title) title.textContent = tool.name;
+  if (hint) { hint.style.display = "block"; hint.innerHTML = "选择要检查的字体，然后执行。"; }
+  if (sheet) sheet.classList.add("show");
+  if (!out) return;
+  out.innerHTML = '<div class="g-hint" style="margin:4px 0 10px">字体库 · ' + paths.length + ' 个</div>'
+    + paths.map(p => {
+        const b = baseName(p).replace(/\.[^.]+$/, "");
+        let label = b;
+        try { label = labelOf(b) || b; } catch (e) {}
+        return '<label class="switch-row" style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
+          + '<input type="radio" name="porscheToolFont" value="' + encodeURIComponent(p) + '"' + (p === def ? " checked" : "") + '>'
+          + '<span style="flex:1">' + cacheEsc(label) + '</span></label>';
+      }).join("")
+    + '<div class="btn-row" style="margin-top:14px">'
+    + '<button class="g-btn primary-blue" onclick="porscheToolPickRun()">执行</button>'
+    + '<button class="g-btn" onclick="porscheToolsUI()">返回</button></div>';
+}
+async function porscheToolPickRun() {
+  const p = window.__porschePick;
+  if (!p) return;
+  const el = document.querySelector('input[name="porscheToolFont"]:checked');
+  if (!el) { showToast("先选一个字体"); return; }
+  let path = "";
+  try { path = decodeURIComponent(el.value); } catch (e) { path = el.value; }
   if (!path) return;
-  await porscheToolRun(id, path);
+  await porscheToolRun(p.task, path);
 }
 
 function porscheToolParse(raw) {
