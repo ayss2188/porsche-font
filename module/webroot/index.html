@@ -9295,13 +9295,8 @@ async function porscheClockInstallMenu() {
   if (ans === true) return porscheClockPickZip();
   if (ans === "alt") return porscheClockUpdate(true);
 }
-let PORSCHE_TOOLS = [
-  { id: "doctor",   name: "字体文件体检", desc: "PS 名、family、空格、中文、OS/2、表结构" },
-  { id: "info",     name: "字体信息 / 授权", desc: "版本、版权、许可证、厂商、设计者" },
-  { id: "analyze",  name: "体积分析", desc: "看哪些表占空间" },
-  { id: "tables",   name: "深度表解析", desc: "逐表检查偏移/长度/能否解析" },
-  { id: "recommend", name: "机型适配建议", desc: "按中文覆盖/字重/VF 给建议" },
-];
+let PORSCHE_TOOLS = [];
+
 let porscheToolBusy = false;
 
 async function porscheCurrentFontPath() {
@@ -9575,6 +9570,10 @@ async function porscheToolsUI() {
     })).filter(x => x.id);
     css = plugin.css || "";
     ui = plugin.ui || {};
+  }
+  if (!PORSCHE_TOOLS.length) {
+    out.innerHTML = '<div style="padding:14px 4px;color:#ef4444">插件没有提供工具界面数据（ui/tools.json）。请重新安装 porsche 插件，模块不再内置备用工具列表。</div>';
+    return;
   }
   if (css) {
     let st = document.getElementById("porscheToolCss");
