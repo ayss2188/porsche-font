@@ -1768,9 +1768,10 @@ try {
     <button class="g-btn" id="porscheUninstallBtn" onclick="porscheClockUninstall()">卸载</button>
   </div>
 
-  <div class="divider" id="porscheToolsDivider" style="display:none"></div>
-  <div class="section-title fade" id="porscheToolsSection" style="margin-top:18px;display:none"><span>字体工具箱</span></div>
-  <div class="switch-row fade" id="porscheToolsEntry" onclick="porscheToolsUI()" style="display:none">
+  <div id="porscheToolsBlock" style="display:none">
+  <div class="divider" id="porscheToolsDivider"></div>
+  <div class="section-title fade" id="porscheToolsSection" style="margin-top:18px"><span>字体工具箱</span></div>
+  <div class="switch-row fade" id="porscheToolsEntry" onclick="porscheToolsUI()">
     <div>
       <div class="t">字体工具箱</div>
       <div class="d">字体体检 · 字体信息/授权 · 体积分析 · 表解析 · 机型建议（由插件执行）</div>
@@ -1778,6 +1779,7 @@ try {
     <div class="row-arrow">›</div>
   </div>
   <div class="g-hint fade">不装插件不影响普通字体切换；只影响锁屏时钟替换。</div>
+  </div>
 
   <div class="divider"></div>
 
@@ -8726,12 +8728,8 @@ function uiApplySections() {
   {
     const hideFt = UI.hideFontTools === "1" || UI.simple === "1";
     if (hideFt) {
-      const ftTitle = document.getElementById("porscheToolsSection");
-      const ftEntry = document.getElementById("porscheToolsEntry");
-      const ftDiv = document.getElementById("porscheToolsDivider");
-      if (ftTitle) ftTitle.style.display = "none";
-      if (ftEntry) ftEntry.style.display = "none";
-      if (ftDiv) ftDiv.style.display = "none";
+      const ftBlock = document.getElementById("porscheToolsBlock");
+      if (ftBlock) ftBlock.style.display = "none";
     }
   }
   uiHideRange("字体工具箱（可选）", UI.hidePlugin === "1" || UI.simple === "1");
@@ -9146,12 +9144,8 @@ function porscheApplyCachedStatus() {
       cur.textContent = vLabel(ver || "?");
       cur.className = "value";
     }
-    const toolsTitle = document.getElementById("porscheToolsSection");
-    const toolsEntry = document.getElementById("porscheToolsEntry");
-    const toolsCheck = document.getElementById("porscheCheckFontEntry");
-    if (toolsTitle) toolsTitle.style.display = "";
-    if (toolsEntry) toolsEntry.style.display = "";
-    if (toolsCheck) toolsCheck.style.display = "";
+    const toolsBlock = document.getElementById("porscheToolsBlock");
+    if (toolsBlock) toolsBlock.style.display = "";
     for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn", "porscheLocalBtn", "porscheUninstallBtn"]) {
       const b = document.getElementById(id);
       if (b) b.style.display = "";
@@ -9174,12 +9168,8 @@ async function porscheRefreshStatus() {
     cur.textContent = ins ? vLabel(ver || "?") : "未安装";
     cur.className = "value" + (ins ? "" : " off");
   }
-  const toolsTitle = document.getElementById("porscheToolsSection");
-  const toolsEntry = document.getElementById("porscheToolsEntry");
-  const toolsCheck = document.getElementById("porscheCheckFontEntry");
-  if (toolsTitle) toolsTitle.style.display = ins ? "" : "none";
-  if (toolsEntry) toolsEntry.style.display = ins ? "" : "none";
-  if (toolsCheck) toolsCheck.style.display = ins ? "" : "none";
+  const toolsBlock = document.getElementById("porscheToolsBlock");
+  if (toolsBlock) toolsBlock.style.display = ins ? "" : "none";
   for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn"]) {
     const b = document.getElementById(id);
     if (b) b.style.display = ins ? "" : (id === "porscheDownloadBtn" ? "none" : "");

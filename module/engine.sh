@@ -379,9 +379,15 @@ case "${1:-status}" in
     _j="$TMP/.eng.latest.$$"
     if fetch_meta "$_j"; then
       _lv=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_j" | head -n1)
+      _lc=$(sed -n 's/.*"code"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$_j" | head -n1)
       say "LATEST=${_lv:-?}"
+      [ -n "$_lc" ] && say "LATEST_CODE=$_lc"
       _iv=$(read_prop "$ENG/plugin.prop" version)
-      [ -n "$_lv" ] && [ "$_lv" != "$_iv" ] && _engine_ver_gt "$_lv" "$_iv" && say "HAS_UPDATE=1"
+      _ic=$(read_prop "$ENG/plugin.prop" code)
+      _has=0
+      if [ -n "$_lv" ] && [ "$_lv" != "$_iv" ] && _engine_ver_gt "$_lv" "$_iv"; then _has=1; fi
+      case "${_lc:-}" in ''|*[!0-9]*) ;; *) case "${_ic:-}" in ''|*[!0-9]*) ;; *) [ "$_lc" -gt "$_ic" ] && _has=1 ;; esac ;; esac
+      [ "$_has" = 1 ] && say "HAS_UPDATE=1"
     else
       say "ERROR:检查更新失败（网络不通）"
     fi
