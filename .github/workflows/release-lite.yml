@@ -62,11 +62,12 @@ jobs:
           gh repo view "$LITE_REPO" >/dev/null 2>&1 || gh repo create "$LITE_REPO" --private
           VER=$(sed -n 's/^version=//p' module/module.prop | head -n1 | tr -d '\r')
           CODE=$(sed -n 's/^versionCode=//p' module/module.prop | head -n1 | tr -d '\r')
-          gh release view "$VER" --repo "$LITE_REPO" >/dev/null 2>&1 \
-            && gh release upload "$VER" dist-lite/*.zip --repo "$LITE_REPO" --clobber \
-            || gh release create "$VER" dist-lite/*.zip \
+          case "$VER" in v*) TAG="$VER" ;; *) TAG="v$VER" ;; esac
+          gh release view "$TAG" --repo "$LITE_REPO" >/dev/null 2>&1 \
+            && gh release upload "$TAG" dist-lite/*.zip --repo "$LITE_REPO" --clobber \
+            || gh release create "$TAG" dist-lite/*.zip \
                  --repo "$LITE_REPO" \
-                 --title "lite $VER" \
+                 --title "lite $TAG" \
                  --notes-file "${{ inputs.release_notes }}" \
                  --latest=false
           gh release view "fonts-v1.0" --repo "$LITE_REPO" >/dev/null 2>&1 \
