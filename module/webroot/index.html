@@ -9343,7 +9343,7 @@ async function fontPackCheck(manual) {
     if (manual) showToast("字体包检查失败：" + errText(e), false, 6000);
   }
 }
-async function fontPackChangelog() {
+async function fontPackChangelog(online) {
   let txt = "";
   try {
     const j = FONT_PACK_LATEST || {};
@@ -9356,7 +9356,8 @@ async function fontPackChangelog() {
       } catch (e) {}
     }
   } catch (e) {}
-  await dialog({ title: "字体更新日志", msg: txt.trim().slice(0, 16000) || "还没有字体更新日志。", okText: "知道了" });
+  const ans = await dialog({ title: "字体更新日志", msg: txt.trim().slice(0, 16000) || "还没有字体更新日志。", okText: "关闭", altText: online ? "" : "看线上最新", order: "cancel-ok-alt" });
+  if (ans === "alt") return fontPackChangelog(true);
 }
 async function fontPackInstallMenu() {
   const ans = await dialog({
@@ -9620,7 +9621,7 @@ async function porscheCheckFont() {
   } catch (e) { showToast("检查失败：" + errText(e), false, 7000); }
 }
 
-async function porscheClockChangelog() {
+async function porscheClockChangelog(online) {
   let txt = "";
   try {
     const ali = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/ENGINE-CHANGELOG.md";
@@ -9635,7 +9636,8 @@ async function porscheClockChangelog() {
   if (!txt.trim()) {
     try { txt = String(await ksuExec(`cat ${LIBROOT}/state/engine/CHANGELOG.md 2>/dev/null`) || ""); } catch (e) {}
   }
-  await dialog({ title: "字体工具箱更新日志", msg: txt.trim().slice(0, 16000) || "还没有安装插件。", okText: "知道了" });
+  const ans = await dialog({ title: "字体工具箱更新日志", msg: txt.trim().slice(0, 16000) || "还没有安装插件。", okText: "关闭", altText: online ? "" : "看线上最新", order: "cancel-ok-alt" });
+  if (ans === "alt") return porscheClockChangelog(true);
 }
 async function porscheClockUI() {
   advConFootHide();
