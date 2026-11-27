@@ -1,0 +1,10 @@
+{
+  "version": "v1.0",
+  "versionCode": 10000,
+  "variant": "none",
+  "zipUrl": "https://github.com/ayss2188/porsche-font-lite/releases/download/fonts-v1.0/porsche-fontpack-718-v1.0.zip",
+  "changelog": "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/718/FONT-CHANGELOG.md",
+  "sha256": "2820721daa08aee397b3d5cedba3728b4e4f774702b05779c4504e155d1d27b6",
+  "size": 27395423,
+  "minModuleCode": 460000
+}
