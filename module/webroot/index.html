@@ -12441,22 +12441,22 @@ async function loadOnlineChangelog() {
   let txt = "";
   try {
     let json = null;
+    const ali = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/" + fontPackVariant() + "/manager-update.json";
+    const sources = [ali];
     for (const repo of UPD_REPOS) {
-      for (const url of [
-        "https://cdn.jsdelivr.net/gh/" + repo + "@main/update.json",
-        "https://raw.githubusercontent.com/" + repo + "/main/update.json",
-      ]) {
-        try {
-          const r = await withTimeout(fetch(url, { cache: "no-store" }), 9000);
-          if (r && r.ok) { json = await r.json(); break; }
-        } catch (e) { /* 换下一个源 */ }
-      }
-      if (json) break;
+      sources.push("https://raw.githubusercontent.com/" + repo + "/main/update.json");
+      sources.push("https://cdn.jsdelivr.net/gh/" + repo + "@main/update.json");
     }
-    if (!json) throw new Error("连不上 GitHub（挂个梯子再试）");
+    for (const url of sources) {
+      try {
+        const r = await withTimeout(fetch(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), 9000);
+        if (r && r.ok) { json = await r.json(); break; }
+      } catch (e) { /* 换下一个源 */ }
+    }
+    if (!json) throw new Error("连不上更新服务器");
     const logUrl = json.changelog || json.CHANGELOG || "";
-    if (!logUrl) throw new Error("update.json 里没有 changelog 地址");
-    const r2 = await withTimeout(fetch(logUrl, { cache: "no-store" }), 12000);
+    if (!logUrl) throw new Error("更新信息里没有 changelog 地址");
+    const r2 = await withTimeout(fetch(logUrl + (logUrl.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), 12000);
     if (!r2 || !r2.ok) throw new Error("下载更新日志失败 HTTP " + (r2 ? r2.status : "?"));
     txt = (await r2.text()).slice(0, 60000);
   } catch (e) {
