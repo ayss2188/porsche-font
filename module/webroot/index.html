@@ -9612,7 +9612,7 @@ async function porscheToolsUI() {
   });
   const fmt = ui.footerFormat || "字体工具箱 v{version} · 构建 {build}";
   html += '<div class="g-hint" id="porscheToolsFoot" style="text-align:center;margin-top:14px">'
-    + cacheEsc(fmt.replace(/\{version\}/g, vLabel(ver)).replace(/\{build\}/g, build || "-").replace(/\{author\}/g, author || "")) + '</div>';
+    + cacheEsc(fmt.replace(/\{version\}/g, String(ver || "?").replace(/^v/i, "")).replace(/\{build\}/g, build || "-").replace(/\{author\}/g, author || "")) + '</div>';
   out.innerHTML = html;
 }
 
