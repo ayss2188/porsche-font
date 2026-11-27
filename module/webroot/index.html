@@ -85,6 +85,8 @@ body { min-height: 100%; }
   .status-row + .status-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .status-box .label { color: var(--text-dim); font-size: 12px; flex-shrink: 0; }
   .status-box .value { font-size: 15px; font-weight: 600; text-align: right; word-break: break-all; }
+  #fontPackPanel { display: none; }
+  #fontPackPanel.show { display: block; }
   .value.active { color: var(--accent); }
   .value.pending { color: var(--pending-blue); }
   .value.ok { color: var(--ok); }
@@ -1760,10 +1762,13 @@ try {
     <button class="g-btn" id="porscheLogBtn" onclick="porscheClockChangelog()">更新日志</button>
     <button class="g-btn" id="porscheInstallBtn" onclick="porscheClockInstallMenu()">安装插件</button>
     <button class="g-btn" id="porscheDownloadBtn" onclick="porscheClockUpdate()" style="display:none">下载并安装</button>
-    <button class="g-btn" id="porscheLocalBtn" onclick="porscheClockPickZip()" style="display:none">从本地安装</button>
-    <button class="g-btn" id="porscheUninstallBtn" onclick="porscheClockUninstall()" style="display:none">卸载</button>
+  </div>
+  <div class="btn-row fade" id="porscheRow2" style="display:none">
+    <button class="g-btn" id="porscheLocalBtn" onclick="porscheClockPickZip()">从本地安装</button>
+    <button class="g-btn" id="porscheUninstallBtn" onclick="porscheClockUninstall()">卸载</button>
   </div>
 
+  <div class="divider" id="porscheToolsDivider" style="display:none"></div>
   <div class="section-title fade" id="porscheToolsSection" style="margin-top:18px;display:none"><span>字体工具箱</span></div>
   <div class="switch-row fade" id="porscheToolsEntry" onclick="porscheToolsUI()" style="display:none">
     <div>
@@ -1781,7 +1786,7 @@ try {
     <div class="status-row"><span class="label">当前字体包</span><span class="value" id="fontPackCurLabel">读取中…</span></div>
     <div class="status-row"><span class="label">最新字体包</span><span class="value off" id="fontPackLatestLabel">未检查</span></div>
   </div>
-  <div id="fontPackPanel" style="display:none;margin:12px 0 2px">
+  <div id="fontPackPanel" style="margin:12px 0 2px">
     <div id="fontPackPanelText" class="g-hint" style="margin:0 0 8px"></div>
     <div id="fontPackBarWrap" style="height:8px;border-radius:6px;overflow:hidden;background:rgba(128,128,128,.25)">
       <div id="fontPackBar" style="height:100%;width:0%;background:#3b82f6;transition:width .25s ease"></div>
@@ -8723,8 +8728,10 @@ function uiApplySections() {
     if (hideFt) {
       const ftTitle = document.getElementById("porscheToolsSection");
       const ftEntry = document.getElementById("porscheToolsEntry");
+      const ftDiv = document.getElementById("porscheToolsDivider");
       if (ftTitle) ftTitle.style.display = "none";
       if (ftEntry) ftEntry.style.display = "none";
+      if (ftDiv) ftDiv.style.display = "none";
     }
   }
   uiHideRange("字体工具箱（可选）", UI.hidePlugin === "1" || UI.simple === "1");
@@ -9173,12 +9180,16 @@ async function porscheRefreshStatus() {
   if (toolsTitle) toolsTitle.style.display = ins ? "" : "none";
   if (toolsEntry) toolsEntry.style.display = ins ? "" : "none";
   if (toolsCheck) toolsCheck.style.display = ins ? "" : "none";
-  for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn", "porscheLocalBtn", "porscheUninstallBtn"]) {
+  for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn"]) {
     const b = document.getElementById(id);
-    if (b) b.style.display = ins ? "" : "none";
+    if (b) b.style.display = ins ? "" : (id === "porscheDownloadBtn" ? "none" : "");
   }
   const ib = document.getElementById("porscheInstallBtn");
   if (ib) ib.style.display = ins ? "none" : "";
+  const r2 = document.getElementById("porscheRow2");
+  if (r2) r2.style.display = ins ? "flex" : "none";
+  const td = document.getElementById("porscheToolsDivider");
+  if (td) td.style.display = ins ? "" : "none";
   return { ins, ver };
 }
 async function porscheClockRender() {
@@ -9459,7 +9470,7 @@ function fontPackPanel(text, ratio, spin) {
   const t = document.getElementById("fontPackPanelText");
   const bar = document.getElementById("fontPackBar");
   const spinEl = document.getElementById("fontPackSpin");
-  if (p) p.style.display = "block";
+  if (p) p.classList.add("show");
   if (t) t.textContent = text || "";
   if (bar) bar.style.width = Math.round(Math.max(0, Math.min(1, ratio || 0)) * 100) + "%";
   const wrap = document.getElementById("fontPackBarWrap");
@@ -9468,7 +9479,7 @@ function fontPackPanel(text, ratio, spin) {
 }
 function fontPackPanelHide() {
   const p = document.getElementById("fontPackPanel");
-  if (p) p.style.display = "none";
+  if (p) p.classList.remove("show");
 }
 async function fontPackAfterInstall(version) {
   fontPackPanel("字体包 " + version + " 已安装，正在重置字体选择…", 1, true);
@@ -12692,6 +12703,9 @@ async function loadOnlineChangelog() {
 let __logReqId = 0;
 async function showChangelog() {
   const box = document.getElementById("logText"), ld = document.getElementById("logLoading");
+  const _h = document.querySelector("#logMask h3"), _ob = document.getElementById("logOnlineBtn");
+  if (_h) _h.textContent = "更新日志";
+  if (_ob) { _ob.style.display = ""; _ob.onclick = loadOnlineChangelog; _ob.textContent = "看线上最新"; }
   box.textContent = ""; box.style.display = "none"; box.classList.remove("pop");
   ld.style.display = "flex";
   document.getElementById("logMask").classList.add("show");
