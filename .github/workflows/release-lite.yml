@@ -1,0 +1,112 @@
+name: Release lite / fontpack
+
+# 只发布 lite 模块包和签名字体包，不发布完整模块包。
+# 完整 4.6.0 仍然只在 porsche-font 仓库走原 Release workflow。
+on:
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: "Release 说明文件（可选，默认用 CHANGELOG.md）"
+        required: false
+        default: "CHANGELOG.md"
+
+permissions:
+  contents: read
+
+env:
+  FONTS_ZIP_URL: "https://github.com/ayss2188/porsche-font/releases/download/fonts-v7/porsche-font-profiles-v7.zip"
+  LITE_REPO: "ayss2188/porsche-font-lite"
+  OSS_BUCKET: "cfs-porsche-downloads-q2188366745"
+  OSS_ENDPOINT: "oss-cn-hangzhou.aliyuncs.com"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install cryptography
+
+      - name: Fetch builtin fonts
+        run: |
+          set -e
+          mkdir -p module/builtin
+          curl -fsSL "$FONTS_ZIP_URL" -o /tmp/fonts.zip
+          unzip -o -j /tmp/fonts.zip 'profiles/*.ttf' -d module/builtin/ || true
+          unzip -o -j /tmp/fonts.zip 'system/fonts_src/*.ttf' -d module/builtin/ || true
+          n=$(ls module/builtin/*.ttf 2>/dev/null | wc -l)
+          [ "$n" -ge 1 ] || { echo "::error::没有字体素材"; exit 1; }
+
+      - name: Build lite packages
+        run: python scripts/build-lite.py dist-lite
+
+      - name: Build signed font packs
+        env:
+          PORSCHE_FONT_KEY_FILE: /tmp/porsche_font.key
+        run: |
+          set -e
+          printf '%s' "${{ secrets.PORSCHE_FONT_SIGNING_KEY }}" > /tmp/porsche_font.key
+          [ -s /tmp/porsche_font.key ] || { echo "::error::缺少 PORSCHE_FONT_SIGNING_KEY"; exit 1; }
+          python scripts/build-fontpack.py dist-fontpack
+
+      - name: Create lite GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN_LITE }}
+        run: |
+          set -e
+          gh repo view "$LITE_REPO" >/dev/null 2>&1 || gh repo create "$LITE_REPO" --private
+          VER=$(sed -n 's/^version=//p' module/module.prop | head -n1 | tr -d '\r')
+          CODE=$(sed -n 's/^versionCode=//p' module/module.prop | head -n1 | tr -d '\r')
+          gh release view "$VER" --repo "$LITE_REPO" >/dev/null 2>&1 \
+            && gh release upload "$VER" dist-lite/*.zip --repo "$LITE_REPO" --clobber \
+            || gh release create "$VER" dist-lite/*.zip \
+                 --repo "$LITE_REPO" \
+                 --title "lite $VER" \
+                 --notes-file "${{ inputs.release_notes }}" \
+                 --latest=false
+          gh release view "fonts-v1.0" --repo "$LITE_REPO" >/dev/null 2>&1 \
+            && gh release upload "fonts-v1.0" dist-fontpack/*.zip --repo "$LITE_REPO" --clobber \
+            || gh release create "fonts-v1.0" dist-fontpack/*.zip \
+                 --repo "$LITE_REPO" \
+                 --title "fonts v1.0" \
+                 --notes "porsche 内置字体包 v1.0" \
+                 --latest=false
+
+      - name: Install ossutil
+        run: |
+          curl -fsSL -o ossutil.zip https://gosspublic.alicdn.com/ossutil/v2/2.4.1/ossutil-2.4.1-linux-amd64.zip
+          unzip -q ossutil.zip -d ossutil
+          BIN=$(find ossutil -type f -name ossutil | head -n1)
+          chmod +x "$BIN"
+          echo "OSSUTIL=$BIN" >> "$GITHUB_ENV"
+
+      - name: Upload metadata and lite packages to Aliyun
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+        run: |
+          set -e
+          CFG="$RUNNER_TEMP/ossutilconfig"
+          cat > "$CFG" <<EOF
+          [default]
+          accessKeyID=$OSS_ACCESS_KEY_ID
+          accessKeySecret=$OSS_ACCESS_KEY_SECRET
+          region=cn-hangzhou
+          endpoint=https://$OSS_ENDPOINT
+          EOF
+          "$OSSUTIL" mb "oss://$OSS_BUCKET" --config-file "$CFG" 2>/dev/null || true
+          for j in dist-lite/manager-update-*.json; do
+            sk=$(basename "$j" .json); sk=${sk#manager-update-}
+            mkdir -p "upload/$sk"
+            cp "$j" "upload/$sk/manager-update.json"
+            cp "dist-lite/porsche-font-${sk}-"*-lite.zip "upload/$sk/" 2>/dev/null || true
+            [ -f "dist-fontpack/font-${sk}.json" ] && cp "dist-fontpack/font-${sk}.json" "upload/$sk/font.json"
+            "$OSSUTIL" cp -f -r "upload/$sk/" "oss://$OSS_BUCKET/porsche/$sk/" --config-file "$CFG"
+          done
+          printf '# porsche 字体更新\n\n- 内置字体包 v1.0\n' > upload/FONT-CHANGELOG.md
+          "$OSSUTIL" cp -f upload/FONT-CHANGELOG.md "oss://$OSS_BUCKET/porsche/FONT-CHANGELOG.md" --config-file "$CFG"
