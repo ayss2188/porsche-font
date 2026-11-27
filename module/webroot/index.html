@@ -1740,8 +1740,6 @@ try {
 
   <div class="divider"></div>
 
-  <div class="divider"></div>
-
   <div class="section-title fade"><span>字体工具箱（可选）</span></div>
   <div class="status-box fade">
     <div class="status-row">
@@ -1754,7 +1752,7 @@ try {
     </div>
   </div>
   <div class="g-hint fade" style="margin:10px 0">
-    更新信息走阿里云，国内可直连；只有下载插件包走 GitHub，下载失败再连 VPN。
+    检测更新和更新日志走阿里云，国内可直连；插件包下载走 GitHub 或本地导入，GitHub 可能需要 VPN。
   </div>
   <div class="g-hint" id="porscheInstallStatus" style="display:none;margin:8px 0"></div>
   <div class="btn-row fade">
@@ -1783,14 +1781,6 @@ try {
     <div class="status-row"><span class="label">当前字体包</span><span class="value" id="fontPackCurLabel">读取中…</span></div>
     <div class="status-row"><span class="label">最新字体包</span><span class="value off" id="fontPackLatestLabel">未检查</span></div>
   </div>
-  <div class="g-hint fade" style="margin:10px 0">
-    字体包只更新内置字体，不动模块和用户导入的字体。更新和回滚都会清空 TTC、时钟和计划缓存。
-  </div>
-  <div class="btn-row fade">
-    <button class="g-btn" onclick="fontPackCheck(true)">检查字体更新</button>
-    <button class="g-btn" onclick="fontPackChangelog()">字体更新日志</button>
-    <button class="g-btn" id="fontPackInstallBtn" onclick="fontPackInstallMenu()">安装字体</button>
-  </div>
   <div id="fontPackPanel" style="display:none;margin:12px 0 2px">
     <div id="fontPackPanelText" class="g-hint" style="margin:0 0 8px"></div>
     <div id="fontPackBarWrap" style="height:8px;border-radius:6px;overflow:hidden;background:rgba(128,128,128,.25)">
@@ -1799,6 +1789,14 @@ try {
     <div id="fontPackSpin" style="display:none;align-items:center;gap:8px;padding:6px 0">
       <span class="spin"></span><span id="fontPackSpinText" class="g-hint" style="margin:0">正在安装…</span>
     </div>
+  </div>
+  <div class="g-hint fade" style="margin:10px 0">
+    检测更新和字体更新日志走阿里云，国内可直连；安装字体包走 GitHub 或本地导入，GitHub 可能需要 VPN。
+  </div>
+  <div class="btn-row fade">
+    <button class="g-btn" onclick="fontPackCheck(true)">检查字体更新</button>
+    <button class="g-btn" onclick="fontPackChangelog()">字体更新日志</button>
+    <button class="g-btn" id="fontPackInstallBtn" onclick="fontPackInstallMenu()">安装字体</button>
   </div>
 
   <div class="divider"></div>
@@ -8722,10 +8720,12 @@ function uiApplySections() {
   uiHideRange("字体包更新", UI.hideFontPack === "1" || UI.simple === "1");
   {
     const hideFt = UI.hideFontTools === "1" || UI.simple === "1";
-    const ftTitle = document.getElementById("porscheToolsSection");
-    const ftEntry = document.getElementById("porscheToolsEntry");
-    if (ftTitle) ftTitle.style.display = hideFt ? "none" : "";
-    if (ftEntry) ftEntry.style.display = hideFt ? "none" : "";
+    if (hideFt) {
+      const ftTitle = document.getElementById("porscheToolsSection");
+      const ftEntry = document.getElementById("porscheToolsEntry");
+      if (ftTitle) ftTitle.style.display = "none";
+      if (ftEntry) ftEntry.style.display = "none";
+    }
   }
   uiHideRange("字体工具箱（可选）", UI.hidePlugin === "1" || UI.simple === "1");
   uiHideRange("Google 应用改用系统字体", UI.hideGoogle === "1" || UI.simple === "1");
@@ -9545,6 +9545,9 @@ async function fontPackInstallFile(path) {
 }
 
 async function porscheToolsUI() {
+  let _st = "";
+  try { _st = await engineStatusRaw(); } catch (e) {}
+  if (!/INSTALLED=1/.test(_st)) { showToast("先安装 porsche 字体工具箱插件", false, 5000); return; }
   advConFootHide();
   const sheet = document.getElementById("advConSheet");
   if (sheet) sheet.classList.add("show");
