@@ -11862,8 +11862,11 @@ async function fbkCollectQuick() {
 async function fbkQuickSend() {
   const btn = document.getElementById("fbkQuickBtn");
   if (btn && btn.disabled) return;
-  const desc = await askDesc("这份状态");
-  if (desc === null) return;
+  const _qd = await askDesc("这份状态");
+  if (_qd === null) return;
+  if (_qd.mode === "save") { showToast("快捷报告已保存在 Download，未上传"); return; }
+  UPLOAD_ROUTE = _qd.route || "aliyun";
+  const desc = String(_qd.text || "");
   fbkBusy(true, "fbkQuickBtn");
   fbkSay("正在生成（两秒左右）…");
   try {
@@ -11875,7 +11878,7 @@ async function fbkQuickSend() {
     fbkSay("正在检查网络…");
     const code = String(await ksuExec(
       "command -v curl >/dev/null 2>&1 && curl -sS -m 6 -o /dev/null -w '%{http_code}' " +
-      WORKER_URL + "/health 2>/dev/null || echo NOCURL")).trim();
+      uploadBase() + "/health 2>/dev/null || echo NOCURL")).trim();
     if (code === "NOCURL") {
       fbkSay("设备上没有 curl，没法直传。报告已保存到 Download/快捷报告.txt，可以直接发给开发者。", "err");
       return;
@@ -11890,11 +11893,11 @@ async function fbkQuickSend() {
 
     fbkSay("正在上传…");
     await shWriteB64(txt, UP_TMP);
-    const hdr = " -H 'x-cfs-key: " + WORKER_KEY + "' -H 'content-type: text/plain'";
+    const hdr = " -H 'x-cfs-key: " + uploadKey() + "' -H 'content-type: text/plain'";
     const note = String(desc || "").replace(/'/g, "");
     const h2 = note ? " -H 'x-cfs-note: " + encodeURIComponent(note) + "'" : "";
     const raw = String(await ksuExec(
-      "curl -sS -m 40 --data-binary @" + UP_TMP + " " + WORKER_URL + "/report" + hdr + h2 + " 2>&1") || "");
+      "curl -sS -m 40 --data-binary @" + UP_TMP + " " + uploadBase() + "/report" + hdr + h2 + " 2>&1") || "");
     const ok = /ok/i.test(raw) || /[A-Z0-9]{6}/.test(raw);
     if (ok) {
       const id = (raw.match(/[A-Z0-9]{6}/) || [""])[0];
@@ -11947,7 +11950,7 @@ async function fbkSelfTest() {
     say("正在检测…");
     const raw = String(await ksuExec(
       "command -v curl >/dev/null 2>&1 && curl -sS -m 8 -o /dev/null -w '%{http_code}' " +
-      WORKER_URL + "/health 2>&1 || echo NOCURL")).trim();
+      uploadBase() + "/health 2>&1 || echo NOCURL")).trim();
     if (raw === "NOCURL") {
       say("设备上没有 curl，无法直传。<br>报告可以保存到 Download 后手动发。", "#ff6b6b");
     } else if (raw === "200" || raw === "204") {
