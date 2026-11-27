@@ -47,6 +47,9 @@ grep -v '^#' "$CONF" | grep -v '^[[:space:]]*$' | while IFS='|' read -r key id u
   work="$OUT/.work-$key"
   rm -rf "$work"; mkdir -p "$work"
   cp -r "$SRC"/. "$work"/
+  # 构建号：跟主项目一致，每次打包写入当前日期时间（MMdd-HHmm）
+  _build=$(date +%m%d-%H%M)
+  sed -i "s/构建 \(__CFS_BUILD__\|[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9]\)/构建 $_build/" "$work/webroot/index.html" 2>/dev/null || true
 
   # 1) 只留该变体的字体
   for f in "$work/builtin"/*.ttf "$work/builtin"/*.TTF "$work/builtin"/*.otf "$work/builtin"/*.OTF; do
@@ -69,12 +72,12 @@ grep -v '^#' "$CONF" | grep -v '^[[:space:]]*$' | while IFS='|' read -r key id u
       /^name=/        { print "name=" disp; next }
       /^version=/     { print "version=" ver; next }
       /^versionCode=/ { print "versionCode=" code; next }
-      /^updateJson=/  { print "updateJson=https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/" up; next }
+      /^updateJson=/  { print "updateJson=https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/" zipkey "/manager-update.json"; next }
       { print }
     ' "$prop"
     # 没有 updateJson 就补一行（老包都没有这一行）
     grep -q '^updateJson=' "$prop" || \
-      echo "updateJson=https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/$upfile"
+      echo "updateJson=https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/$zipkey/manager-update.json"
   } > "$prop.new" && mv "$prop.new" "$prop"
 
   # 3) 把界面里的模块 id 改成这个变体的 id
