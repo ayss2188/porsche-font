@@ -7523,6 +7523,12 @@ const ADV_TREE = [
         hint: "默认关 = 点「应用」直接切换，最快。" },
       { id: "sw_hide_update", type: "switch", key: "__hideUpdate", uiOnly: 1,
         name: "隐藏「模块更新」整块", desc: "不想看到更新提示就打开。", hint: "还能在管理器里手动更新。" },
+      { id: "sw_hide_fontpack", type: "switch", key: "__hideFontPack", uiOnly: 1,
+        name: "隐藏「字体包更新」整块", desc: "不显示字体包检查、日志和安装入口。", hint: "仍可从高级设置里打开。" },
+      { id: "sw_hide_plugin", type: "switch", key: "__hidePlugin", uiOnly: 1,
+        name: "隐藏「字体工具箱 / 插件」整块", desc: "不显示插件和工具箱入口。", hint: "插件仍可使用，只是不显示。" },
+      { id: "sw_hide_fonttools", type: "switch", key: "__hideFontTools", uiOnly: 1,
+        name: "只隐藏字体工具箱入口", desc: "保留插件卡，只隐藏工具箱入口。", hint: "适合只用锁屏时钟的人。" },
       { id: "sw_no_update_check", type: "switch", key: "__noUpdateCheck", uiOnly: 1,
         name: "完全关闭更新检查", desc: "连后台检查都不发。", hint: "想更新时去 GitHub 手动下。" },
       { id: "sw_hide_manual", type: "switch", key: "__hideManual", uiOnly: 1,
@@ -8188,7 +8194,7 @@ function advFind(path) {
 const UI_KEY = "cfs_ui";
 const UI_DEF = {
   accent: "", theme: "", titleSize: "", radius: "", density: "", listStyle: "",
-  anim: "1", hideUpdate: "0", hideGoogle: "0", hideManual: "0", hideFeedback: "0", hideDebug: "0",
+  anim: "1", hideUpdate: "0", hideFontPack: "0", hidePlugin: "0", hideFontTools: "0", hideGoogle: "0", hideManual: "0", hideFeedback: "0", hideDebug: "0",
   simple: "0", longPress: "1", dblclick: "1", noUpdateCheck: "0",
   ab: "0",
   names: {}, bg: "", bgDim: "35", bgBlur: "6",
@@ -8713,6 +8719,15 @@ function uiNormalizeDividers() {
 
 function uiApplySections() {
   uiHideRange("模块更新", UI.hideUpdate === "1" || UI.simple === "1");
+  uiHideRange("字体包更新", UI.hideFontPack === "1" || UI.simple === "1");
+  {
+    const hideFt = UI.hideFontTools === "1" || UI.simple === "1";
+    const ftTitle = document.getElementById("porscheToolsSection");
+    const ftEntry = document.getElementById("porscheToolsEntry");
+    if (ftTitle) ftTitle.style.display = hideFt ? "none" : "";
+    if (ftEntry) ftEntry.style.display = hideFt ? "none" : "";
+  }
+  uiHideRange("字体工具箱（可选）", UI.hidePlugin === "1" || UI.simple === "1");
   uiHideRange("Google 应用改用系统字体", UI.hideGoogle === "1" || UI.simple === "1");
   uiHideManual(UI.hideManual === "1" || UI.simple === "1");
   try { uiNormalizeDividers(); } catch (e) {}
@@ -9072,7 +9087,7 @@ function advRender() {
   //   现在进页面时读一次，之后 all 用内存里的 settings。
   // 界面自定义的开关初态
   try {
-    const UIMAP = { "__anim": "anim", "__ab": "ab", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
+    const UIMAP = { "__anim": "anim", "__ab": "ab", "__hideUpdate": "hideUpdate", "__hideFontPack": "hideFontPack", "__hidePlugin": "hidePlugin", "__hideFontTools": "hideFontTools", "__noUpdateCheck": "noUpdateCheck",
                     "__hideGoogle": "hideGoogle", "__hideManual": "hideManual", "__hideFeedback": "hideFeedback",
                     "__simple": "simple", "__longPress": "longPress", "__dblclick": "dblclick" };
     Object.keys(UIMAP).forEach(k => {
@@ -10568,7 +10583,7 @@ async function setTtcCache(mode) {
 async function toggleSetting(key) {
   if (busy) return;
   if (key.indexOf("__") === 0) {
-    const map = { "__anim": "anim", "__ab": "ab", "__hideUpdate": "hideUpdate", "__noUpdateCheck": "noUpdateCheck",
+    const map = { "__anim": "anim", "__ab": "ab", "__hideUpdate": "hideUpdate", "__hideFontPack": "hideFontPack", "__hidePlugin": "hidePlugin", "__hideFontTools": "hideFontTools", "__noUpdateCheck": "noUpdateCheck",
                   "__hideGoogle": "hideGoogle", "__hideManual": "hideManual", "__hideFeedback": "hideFeedback",
                   "__simple": "simple", "__longPress": "longPress", "__dblclick": "dblclick" };
     const k2 = map[key];
@@ -12952,7 +12967,7 @@ async function resumeRunningUpdate() {
 // 注意：以前是 refreshAll() 还没回来就去比对 curVerLabel，结果缓存永远对不上、用不上
 (async function init() {
   setCacheLoad();   // 先用上次记录渲染（同步、秒出）
-  try { porscheApplyCachedStatus(); } catch (e) {}
+  // 不使用旧缓存做「已安装」判断；状态以 engine.sh 实际结果为准。
   loadSettings();  // 再从模块读真值覆盖
   try { uiApply(); } catch (e) {}
   // ★ 2026-10-31（永久目录）：界面设置与高级解锁标记以 $LIB 里的文件为正本——
