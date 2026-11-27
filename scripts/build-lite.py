@@ -37,7 +37,7 @@ for line in io.open(CFG, encoding="utf-8"):
 os.makedirs(OUT, exist_ok=True)
 for key, mid, up, fonts, disp, zipkey in rows:
     sk = zipkey or key
-    name = "porsche-font-%s-%s-lite.zip" % (sk, VERSION)
+    name = "porsche-font-%s-%s-lite.zip" % (sk, TAG)
     out = os.path.join(OUT, name)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for b, ds, ns in os.walk(MOD):
