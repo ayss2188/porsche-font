@@ -100,13 +100,16 @@ jobs:
           endpoint=https://$OSS_ENDPOINT
           EOF
           "$OSSUTIL" mb "oss://$OSS_BUCKET" --config-file "$CFG" 2>/dev/null || true
+          printf '# porsche 字体更新\n\n- 内置字体包 v1.0\n' > /tmp/FONT-CHANGELOG.md
           for j in dist-lite/manager-update-*.json; do
             sk=$(basename "$j" .json); sk=${sk#manager-update-}
             mkdir -p "upload/$sk"
             cp "$j" "upload/$sk/manager-update.json"
             cp "dist-lite/porsche-font-${sk}-"*-lite.zip "upload/$sk/" 2>/dev/null || true
             [ -f "dist-fontpack/font-${sk}.json" ] && cp "dist-fontpack/font-${sk}.json" "upload/$sk/font.json"
+            cp /tmp/FONT-CHANGELOG.md "upload/$sk/FONT-CHANGELOG.md"
+            [ -f CHANGELOG.md ] && cp CHANGELOG.md "upload/$sk/CHANGELOG.md"
             "$OSSUTIL" cp -f -r "upload/$sk/" "oss://$OSS_BUCKET/porsche/$sk/" --config-file "$CFG"
           done
-          printf '# porsche 字体更新\n\n- 内置字体包 v1.0\n' > upload/FONT-CHANGELOG.md
-          "$OSSUTIL" cp -f upload/FONT-CHANGELOG.md "oss://$OSS_BUCKET/porsche/FONT-CHANGELOG.md" --config-file "$CFG"
+          "$OSSUTIL" cp -f /tmp/FONT-CHANGELOG.md "oss://$OSS_BUCKET/porsche/FONT-CHANGELOG.md" --config-file "$CFG"
+          [ -f module/engine.json ] && "$OSSUTIL" cp -f module/engine.json "oss://$OSS_BUCKET/porsche/engine.json" --config-file "$CFG"
