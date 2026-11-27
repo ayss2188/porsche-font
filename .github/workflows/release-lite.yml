@@ -112,4 +112,4 @@ jobs:
             "$OSSUTIL" cp -f -r "upload/$sk/" "oss://$OSS_BUCKET/porsche/$sk/" --config-file "$CFG"
           done
           "$OSSUTIL" cp -f /tmp/FONT-CHANGELOG.md "oss://$OSS_BUCKET/porsche/FONT-CHANGELOG.md" --config-file "$CFG"
-          [ -f module/engine.json ] && "$OSSUTIL" cp -f module/engine.json "oss://$OSS_BUCKET/porsche/engine.json" --config-file "$CFG"
+          [ -f module/engine.json ] && "$OSSUTIL" cp -f module/engine.json "oss://$OSS_BUCKET/porsche/engine.json" --config-file "$CFG" || true
