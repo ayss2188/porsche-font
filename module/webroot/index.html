@@ -9259,12 +9259,6 @@ async function porscheClockGen() {
 async function porscheRefreshLatest(silent) {
   const ll = document.getElementById("porscheLatestLabel");
   if (!ll) return;
-  const st = await engineStatusRaw();
-  if (!/INSTALLED=1/.test(st)) {
-    ll.textContent = "未检查";
-    ll.className = "value off";
-    return;
-  }
   if (!silent) { ll.textContent = "检查中…"; ll.className = "value off"; }
   try {
     const o = String(await ksuExecTO(`sh ${MODDIR}/engine.sh check-update`, 15000) || "");
