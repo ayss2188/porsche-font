@@ -9600,20 +9600,20 @@ async function porscheToolsUI() {
     author = (est.match(/^AUTHOR=(.*)$/m) || [])[1] || "";
   } catch (e) {}
 
-  const groups = {};
-  PORSCHE_TOOLS.forEach(x => { (groups[x.group || "工具"] = groups[x.group || "工具"] || []).push(x); });
-  let html = '<div class="g-hint" style="margin:0 0 10px">' + cacheEsc(ui.homeHint || "点工具后选择字体，再执行。") + '</div>';
-  Object.keys(groups).forEach(g => {
-    html += '<div class="ft-group open"><div class="ft-ghead"><span>' + cacheEsc(g) + '</span>'
-      + '<span style="margin-left:auto;color:var(--text-dim);font-size:12px">' + groups[g].length + ' 项</span></div><div class="ft-gbody">'
-      + groups[g].map(x => '<div class="ft-item" onclick="porscheToolPick(\'' + x.id + '\')">'
-        + '<div class="t">' + cacheEsc(x.name) + '</div><div class="d">' + cacheEsc(x.desc) + '</div></div>').join("")
-      + '</div></div>';
+  const js = plugin && plugin.js ? String(plugin.js) : "";
+  if (js) {
+    let st = document.getElementById("porscheToolJs");
+    if (!st) { st = document.createElement("script"); st.id = "porscheToolJs"; document.head.append(st); }
+    st.textContent = js;
+  }
+  if (!window.PorscheToolboxUI || typeof window.PorscheToolboxUI.mount !== "function") {
+    out.innerHTML = '<div style="padding:14px 4px;color:#ef4444">插件没有提供工具箱界面脚本（ui/toolbox.js）。</div>';
+    return;
+  }
+  window.PorscheToolboxUI.mount(out, {
+    tools: PORSCHE_TOOLS, ui: ui, version: ver, build: build, author: author,
+    onPick: function (id) { try { porscheToolPick(id); } catch (e) {} }
   });
-  const fmt = ui.footerFormat || "字体工具箱 v{version} · 构建 {build}";
-  html += '<div class="g-hint" id="porscheToolsFoot" style="text-align:center;margin-top:14px">'
-    + cacheEsc(fmt.replace(/\{version\}/g, String(ver || "?").replace(/^v/i, "")).replace(/\{build\}/g, build || "-").replace(/\{author\}/g, author || "")) + '</div>';
-  out.innerHTML = html;
 }
 
 async function porscheToolPick(id) {
