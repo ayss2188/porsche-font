@@ -122,8 +122,10 @@ UPD_ALI="https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/
 _read_json() {   # $1=json 文件；把五个字段填进全局
   NEW_VER=$(jstr version "$1")
   NEW_CODE=$(jnum versionCode "$1")
-  ZIP_URL=$(jstr aliyunZipUrl "$1")
-  [ -n "$ZIP_URL" ] || ZIP_URL=$(jstr zipUrl "$1")
+  case "${CFS_UPDATE_SOURCE:-aliyun}" in
+    github) ZIP_URL=$(jstr githubZipUrl "$1"); [ -n "$ZIP_URL" ] || ZIP_URL=$(jstr zipUrl "$1") ;;
+    *) ZIP_URL=$(jstr aliyunZipUrl "$1"); [ -n "$ZIP_URL" ] || ZIP_URL=$(jstr zipUrl "$1") ;;
+  esac
   LOG_URL=$(jstr changelog "$1")
   SHA=$(jstr sha256 "$1")
 }
@@ -305,7 +307,7 @@ case "${1:-check}" in
     printf 'stage=download\ncur=0\ntotal=0\nmsg=正在准备下载\npid=0\n' > "$STATE" 2>/dev/null
     # setsid：让 worker 脱离当前会话，WebUI 那边断开也不会把它带走
     _ss=""; command -v setsid >/dev/null 2>&1 && _ss=setsid
-    ( $_ss sh "$MODDIR/update.sh" install "${2:-}" >> "$TMP/worker.log" 2>&1 < /dev/null; echo $? > "$TMP/worker.rc" ) >/dev/null 2>&1 &
+    ( $_ss sh "$MODDIR/update.sh" install "${2:-}" "${3:-}" >> "$TMP/worker.log" 2>&1 < /dev/null; echo $? > "$TMP/worker.rc" ) >/dev/null 2>&1 &
     # ★ 立刻把 **worker 自己的 pid** 写进 state。
     #   不能写 installbg 自己的 $$：那个进程马上就退出了，installstate 里的
     #   `kill -0 $pid` 判活会立刻判成"worker 死了" → 进度条刚出来就报错。
@@ -361,6 +363,7 @@ case "${1:-check}" in
     fi
     ;;
   install)
+    case "${3:-}" in github) CFS_UPDATE_SOURCE=github; export CFS_UPDATE_SOURCE ;; *) CFS_UPDATE_SOURCE=aliyun; export CFS_UPDATE_SOURCE ;; esac
     # 真正的活。WebUI 不再直接调它（会阻塞线程），只由 installbg 派生的 worker 调。
     # 手工在终端里调也没问题（那就变成"前台安装"，行为和以前一样）。
     load_json || { echo "ERROR:$ERR"; exit 1; }

@@ -1758,13 +1758,9 @@ try {
   </div>
   <div class="g-hint" id="porscheInstallStatus" style="display:none;margin:8px 0"></div>
   <div class="btn-row fade">
-    <button class="g-btn" id="porscheCheckBtn" onclick="porscheClockCheck()" style="display:none">检查更新</button>
+    <button class="g-btn" id="porscheCheckBtn" onclick="porscheClockCheck()" style="display:none">检测更新</button>
     <button class="g-btn" id="porscheLogBtn" onclick="porscheClockChangelog()" style="display:none">更新日志</button>
-    <button class="g-btn" onclick="porscheClockUpdate()">下载并安装</button>
-  </div>
-  <div class="btn-row fade">
-    <button class="g-btn" onclick="porscheClockPickZip()">从本地安装</button>
-    <button class="g-btn" id="porscheUninstallBtn" onclick="porscheClockUninstall()" style="display:none">卸载</button>
+    <button class="g-btn" onclick="porscheClockInstallMenu()">安装插件</button>
   </div>
 
   <div class="section-title fade" id="porscheToolsSection" style="margin-top:18px;display:none"><span>字体工具箱</span></div>
@@ -2298,7 +2294,7 @@ function cycleTheme() {
 
 /* ---------- 弹窗 ---------- */
 // altText：可选的第三个按钮，点它 resolve "alt"（用于"快速/完整"这种二选一）
-function dialog({title, msg = "", input = null, select = null, okText = "确定", danger = false, altText = "", text = null, textHint = "", maxLen = 300}) {
+function dialog({title, msg = "", input = null, select = null, okText = "确定", danger = false, altText = "", text = null, textHint = "", maxLen = 300, cancelFirst = false, order = ""}) {
   return new Promise(resolve => {
     const mask = document.getElementById("modalMask");
     const inp = document.getElementById("modalInput");
@@ -2336,6 +2332,16 @@ function dialog({title, msg = "", input = null, select = null, okText = "确定"
     ok.className = "g-btn " + (danger ? "primary" : "primary-blue");
     alt.textContent = altText;
     alt.style.display = altText ? "" : "none";
+    try {
+      const _row = ok.parentNode;
+      if (order === "cancel-ok-alt") {
+        _row.append(cancel); _row.append(ok); _row.append(alt);
+      } else if (cancelFirst) {
+        _row.append(cancel); _row.append(alt); _row.append(ok);
+      } else {
+        _row.append(alt); _row.append(cancel); _row.append(ok);
+      }
+    } catch (e) {}
     const done = v => { mask.classList.remove("show"); ok.onclick = cancel.onclick = null; if (alt) alt.onclick = null; resolve(v); };
     // ★ 多行模式返回"用户填的文本"（没填就返回空串 —— 调用方自己决定要不要继续）
     ok.onclick = () => done(
@@ -9238,8 +9244,8 @@ async function porscheRefreshLatest(silent) {
 async function porscheClockCheck() {
   await porscheRefreshLatest(false);
 }
-async function porscheClockUpdate() {
-  if (!window.confirm("从 GitHub 下载并安装最新 porsche 插件？\n约 27MB，国内可能需要 VPN。")) return;
+async function porscheClockUpdate(skipConfirm) {
+  if (!skipConfirm && !window.confirm("从 GitHub 下载并安装最新 porsche 插件？\n约 27MB，国内可能需要 VPN。")) return;
   showToast("正在下载插件，请稍等…", false, 10000);
   try {
     const o = String(await ksuExec(`sh ${MODDIR}/engine.sh install-latest`) || "");
@@ -9247,6 +9253,17 @@ async function porscheClockUpdate() {
     showToast("插件更新完成", false, 6000);
     await porscheClockRender();
   } catch (e) { showToast("更新失败：" + errText(e), true, 9000); }
+}
+async function porscheClockInstallMenu() {
+  const ans = await dialog({
+    title: "安装插件",
+    msg: "选择插件 zip 的来源。\n\n本地安装会调用文件管理器；GitHub 下载需要网络。",
+    okText: "本地安装",
+    altText: "GitHub 下载",
+    order: "cancel-ok-alt"
+  });
+  if (ans === true) return porscheClockPickZip();
+  if (ans === "alt") return porscheClockUpdate(true);
 }
 let PORSCHE_TOOLS = [
   { id: "doctor",   name: "字体文件体检", desc: "PS 名、family、空格、中文、OS/2、表结构" },
@@ -9333,13 +9350,24 @@ async function fontPackChangelog() {
 async function fontPackInstallMenu() {
   const ans = await dialog({
     title: "安装字体包",
-    msg: "可以选择从 GitHub 下载，也可以导入网盘/本地下载好的签名 zip。\n\n注意：不是签名包会被拒绝。",
-    select: { label: "安装方式", options: [["github", "从 GitHub 下载并安装"], ["local", "从本地导入字体包"]], value: "github" },
-    okText: "继续"
+    msg: "选择字体包来源。\n\n本地安装会调用文件管理器；GitHub 下载需要网络。\n只接受开发者签名的字体包。",
+    okText: "本地安装",
+    altText: "GitHub 下载",
+    order: "cancel-ok-alt"
   });
-  if (!ans) return;
-  if (ans.sel === "local") return fontPackInstallLocal();
-  return fontPackInstallGitHub();
+  if (ans === true) return fontPackPickLocal();
+  if (ans === "alt") return fontPackInstallGitHub();
+}
+async function fontPackPickLocal() {
+  window.__zipMode = "font";
+  advConFootHide();
+  const sheet = document.getElementById("advConSheet");
+  const title = document.getElementById("advConTitle");
+  const hint = document.getElementById("advConHint");
+  if (title) title.textContent = "选择字体包 zip";
+  if (hint) hint.innerHTML = "调用模块文件管理器，只列出 .zip。选择后会校验 MANIFEST 和签名；旧版字体包可用于回滚。";
+  if (sheet) sheet.classList.add("show");
+  await porscheZipBrowse("/sdcard/Download");
 }
 async function fontPackInstallLocal() {
   const p = await dialog({
@@ -9598,6 +9626,7 @@ async function porscheClockUI() {
   await porscheClockRender();
 }
 async function porscheClockPickZip() {
+  window.__zipMode = "plugin";
   const sheet = document.getElementById("advConSheet");
   const title = document.getElementById("advConTitle");
   const hint = document.getElementById("advConHint");
@@ -9665,6 +9694,11 @@ function porscheZipClear() {
 async function porscheZipInstallSelected() {
   const p = window.__porscheZipPick;
   if (!p) { showToast("先选一个 zip"); return; }
+  if (window.__zipMode === "font") {
+    advConClose();
+    await fontPackInstallFile(p);
+    return;
+  }
   await porscheZipChoose(p);
 }
 function porscheZipUp() {
@@ -11554,15 +11588,27 @@ async function askDesc(what) {
       msg: "报告里是设备型号 / Android 版本 / 模块版本 / 字体挂载情况 /\n" +
            "字体文件名清单 / 挂载与开机日志。\n" +
            "不会采集：手机号、账号、通讯录、IMEI、你装了哪些 App、照片 / 聊天 / 位置。\n" +
-           "只发到开发者手里，不公开、不外传。\n\n" +
-           "⚠️ 服务器在境外 —— 请先连上 VPN，否则会卡住或失败。",
+           "只发到开发者手里，不公开、不外传。",
       text: "",
       textHint: "遇到什么问题？（可不填）\n例：某个 App 里字体没变 / 中文变方块 / 只有桌面生效",
       maxLen: 200,
-      okText: "连了 VPN，发送",
+      okText: "发送",
+      altText: "保存本地",
+      cancelFirst: true
     });
-    return (v === null || v === undefined) ? null : String(v);
-  } catch (e) { return ""; }   // 弹窗不可用时不挡住功能
+    if (v === null || v === undefined) return null;
+    if (v === "alt") return { mode: "save", text: "" };
+    const route = await dialog({
+      title: "选择上传线路",
+      msg: "阿里云 OSS：国内直连，不需要 VPN。\nCloudflare R2：海外线路，国内可能需要 VPN。\n\n上传的是完整报告/日志，不会截断。",
+      okText: "阿里云 OSS",
+      altText: "Cloudflare R2",
+      order: "cancel-ok-alt"
+    });
+    if (route === null) return null;
+    UPLOAD_ROUTE = route === "alt" ? "r2" : "aliyun";
+    return { mode: "send", text: String(v), route: UPLOAD_ROUTE };
+  } catch (e) { return { mode: "send", text: "" }; }
 }
 
 
@@ -11660,7 +11706,9 @@ async function logcatchUpload() {
     // ① 先问一句"遇到什么问题" + 隐私/VPN 说明（和完整报告同一个弹窗）
     const _d = await askDesc("这份日志");
     if (_d === null) { lcSay("已取消上传（文件还在 Download 里，可以直接发给开发者）"); return; }
-    const note = String(_d || "");
+    if (_d.mode === "save") { lcSay("已保存在 Download，未上传", "#4ade80"); return; }
+    UPLOAD_ROUTE = _d.route || "aliyun";
+    const note = String(_d.text || "");
 
     // ② 找到刚导出的文件
     const path = String(await ksuExec("sh " + MODDIR + "/logcatch.sh lastpath 2>/dev/null") || "").trim();
@@ -11674,11 +11722,11 @@ async function logcatchUpload() {
       _gate = await uploadGate(path);
     } else {
       try {
-        const r = await fetch(WORKER_URL + "/health", { cache: "no-store" });
+        const r = await fetch(uploadBase() + "/health", { cache: "no-store" });
         _gate = r.ok;
       } catch (e) { _gate = false; }
       if (!_gate) {
-        lcSay("连不上服务器 —— 服务器在境外，请先把梯子切成<b>全局模式</b>再点一次。<br>" +
+        lcSay("连不上当前上传线路 —— 如果选的是 Cloudflare R2，请先把梯子切成<b>全局模式</b>；也可以改用阿里云 OSS。<br>" +
               "文件已经在这：<b>" + repEsc(path) + "</b>，也可以直接发给开发者。", "#ff8f6b");
         return;
       }
@@ -11834,7 +11882,7 @@ async function fbkQuickSend() {
     }
     if (code === "000" || code === "") {
       fbkSay("连不上服务器（多半是没连 VPN）。报告已保存到 Download/快捷报告.txt，可以直接发给开发者。", "err");
-      __subUpResult = { ok: false, err: "网络不通（服务器在境外，需要 VPN）" };
+      __subUpResult = { ok: false, err: "网络不通（当前上传线路可能需要代理）" };
       __subUpShown = false;
       await repShowUploadResult();
       return;
@@ -11907,7 +11955,7 @@ async function fbkSelfTest() {
     } else if (raw === "401" || raw === "403") {
       say("服务器能连上，但口令不对（HTTP " + raw + "）。<br>请把这条发给开发者。", "#ffb84d");
     } else if (raw === "000" || raw === "") {
-      say("❌ 连不上服务器（超时/被拦）。<br>服务器在境外 —— 先连 VPN（建议全局模式），或给管理器 App 开代理。", "#ff6b6b");
+      say("❌ 连不上服务器（超时/被拦）。<br>如果选的是 Cloudflare R2，先连 VPN（建议全局模式）；也可以改用阿里云 OSS。", "#ff6b6b");
     } else {
       say("服务器返回 HTTP " + raw + "（能连上，但状态异常）。<br>把这条发给开发者。", "#ffb84d");
     }
@@ -11927,9 +11975,12 @@ async function repSendServer() {
   //   ① 让用户填「遇到什么问题」（可选，但填了排查快很多）
   //   ② 说清 VPN + 隐私（原来这段是只读话术）
   //   合成一个窗，避免连弹两次；用户取消就中止上传。
-  const repDesc = await askDesc("这份报告");   // ★ 描述 + 隐私/VPN 一次问清
-  if (repDesc === null) return;                // 用户取消
-  if (!WORKER_URL || !WORKER_KEY) {
+  const _d = await askDesc("这份报告");
+  if (_d === null) return;
+  if (_d.mode === "save") { showToast("报告已保存在 Download，未上传"); return; }
+  UPLOAD_ROUTE = _d.route || "aliyun";
+  const repDesc = String(_d.text || "");
+  if (!uploadBase() || !uploadKey()) {
     showToast("上报服务器没配置");
     return;
   }
@@ -12004,7 +12055,7 @@ async function repSendServer() {
     //   网络对国内大多不通 —— 不通就**立刻**告诉他，不用等 3 分钟。
     try {
       await ksuExec("command -v curl >/dev/null 2>&1 && curl -sS -m 6 -o /dev/null -w '%{http_code}' " +
-                    WORKER_URL + "/health || echo NOCURL");
+                    uploadBase() + "/health || echo NOCURL");
     } catch (e) {
       // 探测本身失败也继续（可能只是 health 被挡，报告接口能用）
     }
@@ -12013,7 +12064,7 @@ async function repSendServer() {
 
     // ★ 走 shell（curl / toybox）—— WebView 的 fetch 不经过梯子，实测会失败。
     //   报告已经在设备上是个文件了，直接 --data-binary @它，不用读进内存。
-    const hdr = " -H 'x-cfs-key: " + WORKER_KEY + "'" +
+    const hdr = " -H 'x-cfs-key: " + uploadKey() + "'" +
                 " -H 'x-cfs-device: " + fbkHdr(fbkDevTagFromKv(_kv2), 80) + "'" +
                 " -H 'x-cfs-ver: " + fbkHdr((_kv2 && _kv2.ver) || "", 24) + "'" +
                 " -H 'x-cfs-rom: " + fbkHdr((_kv2 && _kv2.rom) || "", 40) + "'" +
@@ -12027,7 +12078,7 @@ async function repSendServer() {
     //   每次更新遮罩的"第 N/3 次"，失败时把 curl 的最后一句话带出来。
     //   （挂梯子时瞬时抖动很常见，重试能救回来；总时长仍封顶 ~2 分钟）
     const _mkCmd = () =>
-      'F="' + path + '"; U=' + WORKER_URL + '/report; ' +
+      'F="' + path + '"; U=' + uploadBase() + '/report; ' +
       'if command -v curl >/dev/null 2>&1; then ' +
         'curl -sS --connect-timeout 8 -m 35 --retry 1 --retry-connrefused ' +
         '-X POST' + hdr + ' --data-binary @$F $U; ' +
@@ -12051,7 +12102,7 @@ async function repSendServer() {
     if (/too big/i.test(out)) throw new Error("报告太大（服务器上限 8MB）");
     if (!/ok|"id"/i.test(out)) {
       throw new Error((_lastErr || "没有响应") +
-                      "（已试 3 次 —— 多半是网络：服务器在境外，需梯子覆盖该域名）");
+                      "（已试 3 次 —— 多半是网络：海外线路需要代理，或改用阿里云 OSS）");
     }
 
     __subUpResult = { ok: true, raw: (typeof out !== "undefined" ? out : "") };
@@ -12062,7 +12113,7 @@ async function repSendServer() {
     //   上传失败九成是网络 —— 服务器在境外，设备上的 curl 得靠梯子覆盖到那个域名。
     const _e = errText(e);
     const _net = /could not resolve|timed? ?out|Connection|refused|network|unreachable|SSL|TLS|handshake|NOHTTPTOOL/i.test(_e);
-    showToast(_net ? "上传失败 —— 多半是网络。请连上 VPN 再点一次（服务器在境外）"
+    showToast(_net ? "上传失败 —— 多半是网络。海外线路请连 VPN，或改用阿里云 OSS"
                    : "上传失败：" + _e);
   } finally {
     if (btn) btn.disabled = false;
@@ -12996,33 +13047,37 @@ function updCheck(manual) {
 function updMainClick() {
   if (UPD2.phase === "done") { doReboot(); return; }
   if (UPD2.phase === "downloading" || UPD2.phase === "installing") return;
-  updInstall();
+  updInstallMenu();
 }
 
 /* 开始下载+安装 */
-async function updInstall() {
+async function updInstallMenu() {
+  if (!UPD2.has) { showToast("没有可安装的新版本"); return; }
+  const ans = await dialog({
+    title: "安装 " + UPD2.newVer,
+    msg: "选择模块更新包下载线路。字体库、设置、当前字体都会保留，装完重启生效。",
+    okText: "阿里云 OSS",
+    altText: "GitHub",
+    order: "cancel-ok-alt"
+  });
+  if (ans === null) return;
+  await updInstall(ans === "alt" ? "github" : "aliyun");
+}
+async function updInstall(source) {
   window.__updActive = true;
   if (!UPD2.has) { showToast("没有可安装的新版本"); return; }
-  const yes = await dialog({
-    title: "安装 " + UPD2.newVer + "？",
-    msg: "会从 GitHub 下载安装包，校验后用当前 Root 管理器安装。字体库、设置和当前字体都会保留，装完重启生效。",
-    okText: "下载并安装"
-  });
-  if (!yes) return;
-
+  source = source === "github" ? "github" : "aliyun";
   UPD2.phase = "downloading";
   UPD2.msg = "";
-  u2text("正在连接 GitHub…");
+  u2text(source === "github" ? "正在连接 GitHub…" : "正在连接阿里云…");
   u2bar(0.02);
   u2paint();
 
   let out = "";
-  // ★ 2026-10-27 先清掉上一次残留的 state（否则一进来就读到 finished → 立刻亮重启）
   try { await ksuExec(`rm -f ${LIB}/.update/state ${LIB}/.update/worker.rc`); } catch (e) {}
   window.__u2SawActive = false;
   try {
-    out = String(await ksuExec(`sh ${MODDIR}/update.sh installbg force`) || "");
-  // 命令已丢到后台，立刻返回；下面按 state 轮询判断是否真的在下载
+    out = String(await ksuExec(`sh ${MODDIR}/update.sh installbg force ${source}`) || "");
   } catch (e) {
     UPD2.phase = "error"; UPD2.msg = "启动下载失败：" + errText(e); u2paint(); return;
   }
@@ -13135,6 +13190,10 @@ async function updResume() {
     try { u2paint(); } catch (e) {}
     updResume().catch(() => {});
     setTimeout(() => { updCheck(false).catch(() => {}); }, 1500);
+    setTimeout(() => {
+      try { porscheRefreshLatest(true); } catch (e) {}
+      try { fontPackCheck(false); } catch (e) {}
+    }, 2200);
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run);
   else run();
