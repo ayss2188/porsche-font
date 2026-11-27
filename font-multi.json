@@ -1,0 +1,10 @@
+{
+  "version": "v1.0",
+  "versionCode": 10000,
+  "variant": "multi",
+  "zipUrl": "https://github.com/ayss2188/porsche-font-lite/releases/download/fonts-v1.0/porsche-fontpack-multi-v1.0.zip",
+  "changelog": "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/multi/FONT-CHANGELOG.md",
+  "sha256": "63ae83de7a9e385269ac46f80f2b71ddf572c91e711b2ba29ab660ff2d6c590a",
+  "size": 82183642,
+  "minModuleCode": 460000
+}
