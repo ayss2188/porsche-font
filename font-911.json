@@ -1,0 +1,10 @@
+{
+  "version": "v1.0",
+  "versionCode": 10000,
+  "variant": "colon",
+  "zipUrl": "https://github.com/ayss2188/porsche-font-lite/releases/download/fonts-v1.0/porsche-fontpack-911-v1.0.zip",
+  "changelog": "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/911/FONT-CHANGELOG.md",
+  "sha256": "8dcfb8357f3d932fd941e72d51a69dba94c336405114058e392b995f2948fc5e",
+  "size": 27395582,
+  "minModuleCode": 460000
+}
