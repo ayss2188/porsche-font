@@ -93,6 +93,16 @@ _fp_clear_caches() {
   rm -f "$STATEDIR"/pw.*.state 2>/dev/null
   # 旧版遗留的 per-font 缓存
   rm -rf "$STATEDIR"/cand "$STATEDIR"/verify 2>/dev/null
+
+  # 字体内容变了，旧计划 / 旧 payload 里可能还指向已删除的 TTC / 时钟文件。
+  # 只清缓存不清计划，开机会拿旧 slots.map 去挂已经不存在的文件，表现就是卡开机/救援。
+  rm -f "$MODDIR/slots.map" "$MODDIR/slots.applied" "$MODDIR/slots.boot.map" \
+        "$MODDIR/slots.map.prev" "$MODDIR/mount.state" 2>/dev/null
+  rm -rf "$MODDIR/payload" 2>/dev/null
+  mkdir -p "$MODDIR/payload" 2>/dev/null
+  printf 'none\n' > "$MODDIR/pending_font" 2>/dev/null
+  printf 'none\n' > "$MODDIR/active_font" 2>/dev/null
+  printf 'none\n' > "$STATEDIR/last_selection" 2>/dev/null
 }
 
 _fp_state() {
