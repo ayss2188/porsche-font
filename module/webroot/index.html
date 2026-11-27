@@ -89,6 +89,8 @@ body { min-height: 100%; }
   #fontPackPanel.show { display: block; }
   #porscheRow2 { display: none !important; }
   #porscheRow2.show { display: flex !important; }
+  #porschePanel { display: none; }
+  #porschePanel.show { display: block; }
   #porscheToolsBlock { display: none !important; }
   #porscheToolsBlock.show { display: block !important; }
   .value.active { color: var(--accent); }
@@ -1758,6 +1760,15 @@ try {
     <div class="status-row">
       <span class="label">最新版本</span>
       <span class="value" id="porscheLatestLabel">未检查</span>
+    </div>
+  </div>
+  <div id="porschePanel" style="margin:12px 0 2px">
+    <div id="porschePanelText" class="g-hint" style="margin:0 0 8px"></div>
+    <div id="porscheBarWrap" style="height:8px;border-radius:6px;overflow:hidden;background:rgba(128,128,128,.25)">
+      <div id="porscheBar" style="height:100%;width:0%;background:#3b82f6;transition:width .25s ease"></div>
+    </div>
+    <div id="porscheSpin" style="display:none;align-items:center;gap:8px;padding:6px 0">
+      <span class="spin"></span><span id="porscheSpinText" class="g-hint" style="margin:0">正在安装插件…</span>
     </div>
   </div>
   <div class="g-hint" id="porscheInstallStatus" style="display:none;margin:8px 0"></div>
@@ -9278,15 +9289,67 @@ async function porscheRefreshLatest(silent) {
 async function porscheClockCheck() {
   await porscheRefreshLatest(false);
 }
+function porschePanel(text, ratio, spin) {
+  const p = document.getElementById("porschePanel");
+  const t = document.getElementById("porschePanelText");
+  const bar = document.getElementById("porscheBar");
+  const spinEl = document.getElementById("porscheSpin");
+  if (p) p.classList.add("show");
+  if (t) t.textContent = text || "";
+  if (bar) bar.style.width = Math.round(Math.max(0, Math.min(1, ratio || 0)) * 100) + "%";
+  const wrap = document.getElementById("porscheBarWrap");
+  if (wrap) wrap.style.display = spin ? "none" : "block";
+  if (spinEl) spinEl.style.display = spin ? "flex" : "none";
+}
+function porschePanelHide() {
+  const p = document.getElementById("porschePanel");
+  if (p) p.classList.remove("show");
+}
 async function porscheClockUpdate(skipConfirm) {
-  if (!skipConfirm && !window.confirm("从 GitHub 下载并安装最新 porsche 插件？\n约 27MB，国内可能需要 VPN。")) return;
-  showToast("正在下载插件，请稍等…", false, 10000);
+  let meta = null;
   try {
-    const o = String(await ksuExec(`sh ${MODDIR}/engine.sh install-latest`) || "");
-    if (/^\s*ERROR/.test(o)) throw new Error(o.replace(/^\s*ERROR:?/, "").trim());
-    showToast("插件更新完成", false, 6000);
-    await porscheClockRender();
-  } catch (e) { showToast("更新失败：" + errText(e), true, 9000); }
+    const r = await withTimeout(fetch("https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/engine.json?t=" + Date.now(), { cache: "no-store" }), 5000);
+    if (r && r.ok) meta = await r.json();
+  } catch (e) {}
+  if (!meta || !meta.url) { showToast("读取插件更新信息失败", false, 6000); return; }
+  const name = String(meta.file || String(meta.url).split("/").pop().split("?")[0] || "porsche-engine.zip");
+  const path = "/sdcard/Download/" + name;
+  const total = parseInt(meta.size || "0", 10) || 0;
+  porschePanel("正在连接 GitHub…", 0.02, false);
+  try {
+    const rc = "/sdcard/Download/.porsche.dl.rc";
+    const log = "/sdcard/Download/.porsche.dl.log";
+    try { await ksuExec(`rm -f ${shq(rc)} ${shq(log)}`); } catch (e) {}
+    await ksuExec(`mkdir -p /sdcard/Download; sh -c 'curl -L --connect-timeout 10 -m 300 -o ${shq(path)} ${shq(meta.url)} >${shq(log)} 2>&1; echo $? > ${shq(rc)}' >/dev/null 2>&1 &`);
+    while (true) {
+      await new Promise(r => setTimeout(r, 700));
+      let sz = 0;
+      try { sz = parseInt(String(await ksuExec(`stat -c %s ${shq(path)} 2>/dev/null || echo 0`) || "0").trim(), 10) || 0; } catch (e) {}
+      const hasRc = String(await ksuExec(`test -f ${shq(rc)} && echo 1 || echo 0`) || "").trim() === "1";
+      if (total > 0) {
+        const r = Math.min(1, sz / total);
+        porschePanel("正在下载 " + u2fmt(sz) + " / " + u2fmt(total) + "（" + Math.round(r * 100) + "%）", r, false);
+      } else {
+        porschePanel("正在下载 " + u2fmt(sz) + "…", 0.08, false);
+      }
+      if (hasRc) break;
+    }
+    let code = "0";
+    try { code = String(await ksuExec(`cat ${shq(rc)} 2>/dev/null`) || "0").trim(); } catch (e) {}
+    if (code !== "0") throw new Error("curl 返回 " + code);
+    porschePanel("正在校验并安装插件…", 1, true);
+    const out = String(await ksuExecTO(`sh ${MODDIR}/engine.sh install-local ${shq(path)} 2>&1`, 180000) || "");
+    if (/^\s*ERROR/m.test(out)) throw new Error(out.replace(/^\s*ERROR:?/m, "").trim().slice(0, 300));
+    porschePanel("插件已安装，正在刷新…", 1, false);
+    try { await refreshAll(true); } catch (e) {}
+    try { await porscheRefreshStatus(); } catch (e) {}
+    try { await porscheClockRender(); } catch (e) {}
+    showToast("插件更新完成", false, 5000);
+    setTimeout(porschePanelHide, 2200);
+  } catch (e) {
+    porschePanel("插件更新失败：" + errText(e), 0, false);
+    setTimeout(porschePanelHide, 6000);
+  }
 }
 async function porscheClockInstallMenu() {
   const ans = await dialog({
