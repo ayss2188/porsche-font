@@ -225,8 +225,10 @@ ENGINE_META_URLS="https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliy
 
 fetch_meta() { # $1=输出文件；依次尝试 GitHub raw / jsDelivr
   for _mu in $ENGINE_META_URLS; do
+    _mto=8
+    case "$_mu" in *cfs-porsche-downloads*) _mto=3 ;; esac
     if command -v curl >/dev/null 2>&1; then
-      curl -fsSL -m 8 -o "$1" "$_mu" 2>/dev/null && [ -s "$1" ] && return 0
+      curl -fsSL -m "$_mto" -o "$1" "$_mu" 2>/dev/null && [ -s "$1" ] && return 0
     else
       fetch_url "$_mu" "$1" && [ -s "$1" ] && return 0
     fi
@@ -326,8 +328,11 @@ case "${1:-status}" in
   install-latest-bg)
     rm -f "$STATEDIR/engine.dl" "$STATEDIR/engine.done" 2>/dev/null
     ( _j="$TMP/.eng.latest.$$"
-      _u="https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/engine.json"
-      command -v curl >/dev/null 2>&1 && curl -fsSL -m 8 -o "$_j" "$_u" 2>/dev/null || fetch_url "$_u" "$_j"
+      for _u in "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/engine.json" "https://raw.githubusercontent.com/ayss2188/porsche-font/main/engine.json"; do
+        _mto=8; case "$_u" in *cfs-porsche-downloads*) _mto=3 ;; esac
+        command -v curl >/dev/null 2>&1 && curl -fsSL -m "$_mto" -o "$_j" "$_u" 2>/dev/null || fetch_url "$_u" "$_j"
+        [ -s "$_j" ] && break
+      done
       [ -s "$_j" ] || { echo "ERROR:获取最新版本失败" > "$STATEDIR/engine.done"; exit 1; }
       _url=$(sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_j" | head -n1)
       _sha=$(sed -n 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_j" | head -n1)

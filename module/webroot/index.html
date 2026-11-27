@@ -9318,11 +9318,18 @@ async function fontPackCheck(manual) {
   const lbl = document.getElementById("fontPackLatestLabel");
   if (manual && lbl) { lbl.textContent = "检查中…"; lbl.className = "value off"; }
   try {
-    const u = fontPackMetaBase() + "/font.json?t=" + Date.now();
-    const rr = await fetch(u, { cache: "no-store" });
-    if (!rr.ok) throw new Error("HTTP " + rr.status);
-    const j = await rr.json();
-    if (!j || !j.versionCode) throw new Error("字体包元数据无效");
+    const ali = fontPackMetaBase() + "/font.json";
+    const gh = "https://raw.githubusercontent.com/ayss2188/porsche-font/main/font-" + fontPackVariant() + ".json";
+    let j = null, lastErr = null;
+    for (const [u, to] of [[ali, 3000], [gh, 5000]]) {
+      try {
+        const rr = await withTimeout(fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), to);
+        if (!rr || !rr.ok) throw new Error("HTTP " + (rr ? rr.status : "?"));
+        const t = await rr.json();
+        if (t && t.versionCode) { j = t; break; }
+      } catch (e) { lastErr = e; }
+    }
+    if (!j) throw (lastErr || new Error("字体包元数据无效"));
     FONT_PACK_LATEST = j;
     const cur = await fontPackState();
     const has = (parseInt(j.versionCode, 10) || 0) > (parseInt(cur.versionCode, 10) || 0);
@@ -9610,10 +9617,21 @@ async function porscheCheckFont() {
 }
 
 async function porscheClockChangelog() {
+  let txt = "";
   try {
-    const o = String(await ksuExec(`cat ${LIBROOT}/state/engine/CHANGELOG.md 2>/dev/null`) || "").trim();
-    await dialog({ title: "字体工具箱更新日志", msg: o.slice(0, 16000) || "还没有安装插件。", okText: "知道了" });
-  } catch (e) { showToast("读取失败：" + errText(e), false, 6000); }
+    const ali = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/ENGINE-CHANGELOG.md";
+    const gh = "https://raw.githubusercontent.com/ayss2188/porsche-font/main/ENGINE-CHANGELOG.md";
+    for (const [u, to] of [[ali, 3000], [gh, 5000]]) {
+      try {
+        const r = await withTimeout(fetch(u + "?t=" + Date.now(), { cache: "no-store" }), to);
+        if (r && r.ok) { txt = String(await r.text() || ""); if (txt.trim()) break; }
+      } catch (e) {}
+    }
+  } catch (e) {}
+  if (!txt.trim()) {
+    try { txt = String(await ksuExec(`cat ${LIBROOT}/state/engine/CHANGELOG.md 2>/dev/null`) || ""); } catch (e) {}
+  }
+  await dialog({ title: "字体工具箱更新日志", msg: txt.trim().slice(0, 16000) || "还没有安装插件。", okText: "知道了" });
 }
 async function porscheClockUI() {
   advConFootHide();
@@ -12503,7 +12521,8 @@ async function loadOnlineChangelog() {
     }
     for (const url of sources) {
       try {
-        const r = await withTimeout(fetch(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), 9000);
+        const _to = url.indexOf("cfs-porsche-downloads") >= 0 ? 3000 : 9000;
+        const r = await withTimeout(fetch(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), _to);
         if (r && r.ok) { json = await r.json(); break; }
       } catch (e) { /* 换下一个源 */ }
     }
@@ -13007,7 +13026,8 @@ function updCheck(manual) {
       for (const u of UPD_JSON_URLS) {
         try {
           const ctl = new AbortController();
-          const tm = setTimeout(() => { try { ctl.abort(); } catch (e) {} }, 5000);
+          const _to = u.indexOf("cfs-porsche-downloads") >= 0 ? 3000 : 5000;
+          const tm = setTimeout(() => { try { ctl.abort(); } catch (e) {} }, _to);
           const rr = await fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(),
                                  { cache: "no-store", signal: ctl.signal });
           clearTimeout(tm);
@@ -13018,7 +13038,7 @@ function updCheck(manual) {
         } catch (e) { /* 换下一个源 */ }
       }
 
-      if (!j) { done("检查失败（先连 VPN 再试）", "off"); if (manual) showToast("连不上 GitHub，先连 VPN"); return; }
+      if (!j) { done("检查失败", "off"); if (manual) showToast("阿里云 3 秒无响应，GitHub 也没连上"); return; }
 
       UPD2.newVer = String(j.version || "");
       UPD2.newCode = parseInt(j.versionCode, 10) || 0;

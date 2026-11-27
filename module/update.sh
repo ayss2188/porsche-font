@@ -135,7 +135,8 @@ _read_json() {   # $1=json 文件；把五个字段填进全局
 _try_update_url() {   # $1=url  $2=目标文件
   _TRY_CODE=""
   rm -f "$2" 2>/dev/null
-  fetch "$1" "$2" 8 || return 1
+  _tmo=8; case "$1" in *cfs-porsche-downloads*) _tmo=3 ;; esac
+  fetch "$1" "$2" "$_tmo" || return 1
   [ -s "$2" ] || return 1
   _read_json "$2"
   case "$NEW_CODE" in ''|*[!0-9]*) return 1 ;; esac
