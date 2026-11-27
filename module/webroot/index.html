@@ -1758,8 +1758,8 @@ try {
   </div>
   <div class="g-hint" id="porscheInstallStatus" style="display:none;margin:8px 0"></div>
   <div class="btn-row fade">
-    <button class="g-btn" id="porscheCheckBtn" onclick="porscheClockCheck()" style="display:none">检测更新</button>
-    <button class="g-btn" id="porscheLogBtn" onclick="porscheClockChangelog()" style="display:none">更新日志</button>
+    <button class="g-btn" id="porscheCheckBtn" onclick="porscheClockCheck()">检测更新</button>
+    <button class="g-btn" id="porscheLogBtn" onclick="porscheClockChangelog()">更新日志</button>
     <button class="g-btn" onclick="porscheClockInstallMenu()">安装插件</button>
   </div>
 
@@ -9147,8 +9147,8 @@ async function porscheRefreshStatus() {
   if (unb) unb.style.display = ins ? "" : "none";
   const cb = document.getElementById("porscheCheckBtn");
   const lb = document.getElementById("porscheLogBtn");
-  if (cb) cb.style.display = ins ? "" : "none";
-  if (lb) lb.style.display = ins ? "" : "none";
+  if (cb) cb.style.display = "";
+  if (lb) lb.style.display = "";
   return { ins, ver };
 }
 async function porscheClockRender() {
@@ -9309,7 +9309,7 @@ async function fontPackState() {
   } catch (e) {}
   const el = document.getElementById("fontPackCurLabel");
   if (el) {
-    el.textContent = st.version ? (st.version + (st.variant ? " · " + st.variant : "")) : "v1.0";
+    el.textContent = st.version ? st.version : "v1.0";
     el.className = "value";
   }
   return st;

@@ -179,7 +179,10 @@ load_json() {
         # 把这份数据固化成"最终结果"（后面可能被更好的覆盖）
         NEW_VER=$(jstr version "$TMP/update.json")
         NEW_CODE=$(jnum versionCode "$TMP/update.json")
-        ZIP_URL=$(jstr zipUrl "$TMP/update.json")
+        case "${CFS_UPDATE_SOURCE:-aliyun}" in
+          github) ZIP_URL=$(jstr githubZipUrl "$TMP/update.json"); [ -n "$ZIP_URL" ] || ZIP_URL=$(jstr zipUrl "$TMP/update.json") ;;
+          *) ZIP_URL=$(jstr aliyunZipUrl "$TMP/update.json"); [ -n "$ZIP_URL" ] || ZIP_URL=$(jstr zipUrl "$TMP/update.json") ;;
+        esac
         LOG_URL=$(jstr changelog "$TMP/update.json")
         SHA=$(jstr sha256 "$TMP/update.json")
       fi
