@@ -1,8 +1,19 @@
 #!/system/bin/sh
+LIBROOT="${LIBROOT:-${LIB:-/data/adb/custom_font_lib}}"
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+FONTDIR="$LIBROOT/fonts"
+BUILTINDIR="$LIBROOT/builtin"
+CLOCKDIR="$LIBROOT/clock"
+CACHEDIR="$LIBROOT/cache"
+STATEDIR="$LIBROOT/state"
+BACKUPDIR="$LIBROOT/backup"
+WORKDIR="$LIBROOT/work"
+LOGDIR="$STATEDIR/logs"
 # ===========================================================================
 # 快捷上报 —— 纯读现成数据 + 一次 glob 比对，**秒级**，不扫描不算哈希
 #
-# 作者要的：
+# 开发者要的：
 #   ① 快 —— 不要像完整报告那样 24~29 分钟
 #   ② 有"没被替换的"这种能直接拿去改适配清单的数据
 #
@@ -23,9 +34,8 @@
 # ===========================================================================
 
 MODDIR=${0%/*}
-[ -n "$MODDIR" ] || MODDIR=/data/adb/modules/custom_font_switcher
-case "$MODDIR" in .|"") MODDIR=$(pwd 2>/dev/null || echo /data/adb/modules/custom_font_switcher) ;; esac
-LIB=/data/adb/custom_font_lib
+[ -n "$MODDIR" ] || MODDIR=/data/adb/modules/porsche_font_multi
+case "$MODDIR" in .|"") MODDIR=$(pwd 2>/dev/null || echo /data/adb/modules/porsche_font_multi) ;; esac
 
 CMD="${1:-print}"
 OUT="${2:-}"
@@ -66,7 +76,11 @@ build() {
   act=$(_one "$MODDIR/active_font")
   mode=$(_one "$MODDIR/payload.mode")
   slots_n=$(grep -c . "$MODDIR/slots.map" 2>/dev/null); [ -n "$slots_n" ] || slots_n=0
-  planf=$(_newest "$LIB/.plan.*")
+  planf=$(_newest "$STATEDIR/plan.*")
+  # 新布局的计划缓存在 cache/plan；旧的 state/plan.* 可能不存在。
+  # 再兜底用实际 slots.map，避免报告误报“缺 .plan.* 缓存”。
+  [ -s "$planf" ] || planf=$(ls -1t "$CACHEDIR"/plan/*.map 2>/dev/null | head -n1)
+  [ -s "$planf" ] || planf="$MODDIR/slots.map"
   plan=$(_all "$planf")
 
   lib_n=$(ls -1 "$LIB" 2>/dev/null | grep -cE '\.(ttf|otf|ttc)$'); [ -n "$lib_n" ] || lib_n=0
@@ -95,9 +109,17 @@ build() {
     "$slots_n" "$lib_n" "$(_hsz "$lib_sz")" "${mode:-?}"
   printf '设置: keep_lang=%s keep_special=%s scope=%s ttc=%s\n' \
     "${kl:-默认}" "${ks:-默认}" "${scope:-默认}" "${ttc:-默认}"
-  printf '开机: post-fs-data=%s service=%s\n' \
-    "$([ -f "$LIB/.boot.post-fs-data" ] && printf 有 || printf 未见)" \
-    "$([ -f "$LIB/.boot.service" ] && printf 有 || printf 未见)"
+  _bid=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '[:space:]')
+  _pfd="未见"; _svc="未见"
+  # 旧版看的是从未创建的 boot.post-fs-data / boot.service，永远显示“未见”。
+  # 现在直接按本次 boot_id 查 boot_events.log。
+  if [ -n "$_bid" ] && [ -s "$LOGDIR/boot_events.log" ]; then
+    grep -q "boot=$_bid .*stage=post-fs-data" "$LOGDIR/boot_events.log" 2>/dev/null && _pfd="有"
+    grep -q "boot=$_bid .*stage=service" "$LOGDIR/boot_events.log" 2>/dev/null && _svc="有"
+  fi
+  [ -f "$STATEDIR/boot.post-fs-data" ] && _pfd="有"
+  [ -f "$STATEDIR/boot.service" ] && _svc="有"
+  printf '开机: post-fs-data=%s service=%s\n' "$_pfd" "$_svc"
   printf '\n'
 
   printf '== 实际替换的槽位（共 %s 个）==\n' "$slots_n"
@@ -105,7 +127,7 @@ build() {
     # ★ 2026-10-16：**必须限制行数**。真机实测：一台 AOSP 机器有 172 个槽位，
     #   全列出来 5KB+ —— 而邮件正文上限是 4000 字符，
     #   结果这份"槽位清单"把后面几段（挂载日志、值得注意的）全挤掉了。
-    #   作者收到的邮件末尾就写着"(截断)"。
+    #   开发者收到的邮件末尾就写着"(截断)"。
     #   所以只列前 24 个（够看出挂到哪些目录、文件名什么风格），其余报个数。
     awk -v lim=24 '{ n=split($2,a,"/"); d=""; for(i=1;i<n;i++) d=d (i>1?"/":"") a[i];
            if (d!=last) { if(last!="") printf "\n"; printf "  [%s]\n", d; last=d }
@@ -118,7 +140,7 @@ build() {
   printf '\n'
 
   # -----------------------------------------------------------------------
-  # ★ 作者最需要的一段：盘上有、但计划里没有的
+  # ★ 开发者最需要的一段：盘上有、但计划里没有的
   # -----------------------------------------------------------------------
   printf '== 该换却没进计划的（只列"看着该换"的）==\n'
   if [ -z "$plan" ]; then
@@ -196,7 +218,7 @@ build() {
   printf '\n'
 
   printf '== 挂载日志 · 最后 6 条 ==\n'
-  [ -f "$LIB/mount.log" ] && tail -n 6 "$LIB/mount.log" 2>/dev/null | sed 's/^/  /' || printf '  （无）\n'
+  [ -f "$LOGDIR/mount.log" ] && tail -n 6 "$LOGDIR/mount.log" 2>/dev/null | sed 's/^/  /' || printf '  （无）\n'
   printf '\n'
 
   printf '== 值得注意的 ==\n'
@@ -232,12 +254,12 @@ EOF_OQ
   [ "$any" = 0 ] && printf '  （无）\n'
   printf '\n'
   # -----------------------------------------------------------------------
-  # ★ 2026-10-24（作者要求）：把**已经存在**的数据都带上 —— 仍然只读、不扫描。
+  # ★ 2026-10-24（设计）：把**已经存在**的数据都带上 —— 仍然只读、不扫描。
   #   一键上报的意义是"快"，所以这里只 cat/head/glob，不做任何计算。
   # -----------------------------------------------------------------------
   printf '== 选中字体元数据 ==\n'
   _meta=""
-  for _m in "$LIB/scanned/slots.meta" "$LIB/font_meta" "$LIB/$pend.meta" "$MODDIR/scanned/slots.meta"; do
+  for _m in "$STATEDIR/scan/slots.meta" "$LIB/font_meta" "$LIB/$pend.meta"; do
     [ -s "$_m" ] && { _meta="$_m"; break; }
   done
   if [ -n "$_meta" ]; then
@@ -259,33 +281,41 @@ EOF_OQ
 
   printf '== 扫描缓存 ==\n'
   printf '  device.list=%s 行   slots.list=%s 行   skip.list=%s 行\n' \
-    "$(grep -c . "$LIB/scanned/device.list" 2>/dev/null)" \
-    "$(grep -c . "$LIB/scanned/slots.list" 2>/dev/null)" \
-    "$(grep -c . "$LIB/scanned/skip.list" 2>/dev/null)"
+    "$(grep -c . "$STATEDIR/scan/device.list" 2>/dev/null)" \
+    "$(grep -c . "$STATEDIR/scan/slots.list" 2>/dev/null)" \
+    "$(grep -c . "$STATEDIR/scan/skip.list" 2>/dev/null)"
   printf '  扫描版本标记: 模块要求 %s / 设备记录 %s\n' \
     "$(sed -n 's/^slot=//p' "$MODDIR/scanmarks.conf" 2>/dev/null | head -n1 | tr -d '\r')" \
-    "$(sed -n 's/^slot=//p' "$LIB/.scanmarks" 2>/dev/null | head -n1 | tr -d '\r')"
-  [ -e "$LIB/.force_rescan" ] && printf '  ! 存在 .force_rescan（下次开机强制重扫）\n'
+    "$(sed -n 's/^slot=//p' "$STATEDIR/scan/.scanmarks" 2>/dev/null | head -n1 | tr -d '\r')"
+  [ -e "$STATEDIR/force_rescan" ] && printf '  ! 存在 .force_rescan（下次开机强制重扫）\n'
   printf '\n'
 
   printf '== 挂载状态 ==\n'
-  printf '  mount.state: %s\n' "$(tr -d '\r' < "$MODDIR/mount.state" 2>/dev/null | head -n1)"
+  _ms=$(tr -d '\r' < "$MODDIR/mount.state" 2>/dev/null | head -n1)
+  if [ -z "$_ms" ]; then
+    if [ -s "$MODDIR/slots.map" ]; then
+      _ms="无 mount.state（manager 模式以 slots.map 为准，$(grep -c . "$MODDIR/slots.map" 2>/dev/null) 行）"
+    else
+      _ms="无（mount.state 和 slots.map 都不存在）"
+    fi
+  fi
+  printf '  mount.state: %s\n' "$_ms"
   [ -e "$MODDIR/mount_missed" ] && printf '  ! 本次开机没有执行自带挂载（mount_missed）\n'
   [ -e "$MODDIR/rescued" ] && printf '  ! 触发过开机救援（rescued）\n'
-  [ -n "$(cat "$LIB/rescue_count" 2>/dev/null)" ] && printf '  救援次数: %s\n' "$(tr -d '\r' < "$LIB/rescue_count" 2>/dev/null)"
+  [ -n "$(cat "$STATEDIR/rescue_count" 2>/dev/null)" ] && printf '  救援次数: %s\n' "$(tr -d '\r' < "$STATEDIR/rescue_count" 2>/dev/null)"
   printf '\n'
 
   printf '== 合集合成（ttc.log 末 8 行）==\n'
-  if [ -s "$LIB/ttc.log" ]; then tail -n 8 "$LIB/ttc.log" 2>/dev/null | sed 's/^/  /'; else printf '  （无）\n'; fi
+  if [ -s "$LOGDIR/ttc.log" ]; then tail -n 8 "$LOGDIR/ttc.log" 2>/dev/null | sed 's/^/  /'; else printf '  （无）\n'; fi
   printf '\n'
 
   printf '== 抓日志状态 ==\n'
-  if [ -f "$LIB/logs/.on" ]; then
-    printf '  正在抓（catch.log %s KB）\n' "$(( $(wc -c < "$LIB/logs/catch.log" 2>/dev/null | tr -d ' ' || echo 0) / 1024 ))"
+  if [ -f "$LOGDIR/.on" ]; then
+    printf '  正在抓（catch.log %s KB）\n' "$(( $(wc -c < "$LOGDIR/catch.log" 2>/dev/null | tr -d ' ' || echo 0) / 1024 ))"
   else
     printf '  未在抓\n'
   fi
-  _lastlog=$(cat "$LIB/logs/last_export.txt" 2>/dev/null)
+  _lastlog=$(cat "$LOGDIR/last_export.txt" 2>/dev/null)
   [ -n "$_lastlog" ] && printf '  最近导出: %s\n' "${_lastlog##*/}"
   printf '\n'
 
@@ -307,11 +337,15 @@ EOF_OQ
   printf '\n'
 
   printf '== 开机事件（末 6 条）==\n'
-  [ -s "$LIB/boot_events.log" ] && tail -n 6 "$LIB/boot_events.log" 2>/dev/null | sed 's/^/  /' || printf '  （无）\n'
+  [ -s "$LOGDIR/boot_events.log" ] && tail -n 6 "$LOGDIR/boot_events.log" 2>/dev/null | sed 's/^/  /' || printf '  （无）\n'
   printf '\n'
 
   printf '== 设置全文 ==\n'
-  sed 's/^/  /' "$MODDIR/settings.conf" 2>/dev/null
+  if [ -s "$MODDIR/settings.conf" ]; then
+    sed 's/^/  /' "$MODDIR/settings.conf" 2>/dev/null
+  else
+    printf '  （无自定义设置，全部使用默认值）\n'
+  fi
   printf '\n'
 
   printf '== 说明 ==\n'
@@ -324,7 +358,7 @@ EOF_OQ
 #
 # 为什么要这层：界面是拿这份文本当**邮件正文**发的（Web3Forms 正文上限 4000 字符），
 # 超了就被服务端砍掉，而且砍的是**后半段**（挂载日志、值得注意的）——
-# 真机上就发生过：作者收到的邮件末尾是"(截断)"，重要的几段没了。
+# 真机上就发生过：开发者收到的邮件末尾是"(截断)"，重要的几段没了。
 #
 # 上面每段各自限制了行数，但段数多、机型差异大，"各段都不超"不等于"合起来不超"。
 # 所以这里做最后一道：真超了就在**末尾**明确打印一句，而不是让服务端静默切掉。

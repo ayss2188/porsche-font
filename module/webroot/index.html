@@ -98,7 +98,7 @@ body { min-height: 100%; }
     position: relative; overflow: hidden;
     background: var(--card); border: 1px solid var(--border); border-radius: 16px;
     padding: 12px 12px 12px 14px; margin-bottom: 10px;
-    /* ★ 2026-10-15 作者反馈：套着选中态的描边会被边缘挡。
+    /* ★ 2026-10-15 实测：套着选中态的描边会被边缘挡。
        直接把卡片缩小一点（左右各留 2px），描边就不会贴到容器边。 */
     margin-left: 2px; margin-right: 2px;
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -106,7 +106,7 @@ body { min-height: 100%; }
     transition: transform .16s ease, background .22s ease, border-color .22s ease;
   }
   .option:active { transform: scale(.97); background: var(--card-press); }
-  /* ★ 2026-10-15 作者反馈：选中那圈光晕（外发光）去掉，只留描边。 */
+  /* ★ 2026-10-15 实测：选中那圈光晕（外发光）去掉，只留描边。 */
   .option.is-active { border-color: var(--accent); box-shadow: none; }
   .option.is-pending { border-color: var(--pending-blue); background: var(--card-pending); }
   .option .info { min-width: 0; flex: 1; }
@@ -128,7 +128,7 @@ body { min-height: 100%; }
   .icon-btn:active { background: var(--card-press); }
 
   .option.busy { cursor: progress; }
-  /* ★ 2026-11-01（作者要求，与主项目同版）：「修改中」遮罩 = 二级菜单同款毛玻璃 ——
+  /* ★ 2026-11-01（设计，与主项目同版）：「修改中」遮罩 = 二级菜单同款毛玻璃 ——
      半透明 + 背面模糊（跟弹层同一配方，明暗主题各自取 --glass-bg） */
   .option .overlay {
     position: absolute; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 8px;
@@ -204,7 +204,7 @@ body { min-height: 100%; }
   .progress.show { display: block; }
   .progress .t { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
   .bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
-  /* ★ 2026-10-19（作者要求）：安装阶段**不显示进度条**（管理器的解包进度无法测量，画出来只能是编的），
+  /* ★ 2026-10-19（设计）：安装阶段**不显示进度条**（管理器的解包进度无法测量，画出来只能是编的），
      只留一行「正在安装中…」。见 updProg 的 noBar 参数。 */
   .progress.barless .bar { display: none; }
   .bar > i { display: block; height: 100%; width: 0; background: var(--pending-blue); transition: width .15s linear; }
@@ -259,7 +259,7 @@ body { min-height: 100%; }
      现在点卡片只弹菜单，真正的应用要再点一次 —— 误触不会再换字体。 */
   .fontact-mask {
     /* ★ 2026-10-15：照抄诊断报告那个浮层（.modal-mask）的做法 ——
-       作者实测它的位置完全正确（自检显示 modal 四边正好铺满屏幕）。
+       开发者实测它的位置完全正确（自检显示 modal 四边正好铺满屏幕）。
        差别只有一条：报告是居中（align-items:center），菜单要贴底（flex-end）。 */
     position: fixed; top: 0; right: 0; bottom: 0; left: 0; inset: 0; z-index: 30;
     background: rgba(0,0,0,.45);
@@ -323,7 +323,7 @@ body { min-height: 100%; }
   .lib-box.collapsed .lib-wrap { grid-template-rows: 0fr; }
   .lib-wrap > .lib-inner { overflow: hidden; min-height: 0; }
   /* 卡片有 border + box-shadow（选中态 1px 描边），列表容器留 1px 余量免得被裁 */
-  /* ★ 2026-10-15 作者反馈：「无字体」那张卡在最上面，套着描边时上边会被切。
+  /* ★ 2026-10-15 实测：「无字体」那张卡在最上面，套着描边时上边会被切。
      给它单独留出上边距（只影响第一张卡）。 */
   #fontList > .option:first-child { margin-top: 3px; }
   @media (prefers-reduced-motion: reduce) {
@@ -363,7 +363,7 @@ body { min-height: 100%; }
   /* 为什么不是 88vh：真机上状态栏 + 手势条会吃掉一截，88vh 时底部按钮仍可能被挤出去。
      ★ 2026-10-14：再减去安全区 —— 光靠 82vh 在有悬浮手势条的机器上仍不够，
        底部按钮会被手势条压住（真机反馈"底部的按钮还是被挤没了"）。 */
-  #reportMask .modal { max-height: calc(88vh - env(safe-area-inset-bottom, 0px)); /* ★ 2026-10-17 作者反馈按钮被切：82vh 装不下换行的按钮行，放到 88vh */
+  #reportMask .modal { max-height: calc(88vh - env(safe-area-inset-bottom, 0px)); /* ★ 2026-10-17 实测按钮被切：82vh 装不下换行的按钮行，放到 88vh */
                        display: flex; flex-direction: column; overflow: hidden; }
   #reportMask .modal > * { flex: 0 0 auto; min-height: 0; }
   /* ★ 2026-10-16：确认弹窗的文案可能很长（比如「一键上报」的隐私说明，20 来行）。
@@ -407,7 +407,7 @@ body { min-height: 100%; }
             ③ `min-width:0` 已有，配合 nowrap 不会把字撑开
        注意按钮行本来就 `flex:0 0 auto`，不会被报告区挤压 —— 它只是**横向**溢出。 */
   #reportMask .btn-row { flex: 0 0 auto; margin-top: 2px; margin-bottom: 0; flex-wrap: wrap; }
-  /* ★ 2026-10-16 再修一次（作者真机反馈"按钮文字显示不全"）：
+  /* ★ 2026-10-16 再修一次（开发者真机反馈"按钮文字显示不全"）：
      上一版只允许换行，但按钮仍是 `flex: 1 1 auto` —— 四五个按钮挤一行时
      每个被压得很窄，`white-space: nowrap` 的文字就溢出被切掉。
      现在改成：**按钮按内容定宽（不收缩）**，一行放不下就整行折下去。
@@ -423,7 +423,7 @@ body { min-height: 100%; }
     white-space: nowrap;
     overflow: visible;
   }
-  /* 主按钮（上传给作者）给多一点分量，一眼能找到 */
+  /* 主按钮（上传给开发者）给多一点分量，一眼能找到 */
   #reportMask .btn-row .g-btn.primary-blue { padding: 10px 18px; font-weight: 700; }
   .modal h3 { margin: 0 0 8px; font-size: 16px; }
   .modal p { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); line-height: 1.55; word-break: break-all; white-space: pre-line; }
@@ -443,6 +443,8 @@ body { min-height: 100%; }
     color: transparent; font-size: 14px; font-weight: 700; flex-shrink: 0;
   }
   .option.selected { border-color: var(--pending-blue); }
+  .switch-row.selected { border-color: var(--pending-blue); }
+  .switch-row.selected .ckbox { background: var(--pending-blue); border-color: var(--pending-blue); color: #fff; }
   .option.selected .ckbox, .pick-item.selected .ckbox { background: var(--pending-blue); border-color: var(--pending-blue); color: #fff; }
   .option.locked { opacity: .55; }
   .batch-btn {
@@ -489,6 +491,7 @@ body { min-height: 100%; }
     font-size: 16px; font-weight: 600; opacity: 1;
   }
   .sheet-x { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 15px; cursor: pointer; }
+  .sheet-back { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 20px; line-height: 1; cursor: pointer; flex: 0 0 auto; }
   .sheet-path { padding: 0 16px 8px; font-size: 12px; color: var(--text-dim); word-break: break-all; }
   .sheet-tools { display: flex; gap: 8px; padding: 0 16px 10px; flex-wrap: wrap; }
   .chip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 12px; cursor: pointer; }
@@ -554,13 +557,14 @@ body { min-height: 100%; }
   .sw.on::after { transform: translateX(18px); }
   select.txt { width: 100%; margin-bottom: 12px; }
   .modal .lbl { font-size: 12px; color: var(--text-dim); margin: 0 0 6px; }
-  textarea.report { width: 100%; height: 46vh; border-radius: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 11px; line-height: 1.5; padding: 10px; resize: none; font-family: monospace; margin-bottom: 12px; }
+  textarea.report { width: 100%; height: 46vh; border-radius: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 11px; line-height: 1.5; padding: 10px; resize: none; font-family: monospace; margin-bottom: 12px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
   /* ---------- 报告"结构化"视图（1.0.9 新增）----------
      以前整个报告塞在一个等宽 textarea 里，几十万字一眼看下去抓不到重点。
      现在默认渲染成"结论卡 + 分区折叠卡"，一眼能看到问题在哪；原样文本视图仍可切换。 */
-  .rep-view { display: none; height: 46vh; overflow-y: auto; overscroll-behavior: contain;
+  .rep-view { display: none; height: 46vh; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
               border: 1px solid var(--border); border-radius: 12px; background: var(--bg);
-              padding: 10px; margin-bottom: 12px; font-size: 12.5px; line-height: 1.65; }
+              padding: 10px; margin-bottom: 12px; font-size: 12.5px; line-height: 1.65;
+              max-width: 100%; word-break: break-word; overflow-wrap: anywhere; }
   .rep-view.show { display: block; }
   .rep-view::-webkit-scrollbar { width: 6px; }
   .rv-grp{margin:14px 0 6px;padding:6px 10px;border-radius:8px;background:rgba(124,92,255,.12);color:var(--text);font-size:13px;font-weight:600}
@@ -591,6 +595,10 @@ body { min-height: 100%; }
   .rv-flag.bad { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
   .rv-flag.warn { background: #e8a33d26; color: #b5791f; }
   .rv-empty { color: var(--text-dim); font-size: 12px; padding: 8px 2px; text-align: center; }
+  .ft-item { padding:10px 6px; border-bottom:1px solid var(--border); cursor:pointer; }
+  .ft-item:active { background: rgba(128,128,128,.10); }
+  .ft-item .t { font-size:14px; }
+  .ft-item .d { font-size:12px; color:var(--text-dim); line-height:1.5; margin-top:3px; }
   .fade { animation: fadeUp .5s cubic-bezier(.22,.8,.34,1) both; animation-delay: var(--d, 0s); }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
   @media (prefers-reduced-motion: reduce) {
@@ -1402,6 +1410,7 @@ body { min-height: 100%; }
   #advLockBtn { margin-left: 0 !important; }
   #advSheet #advBackBtn, #advSheet .sheet-x[onclick*="advClose"],
   #advConSheet .sheet-x { margin-left: auto !important; }
+  #advConSheet .sheet-head > div .sheet-x { margin-left: 0 !important; }
   #advSheet #advBackBtn + .sheet-x { margin-left: 0 !important; }
 
   /* ★ 2026-10-25 展开按钮：用最具体的选择器压掉所有底色 */
@@ -1484,6 +1493,7 @@ body { min-height: 100%; }
     :root[data-theme="light"] body.cfs-hasbg .modal {
       background: rgba(240, 240, 244, .72) !important;
     }
+    #modalMask .modal { max-width: min(92vw, 680px); }
   }
 
   /* 2026-10-25 高级面板头部必须是 flex，否则 margin-left:auto 不生效 */
@@ -1551,23 +1561,27 @@ try {
   </div>
 
   <div class="status-box fade" style="--d:.03s">
-    <div class="status-row">
+    <div class="status-row" onclick="openStatusDetail('active')" style="cursor:pointer">
       <span class="label">当前实际生效</span>
       <span class="value active" id="activeLabel">正在读取文件列表…</span>
     </div>
-    <div class="status-row" id="pendingRow" style="display:none;">
+    <div class="status-row" id="pendingRow" onclick="openStatusDetail('pending')" style="display:none;cursor:pointer">
       <span class="label">待生效（下次重启后）</span>
       <span class="value pending" id="pendingLabel">-</span>
     </div>
-    <div class="status-row" id="rowTotalTop">
+    <div class="status-row" id="rowTotalTop" onclick="openStatusDetail('slots')" style="cursor:pointer">
       <span class="label">槽位总数</span>
       <span class="value off" id="ssTotal">-</span>
     </div>
-    <div class="status-row">
+    <div class="status-row" onclick="openStatusDetail('replaced')" style="cursor:pointer">
       <span class="label">已替换槽位</span>
       <span class="value ok" id="slotLabel">-</span>
     </div>
-        <!-- ★ 2026-10-16（作者定稿 · 方案 C）：两行普通状态行（去掉说明行 —— 作者要求）。
+    <div class="status-row" id="clockRow" onclick="openStatusDetail('clock')" style="display:none;cursor:pointer">
+      <span class="label">锁屏专用时钟字体</span>
+      <span class="value ok" id="clockLabel">-</span>
+    </div>
+        <!-- ★ 2026-10-16（定稿 · 方案 C）：两行普通状态行（去掉说明行 —— 设计）。
              ⚠️ 分隔线为什么写死（调错 4 次的教训）：
                原来靠 `.status-row + .status-row { border-top: 1px solid var(--border) }`，
                依赖链太长，任何一环坏掉用户就看到"没有线"：
@@ -1579,29 +1593,29 @@ try {
              ⚠️ 颜色：.value.active = 紫 / .value.pending = 蓝 / .value.ok = 绿 /
                .value.warn = 琥珀 / .value.off = 灰（跟卡片里其他行同一套语义类）。
              数据来源：SP4 里的 x（配置里列的名字数）和 extra（扫描真正多补的名字数）。 -->
-        <!-- ★ 2026-10-18（作者反馈「69+82 为什么不等于 119」）：
+        <!-- ★ 2026-10-18（实测「69+82 为什么不等于 119」）：
              这三个数字口径不同，必须标清楚，否则用户以为是算错了：
                · 机型清单里的 + 本机扫描补的 = **设备上的全部槽位**（安装时扫出来的，不随开关变）
                · 已替换槽位 = **这次计划替换的**（受「保留锁屏时钟」等开关影响，会少一些）
              所以在两行来源上面加一行「槽位总数」，让 69+82=151 一眼可见。 -->
-        <div class="status-row" id="ssRowX" style="border-top:1px solid rgba(128,128,128,.28);margin-top:10px;padding-top:10px">
+        <div class="status-row" id="ssRowX" onclick="openStatusDetail('scanx')" style="border-top:1px solid rgba(128,128,128,.28);margin-top:10px;padding-top:10px;cursor:pointer">
           <span class="label">　机型清单里的</span>
           <span class="value active" id="ssX">-</span>
         </div>
-        <div class="status-row" id="ssRowExtra" style="border-top:1px solid rgba(128,128,128,.28)">
+        <div class="status-row" id="ssRowExtra" onclick="openStatusDetail('scanextra')" style="border-top:1px solid rgba(128,128,128,.28);cursor:pointer">
           <span class="label">　本机扫描补的</span>
           <span class="value pending" id="ssExtra">-</span>
         </div>
 
-    <div class="status-row">
+    <div class="status-row" onclick="openStatusDetail('mount')" style="cursor:pointer">
       <span class="label">实际挂载</span>
       <span class="value" id="mountLabel">-</span>
     </div>
-    <div class="status-row">
+    <div class="status-row" onclick="openStatusDetail('verify')" style="cursor:pointer">
       <span class="label">实际生效（逐个核对）</span>
       <span class="value" id="verifyLabel">-</span>
     </div>
-    <div class="status-row">
+    <div class="status-row" onclick="openStatusDetail('rom')" style="cursor:pointer">
       <span class="label">识别系统</span>
       <span class="value" id="romLabel">正在读取文件列表…</span>
     </div>
@@ -1658,17 +1672,20 @@ try {
     想换回系统默认就选「无字体（系统默认）」。
   </div>
 
-  <div class="divider"></div>
 
   <div class="section-title fade"><span>替换范围</span></div>
-  <div class="g-hint" style="margin-bottom:8px">日文、韩文、繁体、时钟、代码、斜体 —— 全部都会换成你的字体，不用设置。<br>如果某个字没变、或者显示成方块（□），那是<b>你的字体里没有那个字</b>；诊断报告里会列出是哪些。</div>
+  <div class="g-hint" style="margin-bottom:8px">日文、韩文、繁体、时钟、代码、斜体 —— 默认都会换；锁屏时钟需要单独打开下面的开关。<br>如果某个字没变、或者显示成方块（□），那是<b>你的字体里没有那个字</b>；诊断报告里会列出是哪些。</div>
   <div class="switch-row fade" onclick="toggleSetting('theme_fonts')">
     <div><div class="t">也替换主题里选的字体</div><div class="d">有些机型会把「设置 → 字体样式」或主题商店里选的那份字体单独存一份，它比系统字体优先，不换它就不生效。<br><b>开</b>：那份也换成你的字体，设置里的选择会失效。<br><b>关</b>：只换系统字体。<br><b>注意</b>：主题字体在 /data 上，元模块本身挂不到。如果「自带挂载」是关的（交给元模块），打开这个开关后会自动用<b>「混合挂载」</b>：元模块挂系统分区、模块补挂 /data （诊断报告里会写「混合挂载」 ）。</div></div>
     <div class="sw" id="sw_theme_fonts"></div>
   </div>
-  <div class="switch-row fade" onclick="toggleSetting('keep_lockscreen')">
-    <div><div class="t">保留锁屏时钟字体</div><div class="d">已知这几家把<b>时钟字体单独放一族</b>：<br>· 小米 / 红米 / POCO（miclock、mitype-clock）<br>· 红魔 / 努比亚 / 中兴（RedMagicDigit、ZDigit）<br>· 三星 One UI（SECNum 数字族）<br>默认会连它们一起换成你的字体。<br><b>开</b>：这些保留原样，你还能在系统里换时钟样式。<br><b>关</b>：连锁屏时钟也一起换。<br>（其他品牌没有单独的时钟字体，开关无影响）</div></div>
-    <div class="sw" id="sw_keep_lockscreen"></div>
+  <div class="switch-row fade" onclick="toggleSetting('replace_lockscreen')">
+    <div><div class="t">也替换锁屏时钟字体</div><div class="d">
+      默认关：锁屏时钟保持系统原样。<br>
+      打开：用 porsche 字体工具箱插件，按每个时钟字体族生成配套字体（保留原名/度量），重启后生效。<br>
+      ColorOS / HyperOS / 荣耀 / OriginOS 等需要插件；首次生成可能需要一点时间，具体看时钟族数量。
+    </div></div>
+    <div class="sw" id="sw_replace_lockscreen"></div>
   </div>
 
   </div>
@@ -1683,10 +1700,10 @@ try {
 
   <div class="section-title fade"><span>遇到问题？抓日志 / 报故障</span></div>
   <div class="g-hint fade" style="margin:-2px 0 10px">
-    里面有<b>完整诊断报告</b>（字体指纹、映射、挂载实测，给作者看细节）、
+    里面有<b>完整诊断报告</b>（字体指纹、映射、挂载实测，给开发者看细节）、
     <b>抓崩溃日志</b>、<b>一键上报</b>（两秒，不用自己找文件）。<br>
     遇到 App 闪退、WebUI 闪退、字体没换全、某个 App 没变 ——
-    用「抓日志」记下过程，停止后导出，作者拿到就能直接分析。
+    用「抓日志」记下过程，停止后导出，开发者拿到就能直接分析。
   </div>
   <div class="switch-row fade fbk-entry" onclick="openFbk()">
     <div>
@@ -1701,7 +1718,7 @@ try {
   <div class="switch-row fade" onclick="manualOpen()">
     <div>
       <div class="t">打开使用说明书（可搜索）</div>
-      <div class="d">安装 / 导入 / 挂载方式 / 主题字体 / 诊断 / 卸载 / 常见问题</div>
+      <div class="d">安装 / 切换 / 挂载方式 / 主题字体 / 诊断 / 卸载 / 常见问题</div>
     </div>
     <div class="row-arrow">›</div>
   </div>
@@ -1723,10 +1740,63 @@ try {
 
   <div class="divider"></div>
 
-  <div class="section-title fade"><span>模块更新（GitHub）</span></div>
+  <div class="divider"></div>
+
+  <div class="section-title fade"><span>字体工具箱（可选）</span></div>
+  <div class="status-box fade">
+    <div class="status-row">
+      <span class="label">当前版本</span>
+      <span class="value" id="porscheCurLabel">未安装</span>
+    </div>
+    <div class="status-row">
+      <span class="label">最新版本</span>
+      <span class="value" id="porscheLatestLabel">未检查</span>
+    </div>
+  </div>
+  <div class="g-hint fade" style="margin:10px 0">
+    更新信息走阿里云，国内可直连；只有下载插件包走 GitHub，下载失败再连 VPN。
+  </div>
+  <div class="g-hint" id="porscheInstallStatus" style="display:none;margin:8px 0"></div>
+  <div class="btn-row fade">
+    <button class="g-btn" id="porscheCheckBtn" onclick="porscheClockCheck()" style="display:none">检查更新</button>
+    <button class="g-btn" id="porscheLogBtn" onclick="porscheClockChangelog()" style="display:none">更新日志</button>
+    <button class="g-btn" onclick="porscheClockUpdate()">下载并安装</button>
+  </div>
+  <div class="btn-row fade">
+    <button class="g-btn" onclick="porscheClockPickZip()">从本地安装</button>
+    <button class="g-btn" id="porscheUninstallBtn" onclick="porscheClockUninstall()" style="display:none">卸载</button>
+  </div>
+
+  <div class="section-title fade" id="porscheToolsSection" style="margin-top:18px;display:none"><span>字体工具箱</span></div>
+  <div class="switch-row fade" id="porscheToolsEntry" onclick="porscheToolsUI()" style="display:none">
+    <div>
+      <div class="t">字体工具箱</div>
+      <div class="d">字体体检 · 字体信息/授权 · 体积分析 · 表解析 · 机型建议（由插件执行）</div>
+    </div>
+    <div class="row-arrow">›</div>
+  </div>
+  <div class="g-hint fade">不装插件不影响普通字体切换；只影响锁屏时钟替换。</div>
+
+  <div class="section-title fade" style="margin-top:18px"><span>字体包更新</span></div>
+  <div class="status-box fade">
+    <div class="status-row"><span class="label">当前字体包</span><span class="value" id="fontPackCurLabel">读取中…</span></div>
+    <div class="status-row"><span class="label">最新字体包</span><span class="value off" id="fontPackLatestLabel">未检查</span></div>
+  </div>
+  <div class="g-hint fade" style="margin:10px 0">
+    字体包只更新内置字体，不动模块和用户导入的字体。更新和回滚都会清空 TTC、时钟和计划缓存。
+  </div>
+  <div class="btn-row fade">
+    <button class="g-btn" onclick="fontPackCheck(true)">检查字体更新</button>
+    <button class="g-btn" onclick="fontPackChangelog()">字体更新日志</button>
+    <button class="g-btn" onclick="fontPackInstallMenu()">安装字体</button>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="section-title fade"><span>模块更新</span></div>
   <div class="g-hint vpn-tip fade" style="margin:-2px 0 10px">
-    <b>更新包在 GitHub 上，国内直连大多不通</b> ——
-    点「检查更新」没反应、或「下载并安装」失败，<b>先连上 VPN 再试</b>。
+    <b>更新信息走阿里云，国内可直连</b> ——
+    只有下载模块包仍走 GitHub；下载没反应时再连 VPN。
   </div>
   <div class="status-box fade">
     <div class="status-row">
@@ -1780,7 +1850,7 @@ try {
        ⚠️ 顺序很重要：**必须先挂载，再软重启**。
          只做软重启没用 —— 那时还没有任何东西可读。
 
-       ★ 2026-10-16 作者意见：**不要按 root 类型分**。
+       ★ 2026-10-16 开发者意见：**不要按 root 类型分**。
          因为正常 root 也能用这条路（省一次重启），所以改成按"稳 / 快"分：
            · 最稳 = 重启（所有情况下都管用，真·一次到位）
            · 免重启 = 快，但依赖 root 会话还在
@@ -1804,18 +1874,18 @@ try {
   <div class="hint fade" id="rebootHint">重启一次，模块在开机时自己挂载 —— 以后每次开机都照常生效</div>
 
   <!-- ===================== 遇到问题（入口行）2026-10-16 =====================
-       作者反馈：原来把"快捷上报 + 完整报告"整块摊在主界面上，占了太多位置，
+       实测：原来把"快捷上报 + 完整报告"整块摊在主界面上，占了太多位置，
        而这是**低频功能**（只有出问题才用）。所以收成一行入口，点开才是完整界面。
        弹层见 #fbkSheet。
 
-       ★ 作者第二次反馈："症状标签那排也占位置" —— 压成一行小字。
-       ★ 作者第三次反馈："诊断报告应该回原来的位置" ——
+       ★ 开发者第二次反馈："症状标签那排也占位置" —— 压成一行小字。
+       ★ 开发者第三次反馈："诊断报告应该回原来的位置" ——
          所以「查看诊断报告」按钮已挪回主界面（自带挂载下面），
          这里只留"上报/反馈"这一行；弹层里仍保留完整报告的入口
          （"出问题了"这个上下文里，用户自然会想看详细数据）。 -->
 
   <div class="hint">开机异常时：进入安全模式或在管理器里禁用本模块即可恢复</div>
-  <div class="foot">保时捷字体 · 作者 暗影双生 · 构建 1106-1920</div>
+  <div class="foot">保时捷字体 · 开发者 暗影双生 · 构建 1127-2317</div>
 
   <div class="sheet" id="sheet">
     <div class="sheet-head">
@@ -1839,7 +1909,7 @@ try {
        结构照抄上面的文件浏览器 sheet：头部标题+✕ / 中间可滚 / 底部按钮。
        内容分两半，中间一条分割线：
          上半 = 秒级（约 2KB）：一键上报 / 导出小报告
-         下半 = 完整报告（约 5~6 分钟）：生成，生成完窗口里点「上传给作者」
+         下半 = 完整报告（约 5~6 分钟）：生成，生成完窗口里点「上传给开发者」
        ================================================== -->
   <div class="sheet" id="fbkSheet">
     <div class="sheet-head">
@@ -1860,17 +1930,17 @@ try {
 
     <!-- ===================================================================
          ② 快速通道：一键上报 / 连接自检 / 导出小报告
-            · 一键上报：2 秒，只读模块状态文件，直接发到作者服务器
+            · 一键上报：2 秒，只读模块状态文件，直接发到开发者服务器
             · 连接自检：判断"传不上去"卡在【网络 / 口令 / 服务器】哪一步
             · 导出小报告：存到 Download 的纯文本（约 2KB），可先自己看
             三条通道并存，互不替代。
          =================================================================== -->
     <div class="fbk-sec">② 快速通道（几秒）</div>
 
-    <!-- ★ 2026-10-16 作者要求：上传前先提醒要梯子（服务器在国外） -->
-    <div class="g-hint vpn-tip" style="margin-bottom:10px">
-      <b>上传前请先连 VPN</b> —— 报告是传到我自己的服务器（在国外），
-      不连 VPN 一般传不上去。连不上会直接提示，也可以到最下面的「网络诊断」里看卡在哪一步。
+    <!-- 上传已切到国内服务器，不再需要代理 -->
+    <div class="g-hint" style="margin-bottom:10px">
+      <b>上传已接入国内服务器</b> —— 不需要连 VPN。
+      连不上会直接提示你，也可以到最下面的「网络诊断」里看卡在哪一步。
     </div>
       <div class="g-hint" style="margin-bottom:12px">
         <b>先试「一键上报」</b> —— 两秒生成、点一下就发到我邮箱，不用你找文件。
@@ -1893,7 +1963,7 @@ try {
 
       <!-- =================================================================
            ③ 完整报告：全量采集（字体指纹、语言→字体映射、挂载实测、开机痕迹…）
-              要 5~6 分钟，生成期间必须留在这个页面；生成完才出现「上传给作者」。
+              要 5~6 分钟，生成期间必须留在这个页面；生成完才出现「上传给开发者」。
               与上面的快速通道是两条独立通道。
            ================================================================= -->
       <div class="fbk-sec">③ 完整报告（5~6 分钟）</div>
@@ -1909,7 +1979,7 @@ try {
         <button class="g-btn" onclick="closeFbk(); showReport()">查看 / 生成完整报告</button>
       </div>
       <div class="g-hint" style="opacity:.75">
-        生成完那个窗口底部会多出一个「上传给作者」————
+        生成完那个窗口底部会多出一个「上传给开发者」————
 
 
 
@@ -1925,11 +1995,11 @@ try {
       <div class="btn-row">
         <button class="g-btn primary-blue" id="logcatchStartBtn" onclick="logcatchStart()">开始抓日志</button>
         <button class="g-btn danger" id="logcatchStopBtn" onclick="logcatchGo('stop')" style="display:none">停止并导出</button>
-        <button class="g-btn" id="logcatchUploadBtn" onclick="logcatchUpload()" style="display:none">上传给作者</button>
+        <button class="g-btn" id="logcatchUploadBtn" onclick="logcatchUpload()" style="display:none">上传给开发者</button>
       </div>
       <div class="g-hint" id="logcatchStatus" style="display:none"></div></div>
 
-<!-- ★ 2026-10-23（作者要求）：网络诊断单独一块，不和一键上报挤在一起 -->
+<!-- ★ 2026-10-23（设计）：网络诊断单独一块，不和一键上报挤在一起 -->
       <div class="fbk-sec">⑤ 网络诊断</div>
       <div class="g-hint" style="margin-bottom:10px">
         上传前会自动检测能不能连上服务器；这里可以手动再测一次，
@@ -1978,17 +2048,17 @@ try {
         <button class="g-btn" id="reportChoiceSlow" onclick="repStart('full','gentle')">慢慢生成</button>
       </div>
       <div class="g-hint" id="reportChoiceHint" style="display:none"></div>
-      <!-- ★ 2026-10-16（作者要求）：上传前提醒挂梯子。
+      <!-- ★ 2026-10-16（设计）：上传前提醒挂梯子。
            为什么需要：上传走设备上的 curl，而服务器在境外 ——
            梯子没覆盖到那个域名时，现象就是"点了没反应 / 上传失败"，
-           用户会以为是模块坏了（作者真机反馈过好几次）。 -->
+           用户会以为是模块坏了（开发者真机反馈过好几次）。 -->
       <div class="btn-row">
         <button class="g-btn urgent" id="reportCancelBtn" onclick="cancelReport()" style="display:none">中止生成</button>
         <button class="g-btn" id="reportMoreBtn" onclick="reportMore()" style="display:none">更多</button>
         <button class="g-btn" id="reportViewBtn" onclick="repShowView(repViewMode === 'raw' ? 'pretty' : 'raw')" style="display:none">文本</button>
         <button class="g-btn" id="reportRegenBtn" onclick="regenReport()" style="display:none">重生成</button>
-        <!-- ★ 2026-10-16：生成完成后就地提供"上传给作者"（传作者自己的服务器）。
-             作者的意见：它属于完整报告的一部分，放在外面的区块里"感觉很奇怪" ——
+        <!-- ★ 2026-10-16：生成完成后就地提供"上传给开发者"（传开发者自己的服务器）。
+             开发者的意见：它属于完整报告的一部分，放在外面的区块里"感觉很奇怪" ——
              而且它依赖这次刚生成的文件，就地放才说得通。
              所以只在**生成完成**（repPaintDone）后才出现。 -->
         <button class="g-btn primary-blue" id="reportServerBtn" onclick="repSendServer()" title="需要先连 VPN（服务器在境外）" style="display:none">上传</button>
@@ -2053,10 +2123,12 @@ try {
    在某些环境下回调不返回，整个界面就会永远卡在「正在读取」。 */
 const MODULE_HINT = "porsche_font_multi";   // 打包脚本会按变体改写
 const MODDIR = "/data/adb/modules/" + MODULE_HINT;
-const LIB = "/data/adb/custom_font_lib";
+const LIBROOT = "/data/adb/custom_font_lib";
+const LIB = LIBROOT + "/fonts";
+const BUILTINDIR = LIBROOT + "/builtin";
 const DIAGWEB = MODDIR + "/webroot/diag";   // 诊断状态/正文的镜像目录（fetch 直接读，不起 shell）
 /* ===========================================================================
-   ★ 2026-10-16 上报通道：**只有一条 —— 作者自己的服务器**
+   ★ 2026-10-16 上报通道：**只有一条 —— 开发者自己的服务器**
    ===========================================================================
    服务器：Cloudflare Worker（cfs-report）+ R2 存储桶 cfs-reports
      收报告  POST /report               带 x-cfs-key 口令
@@ -2076,7 +2148,7 @@ const DIAGWEB = MODDIR + "/webroot/diag";   // 诊断状态/正文的镜像目�
                 拿到它顶多往桶里塞垃圾报告，看不到已有的。
                 所以内置在界面里是安全的。换口令：改 Worker 的 secret + 改这里。
    =========================================================================== */
-/* ★ 2026-10-16 作者要求：**只留自己的服务器这一条通道**。
+/* ★ 2026-10-16 设计：**只留自己的服务器这一条通道**。
    去掉的两条：
      · Web3Forms 邮箱 —— 报告当邮件正文发，正文有 4000 字符上限，真机被截断过
      · GitHub Issue  —— 手机上 github.com 在没梯子时打不开，还要手动拖文件
@@ -2087,7 +2159,7 @@ const DIAGWEB = MODDIR + "/webroot/diag";   // 诊断状态/正文的镜像目�
 /* ---------- ★ 2026-10-16：自己的上报服务器（优先走这条）----------
    背景：Web3Forms 的问题是**报告要当邮件正文发**，正文有 4000 字符上限，
         真机上就被截断过 —— 而截掉的恰好是最该看的几段。
-        作者原本就部署了一个 Cloudflare Worker（报告存 R2），
+        开发者原本就部署了一个 Cloudflare Worker（报告存 R2），
         那条路**不占长度**（单份上限 8MB），也没有 250 封/月 的额度焦虑。
 
    通道顺序：
@@ -2099,15 +2171,21 @@ const DIAGWEB = MODDIR + "/webroot/diag";   // 诊断状态/正文的镜像目�
       所以内置在界面里是可接受的 —— 跟 Web3Forms 的 access_key 同理。
       真要换口令：改 Worker 的 secret + 改这里，两处一致即可。
 */
-const WORKER_URL = "https://cfs-report.2188366745q.workers.dev";
-const WORKER_KEY = "up_AIWDsNGqSacruDo4wLnJmEiMvgEMpGtt";
+const WORKER_URL = "https://cfs-report-ffadnohrkc.cn-hangzhou.fcapp.run";
+const WORKER_KEY = "se40odifAmODULlNh6yISRqZVwQKBHkPYrntWXM5";
+// 海外备用：旧 Cloudflare R2 Worker（国内可能需要 VPN）
+const R2_WORKER_URL = "https://cfs-report.2188366745q.workers.dev";
+const R2_WORKER_KEY = "up_AIWDsNGqSacruDo4wLnJmEiMvgEMpGtt";
+let UPLOAD_ROUTE = "aliyun";
+function uploadBase() { return UPLOAD_ROUTE === "r2" ? R2_WORKER_URL : WORKER_URL; }
+function uploadKey() { return UPLOAD_ROUTE === "r2" ? R2_WORKER_KEY : WORKER_KEY; }
 
 /* 自检：在控制台里跑一下就知道服务器通不通、口令对不对。
    手机上看不到控制台的话，直接在浏览器打开这个地址也行：
      https://cfs-report.2188366745q.workers.dev/health   → 正常会返回 ok
    用法：ksu 界面里没法开控制台，所以这个函数主要是给"以后排查"留的。 */
 /* 连接自检（2026-10-16 加）
-   为什么加：作者反馈"挂了梯子也上传不了"，而错误信息只有一个
+   为什么加：实测"挂了梯子也上传不了"，而错误信息只有一个
    "Failed to fetch"，看不出是【网络到不了】还是【口令不对】还是【别的】。
    这个函数把三段分别测一遍，结果直接显示在界面上 —— 一眼定位。
 
@@ -2141,6 +2219,13 @@ function ksuExec(cmd) {
     try { ksu.exec(cmd, "{}", cbName); } catch (e) { delete window[cbName]; reject(e); }
   });
 }
+// WebUI 的 ksu.exec 在部分管理器里可能永远不回调；状态探测必须有超时
+function ksuExecTO(cmd, ms) {
+  return Promise.race([
+    ksuExec(cmd),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT")), ms || 4000)),
+  ]);
+}
 const shq = s => "'" + String(s).replace(/'/g, "'\\''") + "'";
 const errText = e => String(e && e.message || e).replace(/^ERROR:/, "");
 // 大小显示：拿不到真实大小就显示——，不要用 Math.max(1,..) 编一个"1 KB"出来
@@ -2157,8 +2242,8 @@ function showToast(msg, sticky, ms) {
   t.textContent = msg;
   t.classList.add("show");
   if (toastTimer) clearTimeout(toastTimer);
-  // ★ 2026-11-01（作者反馈"还没来得及看就没了"，与主项目同版）：
-  //   结果提示给 3 秒（作者定稿：8 秒太长）→ 可传第三个参数自定义；
+  // ★ 2026-11-01（实测"还没来得及看就没了"，与主项目同版）：
+  //   结果提示给 3 秒（定稿：8 秒太长）→ 可传第三个参数自定义；
   //   普通短提示维持 2.8 秒；sticky 仍常驻、由流程收尾时清掉。
   if (!sticky) toastTimer = setTimeout(() => t.classList.remove("show"), ms || 2800);
 }
@@ -2278,7 +2363,7 @@ function labelOf(id) {
   return p.length === 2 ? "中文 " + nameOf(p[0]) + " + 英文 " + nameOf(p[1]) : nameOf(id);
 }
 
-/* ★ 2026-10-16 修一个误报（作者真机反馈"明明有数据却显示无法读取"）：
+/* ★ 2026-10-16 修一个误报（开发者真机反馈"明明有数据却显示无法读取"）：
    旧写法把整段包在一个 try 里 ——
      applyStatus 已经填好了 slotLabel / romLabel / mountLabel，
      后面 backfillFam / render 里任何一个小错都会走 catch，
@@ -2323,7 +2408,7 @@ async function refreshAll(force) {
       (metaStr || "").split(",").forEach(kv => { const i = kv.indexOf("="); if (i > 0) meta[kv.slice(0, i)] = kv.slice(i + 1); });
       return {id, name: p.join("|") || id, size, meta};
     });
-    // ★ 2026-11-01（作者反馈"开关时列表可能变空白"，与主项目同版）：
+    // ★ 2026-11-01（实测"开关时列表可能变空白"，与主项目同版）：
     //   开关刚 reapply 完设备正忙，list 偶发返回空 —— 空结果不顶掉已有列表。
     if (parsed.length || !fonts.length) fonts = parsed;
     applyStatus(st);
@@ -2396,13 +2481,15 @@ function applyStatus(st) {
       renderSelfCheck();
     }
     const g = k => (st.match(new RegExp("^" + k + "=(.*)$", "m")) || [])[1] || "";
+    const _statusBusy = busy;
     activeId = g("A").trim() || "none";
-    pendingId = g("P").trim() || activeId;
+    // 应用过程中后台刷新可能先读到新 pending；遮罩还在时不能提前把卡片改成“待生效”
+    if (!_statusBusy) pendingId = g("P").trim() || activeId;
     const rom = g("R").trim();
   settings.rom_override = ((g("RO") || "auto").trim()) || "auto";
   settings.rom_pending = ((g("RP") || "").trim());
     const nSlots = g("N").trim();
-    // ★ 2026-11-01（作者反馈"已替换槽位没跟着一起改"，与主项目同版）：
+    // ★ 2026-11-01（实测"已替换槽位没跟着一起改"，与主项目同版）：
     //   计划比本次开机新时按「当前」口径 —— 显示开机快照的替换数（BN），
     //   重启后才更新成新计划的数字。
     if (g("PD").trim() === "1") {
@@ -2412,10 +2499,42 @@ function applyStatus(st) {
     } else {
       setValue("slotLabel", nSlots && +nSlots > 0 ? nSlots + " 个" : "0（未替换）");
     }
+    // 锁屏时钟：target 数 + 当前实际状态
+    (function () {
+      const _ck = parseInt(String(g("CK") || "0").trim(), 10) || 0;
+      const _cb = parseInt(String(g("CB") || "0").trim(), 10) || 0;
+      const _ct = parseInt(String(g("CT") || "0").trim(), 10) || _ck;
+      const _cg = parseInt(String(g("CG") || "0").trim(), 10) || 0;
+      const _cm = parseInt(String(g("CM") || "0").trim(), 10) || 0;
+      const _ce = String(g("CE") || "0").trim() === "1";
+      const _pd = String(g("PD") || "0").trim() === "1";
+      const _row = document.getElementById("clockRow");
+      const _val = document.getElementById("clockLabel");
+      if (_row) _row.style.display = _ct > 0 ? "" : "none";
+      if (_val) _val.classList.remove("warn", "off", "ok");
+      if (_ct > 0) {
+        let _txt = _ct + " 个";
+        let _cls = "ok";
+        if (!_ce) {
+          if (_cb > 0 || _pd) { _txt += "（重启后关闭）"; _cls = "warn"; }
+          else { _txt += "（未开启）"; _cls = "off"; }
+        } else if (_ck <= 0) {
+          _txt += "（未生成）"; _cls = "warn";
+        } else if (_pd || _cb !== _ck) {
+          _txt += "（重启后 " + _ck + "/" + _ct + "）"; _cls = "warn";
+        } else if (_cg < _ct) {
+          _txt += "（生成中 " + _cg + "/" + _ct + "）"; _cls = "warn";
+        } else {
+          _txt += "（已挂载 " + _cm + "/" + _ct + "）"; _cls = "ok";
+        }
+        setValue("clockLabel", _txt);
+        if (_val) _val.classList.add(_cls);
+      }
+    })();
     // ★ 槽位来源（定稿）：三行 —— 总数 / 机型清单里的 / 本机扫描补的
     //   「槽位总数」是这两项之和，也就是设备上的全部槽位（安装时扫出来的，不随开关变）；
     //   而上面那行「已替换槽位」是**这次计划替换**的数量（受「保留锁屏时钟」等开关影响）。
-    //   作者反馈过"69+82 为什么不等于 119" —— 就是这两个口径不同造成的误解。
+    //   实测过"69+82 为什么不等于 119" —— 就是这两个口径不同造成的误解。
     (function () {
       const rowT = document.getElementById("ssRowTotal");
       const rowX = document.getElementById("ssRowX");
@@ -2444,6 +2563,16 @@ function applyStatus(st) {
         : totalN + " 个");
       setValue("ssX", x + " 个");
       setValue("ssExtra", modSlots + " 个");
+      const _ckT = parseInt(String(g("CK") || "0").trim(), 10) || 0;
+      const _ctT = parseInt(String(g("CT") || "0").trim(), 10) || 0;
+      const _ttT = parseInt(String(g("TT") || "0").trim(), 10) || 0;
+      const _nT = parseInt(String(nSlots || "0").trim(), 10) || 0;
+      const _clockT = _ckT > 0 ? _ckT : _ctT;
+      if (_clockT > 0 && _nT > 0) {
+        const _totT = _nT + (_ckT > 0 ? 0 : _clockT);
+        const _ord = Math.max(0, _totT - _clockT - _ttT);
+        setValue("ssTotal", _totT + " 个（普通 " + _ord + " + 中文合集 " + _ttT + " + 锁屏 " + _clockT + "）");
+      }
     })();
     document.getElementById("rescueBanner").classList.toggle("show", g("X") === "1");
     document.getElementById("stoppedBanner").classList.toggle("show", g("RS") === "1");
@@ -2500,8 +2629,9 @@ function applyStatus(st) {
     {
       const kl = g("KL").trim();
       if (kl === "0" || kl === "1") settings.keep_lockscreen = kl;
-      const swEl = document.getElementById("sw_keep_lockscreen");
-      if (swEl && (kl === "0" || kl === "1")) swEl.classList.toggle("on", kl === "1");
+      if (kl === "0" || kl === "1") settings.replace_lockscreen = (kl === "0" ? "1" : "0");
+      const swEl = document.getElementById("sw_replace_lockscreen");
+      if (swEl && (kl === "0" || kl === "1")) swEl.classList.toggle("on", kl === "0");
       // ★ 2026-10-24：中文合集替换开关的当前值（后端生效值）
       const tr = String(g("TR") || "").trim();
       if (tr === "0" || tr === "1") settings.ttc_replace = tr;
@@ -2556,14 +2686,14 @@ function applyStatus(st) {
       vl.classList.remove("warn", "ok");
       if (vf[0] !== "" && +vf[1] > 0) {
         const hitN = +vf[0], planN = +vf[1];
-        // ★ 2026-11-01（作者要求，与主项目同版）：计划比本次开机新（拨了开关/
+        // ★ 2026-11-01（设计，与主项目同版）：计划比本次开机新（拨了开关/
         //   换了字体还没重启）时，数字口径固定为"左边 = 当前实际生效，
         //   重启后才更新成新计划的数量"，避免 154/121 这种看着像算错的显示。
         //   ★ v24：「已生效」改读开机快照 BN —— apply 会当场把 payload 换成
         //   新计划，VF 的 hit 跟着变，两个数会"一起改"；快照在重启前纹丝不动。
         if (g("PD").trim() === "1") {
           const bnN = parseInt((g("BN") || "").trim(), 10) || hitN;
-          setValue("verifyLabel", "已生效 " + bnN + " 个 · 新计划 " + planN + " 个 · 重启后更新");
+          setValue("verifyLabel", "已写入 " + planN + " 个 · 当前挂载 " + bnN + " 个 · 重启后核对");
           vl.classList.add("warn");
           vl.removeAttribute("title");
         } else if (hitN === planN) {
@@ -2712,7 +2842,7 @@ function showFontSheet(id, name, isNone) {
       sheet.append(mkItem("↻", "重新应用这个字体", "apply", () => selectFont(id)));
     } else if (isCur) {
       // 当前在用、但待生效的不是它（= 用户刚改成别的还没重启）
-      // → 这里必须**可点**，否则"切到无字体后切不回来"（作者真机反馈过）
+      // → 这里必须**可点**，否则"切到无字体后切不回来"（开发者真机反馈过）
       sheet.append(mkItem("↩", "改回这个字体", "apply", () => selectFont(id)));
     } else {
       sheet.append(mkItem("✓", "应用这个字体", "apply", () => applyFont(id)));
@@ -6442,7 +6572,7 @@ function render() {
   if (!fonts.length) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = "字体库还是空的，先在下方导入一个字体吧";
+    e.textContent = "字体库还是空的";
     box.append(e);
   }
 
@@ -6483,6 +6613,15 @@ function batchDelete() {
   if (selected.size) deleteFonts([...selected]);
 }
 
+function setOverlayText(el, text) {
+  if (!el) return;
+  const t = el.querySelector("span:last-child");
+  if (t) t.textContent = text;
+}
+function setCardBusyText(card, text) {
+  if (!card) return;
+  setOverlayText(card.querySelector(".overlay"), text);
+}
 function setCardBusy(card, on) {
   if (!card) return;
   const old = card.querySelector(".overlay");
@@ -6491,7 +6630,7 @@ function setCardBusy(card, on) {
   const ov = document.createElement("div");
   ov.className = "overlay";
   const sp = document.createElement("span"); sp.className = "spin";
-  const tx = document.createElement("span"); tx.textContent = "修改中…";
+  const tx = document.createElement("span"); tx.textContent = "准备修改…";
   ov.append(sp, tx);
   card.append(ov);
   card.classList.add("busy");
@@ -6500,21 +6639,126 @@ function setCardBusy(card, on) {
 /* ---------- 切换 / 重命名 / 删除 ---------- */
 // ★ 2026-11-02：异步应用的结果轮询（与主项目同版）—— apply-bg 后台跑，
 //   JS 线程不被冻住；每 0.5 秒读一次状态文件，读到 OK:/ERROR: 即结束。
-async function pollApplyResult(timeoutMs) {
-  const sf = LIB + "/.reapply.state";
+async function pollApplyResult(timeoutMs, onStage, prefix) {
+  const sf = LIBROOT + "/state/reapply.state";
+  const pf = LIBROOT + "/state/apply.state";
   const T0 = Date.now();
+  let _lastToast = "";
   await new Promise(r => setTimeout(r, 600));   // 先给后台一小会再开始问
   while (Date.now() - T0 < (timeoutMs || 180000)) {
     let st = "";
     try { st = String(await ksuExec(`cat ${shq(sf)} 2>/dev/null`) || "").trim(); } catch (e) {}
+    if (typeof onStage === "function") {
+      let ps = "";
+      try { ps = String(await ksuExec(`cat ${shq(pf)} 2>/dev/null`) || "").trim(); } catch (e) {}
+      const stage = (/stage=(\w+)/.exec(ps) || [])[1] || "";
+      const msg = (/^msg=(.+)$/m.exec(ps) || [])[1] || "";
+      let txt = "";
+      if (msg) txt = msg;
+      else if (stage === "plan") txt = "生成挂载计划…";
+      else if (stage === "plan-hit") txt = "命中计划缓存…";
+      else if (stage === "clock") txt = "生成锁屏时钟配套…";
+      else if (stage === "files") txt = "写入字体文件…";
+      else if (stage === "done") txt = "完成，刷新状态…";
+      if (txt) {
+        const shown = prefix ? prefix + "：" + txt : txt;
+        onStage(shown);
+        if (shown !== _lastToast) { _lastToast = shown; showToast(shown, true); }
+      }
+    }
     if (st && st.indexOf("stage=running") !== 0) return st.split("\n")[0];
     await new Promise(r => setTimeout(r, 500));
   }
   return "ERROR:处理超时（后台可能还在跑，稍后看顶部状态）";
 }
 
+async function clockPreflight(id) {
+  // 切换字体前检查这个字体有没有锁屏时钟配套（组合字体按基础字体检查）
+  if (!id || id === "none") return true;
+  let st = "";
+  try { st = String(await ksuExec(`sh ${MODDIR}/fontctl.sh clock-check ${shq(id)}`) || ""); } catch (e) { return true; }
+  const gv = k => ((st.match(new RegExp("^" + k + "=(.*)$", "m")) || [])[1] || "").trim();
+  if (gv("CE") !== "1") return true;
+  const plugin = gv("PLUGIN") === "1";
+  const pcode = parseInt(gv("PLUGIN_CODE") || "0", 10) || 0;
+  if (!plugin || pcode < 10000) {
+    await dialog({
+      title: plugin ? "字体工具箱版本过低" : "需要先安装 porsche 字体工具箱",
+      msg: plugin
+        ? "锁屏时钟需要 porsche 字体工具箱 1.0 或以上。\n\n当前 code：" + pcode + "。\n\n请先更新插件。"
+        : "锁屏时钟配套必须由 porsche 字体工具箱生成。\n\n请到「高级设置 → 字体工具箱」安装插件后再切换。\n\n现在会关闭锁屏时钟开关，普通字体继续切换。",
+      okText: "知道了"
+    });
+    try {
+      await ksuExec(`sh ${MODDIR}/fontctl.sh settings set replace_lockscreen 0`);
+      settings.replace_lockscreen = "0";
+    } catch (e) {}
+    return true;
+  }
+  const ct = parseInt(gv("CT") || "0", 10) || 0;
+  const cg = parseInt(gv("CG") || "0", 10) || 0;
+  if (ct <= 0 || cg >= ct) return true;
+  const ans = await dialog({
+    title: "这个字体没有完整的锁屏时钟配套",
+    msg: "当前锁屏时钟替换是打开的。\n\n"
+       + "这个字体需要生成 " + ct + " 个时钟配套，已经生成 " + cg + " 个。\n\n"
+       + "【生成配套并切换】\n"
+       + "· 为这个字体生成全部 " + ct + " 个时钟配套\n"
+       + "· 显示生成进度 3/" + ct + " …\n"
+       + "· 完成后切换字体，并提示重启\n"
+       + "· 生成期间不要退出或重复点\n\n"
+       + "【关闭时钟并切换】\n"
+       + "· 只换普通字体，锁屏时钟保持系统原样\n"
+       + "· 这个开关会被关闭，之后需要手动重新打开\n\n"
+       + "【取消】\n"
+       + "· 不切换，保持当前字体",
+    okText: "生成配套并切换",
+    altText: "关闭时钟并切换",
+    cancelFirst: true
+  });
+  if (ans === null) return false;
+  if (ans === "alt") {
+    try {
+      const o = String(await ksuExec(`sh ${MODDIR}/fontctl.sh settings set replace_lockscreen 0`) || "");
+      if (/^\s*ERROR/.test(o)) throw new Error(o.trim());
+      settings.replace_lockscreen = "0";
+      showToast("已关闭锁屏时钟替换，继续切换");
+    } catch (e) {
+      showToast("关闭开关失败：" + errText(e), true, 8000);
+      return false;
+    }
+    return true;
+  }
+  try {
+    const o = String(await ksuExec(`sh ${MODDIR}/fontctl.sh clock-gen-bg ${shq(id)}`) || "");
+    if (/^\s*ERROR/.test(o) || !/^OK:clock-gen-bg/m.test(o)) throw new Error(o.trim() || "启动生成失败");
+    let lastTxt = "", done = false;
+    for (let i = 0; i < 240 && !done; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      let s = "";
+      try { s = String(await ksuExec(`sh ${MODDIR}/fontctl.sh clock-gen-state ${shq(id)}`) || ""); } catch (e) {}
+      const sm = s.match(/stage=(\w+)\s+(\d+)\/(\d+)\s*(.*)/);
+      if (sm) {
+        if (sm[1] === "done") { done = true; break; }
+        const txt = "正在生成锁屏时钟 " + sm[2] + "/" + sm[3] + (sm[4] ? "  " + sm[4] : "");
+        if (txt !== lastTxt) { lastTxt = txt; showToast(txt, false, 3000); }
+      } else if (/stage=error/.test(s)) {
+        throw new Error(s.trim());
+      }
+    }
+    if (!done) throw new Error("生成超时，请查看 state/logs/clock.log");
+    window.__clockGenerated = true;
+    showToast("锁屏时钟配套已生成，继续切换");
+    return true;
+  } catch (e) {
+    showToast("时钟配套生成失败：" + errText(e), true, 9000);
+    return false;
+  }
+}
+
 async function selectFont(id) {
   if (busy) return;
+  if (!(await clockPreflight(id))) return;
   const big = selIds(id).map(x => fonts.find(f => f.id === x)).filter(f => f && f.size >= HUGE_FONT);
   if (big.length) {
     const f = big[0];
@@ -6528,8 +6772,9 @@ async function selectFont(id) {
   }
   busy = true;
   const card = document.querySelector('.option[data-id="' + id + '"]');
+  const _fSel = fonts.find(f => f.id === id);
   setCardBusy(card, true);
-  showToast("修改中…", true);
+  showToast("正在切换到「" + (_fSel ? _fSel.name : id) + "」…", true);
   await nextPaint();
   // ★ 2026-10-23：看门狗 —— apply 走的是同步 exec，卡住时界面会永远停在"修改中"
   let __applyDone = false;
@@ -6545,8 +6790,8 @@ async function selectFont(id) {
   }, 180000);
   try {
     // ★ 2026-11-02：改异步（与主项目同版）—— apply-bg 立即返回、后台真跑、这里轮询
-    await ksuExec(`sh ${MODDIR}/fontctl.sh apply-bg ${shq(id)}`);
-    const out = await pollApplyResult();
+    await ksuExec(`CFS_ALLOW_TTC=1 sh ${MODDIR}/fontctl.sh apply-bg ${shq(id)}`);
+    const out = await pollApplyResult(900000, txt => setCardBusyText(card, txt), "正在切换字体");
     // ★ 2026-10-18 修：返回值末尾可能带 `:kl=N`（do_apply 附带的诊断字段），
     //   这里以前没接受它 → 后端明明成功、界面却提示"切换失败"（真机实测）。
     // ★ 2026-10-23（ColorOS 真机）：后端返回 "OK:无字体（系统默认）:0:none:" ——
@@ -6580,23 +6825,17 @@ async function selectFont(id) {
   } finally {
     __applyDone = true;
     try { clearTimeout(__applyWd); } catch (e) {}
-    busy = false;
-    try { setCardBusy(card, false); } catch (e) {}
-    // ★ 2026-10-23：切完字必须**立刻**让界面更新。
-    //   原来只调 refreshAll()，但它开头 `if (refreshBusy) return;` ——
-    //   撞上别的刷新在跑就直接返回（还不抛错），界面停在旧状态。
-    //   顺序：先本地乐观更新 → 再直刷顶部 → 再全量 → 最后再兜一次。
-    // 只改 pending（待重启生效）；active 保持『本次开机实际生效』不变
-    // ★ 2026-10-30（性能）：apply 的返回值已带槽位数/范围，顶部状态由 refreshAll(quick)
-    //   补齐即可；紧跟的那次完整 status 砍掉（挂载/验证状态不会因为"写计划"而变，
-    //   每次完整 status 都要重新加载一遍后端脚本）。1.2 秒后的那次保留 —— 它负责
-    //   把 VF/MO/verify 这些重字段刷准。
-    try { pendingId = id; render(); } catch (e) {}
-    // ★ 2026-11-03：force —— 撞上在跑的刷新时等它结束再补一次，不再被静默吞掉
+    // 保持 busy=true 和转圈遮罩，直到 refreshAll 结束：
+    // 否则会出现「卡片已经显示待生效，遮罩还写着修改中，顶部状态还是旧的」。
     try { await refreshAll(true); } catch (e) {}
-    // ★ 2026-11-03：结果提示最后弹（与主项目同版）—— 刷新期间线程被冻结，
-    //   定时器不走、提示超时挂着；现在刷新完了再弹，3 秒就是 3 秒。
     if (_selMsg) showToast(_selMsg, false, 3000);
+    if (!/^切换失败/.test(_selMsg || "")) {
+      try { pendingId = id; render(); } catch (e) {}
+    }
+    try { setCardBusy(card, false); } catch (e) {}
+    busy = false;
+    // 三个地方同一时刻收口：卡片、遮罩、状态卡
+    try { await refreshStatusOnly(); } catch (e) {}
     setTimeout(() => { try { refreshStatusOnly(); } catch (e) {} }, 1200);
   }
 }
@@ -7170,7 +7409,7 @@ const IMP_SAMPLES = [
 
 // 真正的下拉菜单：点「xxx ▾」弹出一个文件列表，点哪一行就预览哪个
 /* ---------- 替换范围设置 / 诊断 ---------- */
-const settings = {mount_mode: "self", theme_fonts: "0", keep_lockscreen: "0"};   // 1.0.9：只剩这两个开关；v1.1.1 加了「保留锁屏时钟字体」
+const settings = {mount_mode: "self", theme_fonts: "0", keep_lockscreen: "1", replace_lockscreen: "0"};
 /* ★ 2026-10-25：开关状态本地缓存 —— 打开页面先用它渲染，之后再用 shell 校验覆盖 */
 const SET_CACHE_KEY = "cfs_settings_cache";
 let SET_VERIFIED = "0";   // "1" = 本次已从模块读到；"0" = 显示的是上次记录
@@ -7205,7 +7444,7 @@ async function loadSettings() {
     const out = await ksuExec(`sh ${MODDIR}/fontctl.sh settings`);
     (out.match(/(\w+)=(\S+)/g) || []).forEach(kv => { const i = kv.indexOf("="); settings[kv.slice(0, i)] = kv.slice(i + 1); });
   } catch (e) {}
-  ["theme_fonts", "keep_lockscreen"].forEach(k => {
+  ["theme_fonts", "keep_lockscreen", "replace_lockscreen"].forEach(k => {
     const el = document.getElementById("sw_" + k);
     if (el) el.classList.toggle("on", settings[k] === "1");
   });
@@ -7317,7 +7556,7 @@ const ADV_TREE = [
             + "这里能看到它做了什么、有没有失败。",
         hint: "字体在系统更新后没生效，先看这里。", safe: 1, cmd: "otareport" },
 
-      { id: "export", name: "把现场打包发给作者", desc: "作者要你提供情况时，用这里的第一个就够了", children: [
+      { id: "export", name: "把现场打包发给开发者", desc: "开发者要你提供情况时，用这里的第一个就够了", children: [
         { id: "pack", name: "打个包（推荐先点这个）",
           desc: "把「这台机器换了哪些字体、开机时挂没挂上、报了什么错、你的设置」全部装进一个压缩包，存到手机的 Download 文件夹。",
           hint: "只发这一个文件就够，不用截图、不用打一大堆字。",
@@ -7524,9 +7763,19 @@ const ADV_TREE = [
           safe: 3, cmd: "rescanAll" },
         { id: "prewarm_all", name: "预生成切换计划 + 中文合集（秒切准备）",
           desc: "把字体库里每份字体的切换计划和中文合集产物提前做好并永久保存（每字体几秒到几十秒）。",
-          hint: "做完之后切任何字体都是秒级。升级模块 / 改开关 / 导入新字体后点一次即可（平时会自动做）。",
+          hint: "做完之后切任何字体都是秒级。升级模块 / 改开关 / 换字体后点一次即可（平时会自动做）。",
           safe: 2, cmd: "prewarm-all" },
       ]},
+    ]
+  },
+  {
+    id: "cache_mgr", name: "缓存管理",
+    desc: "TTC 合集和锁屏时钟文件分开管理。删除只影响缓存，不会删掉字体库里的字体。",
+    hint: "只保留当前：换字体后清掉上一套；全部保留：切换更快，占空间更多。",
+    children: [
+      { id: "cache_ttc", name: "TTC 合集缓存", desc: "按字体查看已合成中文合集。", cmd: "ttcCacheUI", safe: 0 },
+      { id: "cache_clock", name: "锁屏时钟文件", desc: "查看已生成的锁屏时钟配套。", cmd: "clockCacheUI", safe: 0 },
+      { id: "cache_residue", name: "清理残留缓存", desc: "清理字体库里已删除字体留下的缓存。", cmd: "cacheResidue", safe: 1 },
     ]
   },
   {
@@ -8161,6 +8410,10 @@ function uiToggleLightDark() {
 /* ★ 2026-10-25 头部：关闭键靠右、子页隐藏锁定 */
 (function cfsHeaderFix() {
   function apply() {
+    if (!window.__fontPackStateInit) {
+      window.__fontPackStateInit = 1;
+      setTimeout(function () { try { fontPackState(); } catch (e) {} }, 600);
+    }
     ["advSheet", "advConSheet"].forEach(function (id) {
       var s = document.getElementById(id);
       if (!s) return;
@@ -8291,11 +8544,13 @@ function advAccentHelp() {
    安装号变了 = 新安装 → 清掉本地界面设置（含壁纸），回到默认外观。 */
 async function cfsCheckInstallId() {
   try {
-    const cur = String(await ksuExec(`cat ${LIB}/.install_id 2>/dev/null`) || "").trim();
+    const cur = String(await ksuExec(`cat ${LIBROOT}/state/install_id 2>/dev/null`) || "").trim();
     if (!cur) return;
+    const mode = String(await ksuExec(`cat ${LIBROOT}/state/install_mode 2>/dev/null`) || "").trim();
     const old = localStorage.getItem("cf_install_id") || "";
     if (old === cur) return;
     localStorage.setItem("cf_install_id", cur);
+    if (mode !== "fresh") return;
     if (old) {
       // 不是首次运行，而是"重装/更新"：把界面与壁纸重置
       try { localStorage.removeItem(UI_KEY); } catch (e) {}
@@ -8317,7 +8572,7 @@ function uiSave() {
   //   shell 参数里没有引号/特殊字符，单条 printf 就能写（体积才 1~2KB）。
   try {
     const _b = btoa(unescape(encodeURIComponent(JSON.stringify(UI))));
-    ksuExec("printf '%s' '" + _b + "' | base64 -d > " + LIB + "/ui.json 2>/dev/null").catch(() => {});
+    ksuExec("printf '%s' '" + _b + "' | base64 -d > " + LIBROOT + "/ui.json 2>/dev/null").catch(() => {});
   } catch (e) {}
   uiApply();
 }
@@ -8386,6 +8641,10 @@ function uiHideManual(hide) {
 function uiHideRange(titleKey, hide) {
   document.querySelectorAll(".section-title").forEach(t => {
     if (String(t.textContent || "").indexOf(titleKey) < 0) return;
+    const _prevDiv = t.previousElementSibling;
+    if (_prevDiv && _prevDiv.classList && _prevDiv.classList.contains("divider")) {
+      _prevDiv.style.display = hide ? "none" : "";
+    }
     let el = t, n = 0;
     while (el && n < 120) {
       // ★ 高级设置入口/它的分割线永远不跟着隐藏，否则锁上就再也进不来
@@ -8432,7 +8691,7 @@ function uiNormalizeDividers() {
 }
 
 function uiApplySections() {
-  uiHideRange("模块更新（GitHub）", UI.hideUpdate === "1" || UI.simple === "1");
+  uiHideRange("模块更新", UI.hideUpdate === "1" || UI.simple === "1");
   uiHideRange("Google 应用改用系统字体", UI.hideGoogle === "1" || UI.simple === "1");
   uiHideManual(UI.hideManual === "1" || UI.simple === "1");
   try { uiNormalizeDividers(); } catch (e) {}
@@ -8472,7 +8731,7 @@ async function uiPickBg() {
     let f = inp.files && inp.files[0];
     try { inp.remove(); } catch (e) {}
     if (!f) return;
-    // ★ 2026-10-26 按作者要求：原图直接导入，不压缩
+    // ★ 2026-10-26 按设计：原图直接导入，不压缩
     //   上限放宽到 24MB（再大分块写入会明显变慢，属于保护而非限制）
     const BG_MAX = 24 * 1024 * 1024;
     if (f.size > BG_MAX) { showToast("这张图超过 24MB，换一张吧"); return; }
@@ -8503,7 +8762,7 @@ async function uiPickBg() {
       sz = parseInt(String(await ksuExec("wc -c < " + MODDIR + "/webroot/bg.jpg")).trim(), 10) || 0;
       if (sz < 1000) ok = false;
       // 正本落永久目录
-      if (ok) await ksuExec("cp -f " + MODDIR + "/webroot/bg.jpg " + LIB + "/bg.jpg 2>/dev/null; chmod 644 " + LIB + "/bg.jpg 2>/dev/null");
+      if (ok) await ksuExec("cp -f " + MODDIR + "/webroot/bg.jpg " + LIBROOT + "/bg.jpg 2>/dev/null; chmod 644 " + LIBROOT + "/bg.jpg 2>/dev/null");
     } catch (e) { ok = false; }
     if (!ok) { showToast("壁纸写不进去（" + sz + " 字节），换一张试试"); return; }
     UI.bg = "./bg.jpg";
@@ -8520,7 +8779,7 @@ async function uiClearBg() {
   try { setTimeout(() => { if (window.advRender) advRender(); }, 60); } catch (e) {}
   UI.bg = ""; uiSave();
   // ★ 2026-10-31：正本（$LIB）与副本（webroot）一起删
-  try { await ksuExec("rm -f " + MODDIR + "/webroot/bg.jpg " + LIB + "/bg.jpg"); } catch (e) {}
+  try { await ksuExec("rm -f " + MODDIR + "/webroot/bg.jpg " + LIBROOT + "/bg.jpg"); } catch (e) {}
   showToast("背景已清除");
 }
 
@@ -8803,6 +9062,911 @@ function advRender() {
   advSync();
 }
 
+
+async function engineStatusRaw() {
+  let st = "";
+  try { st = String(await ksuExecTO(`sh ${MODDIR}/engine.sh status`, 5000) || ""); } catch (e) {}
+  if (!/INSTALLED=1/.test(st)) {
+    // 有些 WebUI 的 ksu.exec 以 shell 身份运行，engine.sh 读不到 root 目录；显式走 su
+    try { st = String(await ksuExecTO(`su -c ${shq(`sh ${MODDIR}/engine.sh status`)}`, 5000) || ""); } catch (e) {}
+  }
+  if (/INSTALLED=1/.test(st)) return st;
+  // shell 域读不到 /data/adb，用 root 安装时写出的公开状态文件
+  try {
+    const m = String(await ksuExecTO(`cat /data/local/tmp/cfs-porsche.engine 2>/dev/null`, 4000) || "");
+    if (/INSTALLED=1/.test(m)) return m;
+  } catch (e) {}
+  // 兜底：模块入口读不到时，直接看插件目录（只影响状态显示，不代替安装）
+  for (const d of [LIBROOT + "/state/engine", LIBROOT + "/plugin", LIBROOT + "/engine"]) {
+    try {
+      const p = String(await ksuExecTO(`su -c ${shq(`test -x "${d}/bin/run" && { echo INSTALLED=1; sed -n "s/^version=//p" "${d}/plugin.prop" 2>/dev/null | sed "s/^/VERSION=/"; sed -n "s/^build=//p" "${d}/plugin.prop" 2>/dev/null | sed "s/^/BUILD=/"; }`)}`, 4000) || "");
+      if (/INSTALLED=1/.test(p)) return p;
+    } catch (e) {}
+  }
+  // 命令完全失败时用上次成功状态（跟主项目的 localStorage 缓存一致）
+  if (!/INSTALLED=/.test(st)) {
+    try {
+      const c = localStorage.getItem("cfs_porsche_engine");
+      if (c) return c;
+    } catch (e) {}
+  }
+  return st;
+}
+function porscheApplyCachedStatus() {
+  try {
+    const st = localStorage.getItem("cfs_porsche_engine") || "";
+    if (!/INSTALLED=1/.test(st)) return;
+    const ins = true;
+    const ver = (st.match(/^VERSION=(.*)$/m) || [])[1] || "";
+    const cur = document.getElementById("porscheCurLabel");
+    if (cur) {
+      cur.textContent = "v" + (ver || "?");
+      cur.className = "value";
+    }
+    const toolsTitle = document.getElementById("porscheToolsSection");
+    const toolsEntry = document.getElementById("porscheToolsEntry");
+    const toolsCheck = document.getElementById("porscheCheckFontEntry");
+    if (toolsTitle) toolsTitle.style.display = "";
+    if (toolsEntry) toolsEntry.style.display = "";
+    if (toolsCheck) toolsCheck.style.display = "";
+    const unb = document.getElementById("porscheUninstallBtn");
+    if (unb) unb.style.display = "";
+    for (const id of ["porscheCheckBtn", "porscheLogBtn"]) {
+      const b = document.getElementById(id);
+      if (b) b.style.display = "";
+    }
+  } catch (e) {}
+}
+
+async function porscheRefreshStatus() {
+  let st = await engineStatusRaw();
+  const ins = /INSTALLED=1/.test(st);
+  try {
+    if (ins) localStorage.setItem("cfs_porsche_engine", st);
+    else if (/INSTALLED=0/.test(st)) localStorage.removeItem("cfs_porsche_engine");
+  } catch (e) {}
+  const ver = (st.match(/^VERSION=(.*)$/m) || [])[1] || "";
+  const cur = document.getElementById("porscheCurLabel");
+  if (cur) {
+    cur.textContent = ins ? ("v" + (ver || "?")) : "未安装";
+    cur.className = "value" + (ins ? "" : " off");
+  }
+  const toolsTitle = document.getElementById("porscheToolsSection");
+  const toolsEntry = document.getElementById("porscheToolsEntry");
+  const toolsCheck = document.getElementById("porscheCheckFontEntry");
+  if (toolsTitle) toolsTitle.style.display = ins ? "" : "none";
+  if (toolsEntry) toolsEntry.style.display = ins ? "" : "none";
+  if (toolsCheck) toolsCheck.style.display = ins ? "" : "none";
+  const unb = document.getElementById("porscheUninstallBtn");
+  if (unb) unb.style.display = ins ? "" : "none";
+  const cb = document.getElementById("porscheCheckBtn");
+  const lb = document.getElementById("porscheLogBtn");
+  if (cb) cb.style.display = ins ? "" : "none";
+  if (lb) lb.style.display = ins ? "" : "none";
+  return { ins, ver };
+}
+async function porscheClockRender() {
+  const out = document.getElementById("advConOut");
+  if (!out) return;
+  let st = "";
+  try { st = await engineStatusRaw(); } catch (e) { st = ""; }
+  const ins = /INSTALLED=1/.test(st);
+  const ver = (st.match(/^VERSION=(.*)$/m) || [])[1] || "";
+  let on = "0";
+  try {
+    const g = String(await ksuExec(`grep '^replace_lockscreen=' ${MODDIR}/settings.conf 2>/dev/null || true`) || "");
+    if (/replace_lockscreen=1/.test(g)) on = "1";
+  } catch (e) {}
+  let ct = 0, cg = 0, ready = false, cid = "";
+  try {
+    cid = String(await ksuExec(`cat ${MODDIR}/pending_font 2>/dev/null || cat ${MODDIR}/active_font 2>/dev/null`) || "").trim();
+    if (!cid || cid === "none") cid = String(await ksuExec(`cat ${MODDIR}/active_font 2>/dev/null`) || "").trim();
+    if (cid && cid !== "none") {
+      const cs = String(await ksuExec(`sh ${MODDIR}/fontctl.sh clock-check ${shq(cid)} 2>/dev/null`) || "");
+      ct = parseInt((cs.match(/^CT=(\d+)/m) || [])[1] || "0", 10) || 0;
+      cg = parseInt((cs.match(/^CG=(\d+)/m) || [])[1] || "0", 10) || 0;
+      ready = /^READY=1/m.test(cs);
+    }
+  } catch (e) {}
+  const clockState = ct > 0 ? (cg + "/" + ct + (ready ? "（完整）" : "（未完整）")) : "无时钟槽位";
+  const row1 = (ins ? '<button class="g-btn" onclick="porscheClockCheck()">检查更新</button>' : '')
+    + (ins ? '<button class="g-btn" onclick="porscheClockChangelog()">更新日志</button>' : '')
+    + '<button class="g-btn" onclick="porscheClockUpdate()">下载并安装</button>';
+  const row2 = (!ins ? '<button class="g-btn" onclick="porscheClockPickZip()">从本地安装</button>' : '')
+    + (ins ? '<button class="g-btn" onclick="porscheClockGen()">生成/补齐配套</button>' : '')
+    + (ins ? '<button class="g-btn" onclick="porscheClockUninstall()">卸载插件</button>' : '');
+  out.innerHTML = '<div style="line-height:2">插件：<b>' + (ins ? ("已安装 v" + (ver || "?")) : "未安装") + '</b><br>'
+    + '锁屏时钟：<b>' + (on === "1" ? "已开启" : "未开启") + '</b><br>'
+    + '当前字体配套：<b>' + clockState + '</b><br>'
+    + '<span style="opacity:.7;font-size:12px">更新信息走阿里云；插件包下载走 GitHub，也可从 Download 本地安装 fontlab-engine-porsche*.zip</span></div>'
+    + '<div class="btn-row" style="margin-top:12px">' + row1 + '</div>'
+    + (row2 ? '<div class="btn-row">' + row2 + '</div>' : '');
+  porscheRefreshStatus().catch(() => {});
+}
+async function porscheClockGen() {
+  const out = document.getElementById("advConOut");
+  try {
+    const cid = String(await ksuExec(`cat ${MODDIR}/pending_font 2>/dev/null || cat ${MODDIR}/active_font 2>/dev/null`) || "").trim();
+    if (!cid || cid === "none") { showToast("先选一个字体再生成配套", false, 5000); return; }
+    showToast("正在生成锁屏时钟配套…", false, 120000);
+    await ksuExec(`sh ${MODDIR}/fontctl.sh clock-gen-bg ${shq(cid)}`);
+    for (let i = 0; i < 240; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      let cs = "";
+      try { cs = String(await ksuExec(`sh ${MODDIR}/fontctl.sh clock-check ${shq(cid)} 2>/dev/null`) || ""); } catch (e) {}
+      const ct = parseInt((cs.match(/^CT=(\d+)/m) || [])[1] || "0", 10) || 0;
+      const cg = parseInt((cs.match(/^CG=(\d+)/m) || [])[1] || "0", 10) || 0;
+      if (out && /^READY=1/m.test(cs)) {
+        out.insertAdjacentHTML("afterbegin", '<div class="g-hint" style="margin-bottom:6px">锁屏时钟配套已生成：' + cg + "/" + ct + '</div>');
+        showToast("锁屏时钟配套已生成", false, 5000);
+        return;
+      }
+    }
+    showToast("生成可能仍在后台继续，稍后再看配套数量", false, 8000);
+  } catch (e) { showToast("生成失败：" + errText(e), false, 7000); }
+}
+
+async function porscheRefreshLatest(silent) {
+  const ll = document.getElementById("porscheLatestLabel");
+  if (!ll) return;
+  const st = await engineStatusRaw();
+  if (!/INSTALLED=1/.test(st)) {
+    ll.textContent = "未检查";
+    ll.className = "value off";
+    return;
+  }
+  if (!silent) { ll.textContent = "检查中…"; ll.className = "value off"; }
+  try {
+    const o = String(await ksuExecTO(`sh ${MODDIR}/engine.sh check-update`, 15000) || "");
+    const latest = (o.match(/^LATEST=(.*)$/m) || [])[1] || "";
+    const has = /HAS_UPDATE=1/.test(o);
+    if (!latest) {
+      ll.textContent = "未检查";
+      ll.className = "value off";
+      if (!silent) showToast("没有拿到插件版本信息", false, 6000);
+      return;
+    }
+    ll.textContent = "v" + latest + (has ? "（可更新）" : "（已是最新）");
+    ll.className = "value " + (has ? "active" : "off");
+    if (!silent) showToast(has ? ("发现插件新版 " + latest) : "插件已是最新版本", false, 5000);
+  } catch (e) {
+    ll.textContent = "检查失败（可能要梯子）";
+    ll.className = "value off";
+    if (!silent) showToast("检查失败：" + errText(e), false, 7000);
+  }
+}
+async function porscheClockCheck() {
+  await porscheRefreshLatest(false);
+}
+async function porscheClockUpdate() {
+  if (!window.confirm("从 GitHub 下载并安装最新 porsche 插件？\n约 27MB，国内可能需要 VPN。")) return;
+  showToast("正在下载插件，请稍等…", false, 10000);
+  try {
+    const o = String(await ksuExec(`sh ${MODDIR}/engine.sh install-latest`) || "");
+    if (/^\s*ERROR/.test(o)) throw new Error(o.replace(/^\s*ERROR:?/, "").trim());
+    showToast("插件更新完成", false, 6000);
+    await porscheClockRender();
+  } catch (e) { showToast("更新失败：" + errText(e), true, 9000); }
+}
+let PORSCHE_TOOLS = [
+  { id: "doctor",   name: "字体文件体检", desc: "PS 名、family、空格、中文、OS/2、表结构" },
+  { id: "info",     name: "字体信息 / 授权", desc: "版本、版权、许可证、厂商、设计者" },
+  { id: "analyze",  name: "体积分析", desc: "看哪些表占空间" },
+  { id: "tables",   name: "深度表解析", desc: "逐表检查偏移/长度/能否解析" },
+  { id: "recommend", name: "机型适配建议", desc: "按中文覆盖/字重/VF 给建议" },
+];
+let porscheToolBusy = false;
+
+async function porscheCurrentFontPath() {
+  let id = String(await ksuExec(`cat ${MODDIR}/active_font 2>/dev/null`) || "").trim();
+  if (!id) id = "none";
+  const cands = [BUILTINDIR + "/" + id + ".ttf", LIB + "/builtin_" + id + ".ttf", LIB + "/" + id + ".ttf"];
+  for (const p of cands) {
+    try {
+      if (String(await ksuExec(`test -f ${shq(p)} && echo 1`) || "").includes("1")) return p;
+    } catch (e) {}
+  }
+  return "";
+}
+
+
+/* ---------------- 字体包更新（内置字体独立于模块） ---------------- */
+let FONT_PACK_LATEST = null;
+
+function fontPackVariant() {
+  const id = String(MODULE_HINT || "");
+  if (id.indexOf("718") >= 0) return "718";
+  if (id.indexOf("911") >= 0) return "911";
+  if (id.indexOf("gt3") >= 0) return "gt3";
+  return "multi";
+}
+function fontPackMetaBase() {
+  return "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/" + fontPackVariant();
+}
+async function fontPackState() {
+  let st = {};
+  try {
+    const raw = String(await ksuExecTO(`sh ${MODDIR}/fontpack.sh state 2>/dev/null`, 4000) || "");
+    const a = raw.indexOf("{"); const b = raw.lastIndexOf("}");
+    if (a >= 0 && b > a) st = JSON.parse(raw.slice(a, b + 1));
+  } catch (e) {}
+  const el = document.getElementById("fontPackCurLabel");
+  if (el) {
+    el.textContent = st.version ? (st.version + (st.variant ? " · " + st.variant : "")) : "v1.0";
+    el.className = "value";
+  }
+  return st;
+}
+async function fontPackCheck(manual) {
+  const lbl = document.getElementById("fontPackLatestLabel");
+  if (manual && lbl) { lbl.textContent = "检查中…"; lbl.className = "value off"; }
+  try {
+    const u = fontPackMetaBase() + "/font.json?t=" + Date.now();
+    const rr = await fetch(u, { cache: "no-store" });
+    if (!rr.ok) throw new Error("HTTP " + rr.status);
+    const j = await rr.json();
+    if (!j || !j.versionCode) throw new Error("字体包元数据无效");
+    FONT_PACK_LATEST = j;
+    const cur = await fontPackState();
+    const has = (parseInt(j.versionCode, 10) || 0) > (parseInt(cur.versionCode, 10) || 0);
+    if (lbl) {
+      lbl.textContent = String(j.version || "") + (has ? "（可更新）" : "（已是最新）");
+      lbl.className = "value " + (has ? "active" : "off");
+    }
+    if (manual) showToast(has ? "发现字体包新版 " + (j.version || "") : "字体包已是最新版本", false, 5000);
+  } catch (e) {
+    if (lbl) { lbl.textContent = "检查失败"; lbl.className = "value off"; }
+    if (manual) showToast("字体包检查失败：" + errText(e), false, 6000);
+  }
+}
+async function fontPackChangelog() {
+  try {
+    const j = FONT_PACK_LATEST || {};
+    const u = j.changelog || (fontPackMetaBase() + "/FONT-CHANGELOG.md");
+    const rr = await fetch(u + (u.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
+    const o = String(await rr.text() || "");
+    await dialog({ title: "字体更新日志", msg: o.slice(0, 16000) || "还没有字体更新日志。", okText: "知道了" });
+  } catch (e) {
+    await dialog({ title: "字体更新日志", msg: "读取失败：" + errText(e), okText: "知道了" });
+  }
+}
+async function fontPackInstallMenu() {
+  const ans = await dialog({
+    title: "安装字体包",
+    msg: "可以选择从 GitHub 下载，也可以导入网盘/本地下载好的签名 zip。\n\n注意：不是签名包会被拒绝。",
+    select: { label: "安装方式", options: [["github", "从 GitHub 下载并安装"], ["local", "从本地导入字体包"]], value: "github" },
+    okText: "继续"
+  });
+  if (!ans) return;
+  if (ans.sel === "local") return fontPackInstallLocal();
+  return fontPackInstallGitHub();
+}
+async function fontPackInstallLocal() {
+  const p = await dialog({
+    title: "本地导入字体包",
+    msg: "填写字体包 zip 的完整路径，例如 /sdcard/Download/porsche-fonts-multi-v1.0.zip",
+    input: "/sdcard/Download/",
+    okText: "导入"
+  });
+  if (!p) return;
+  await fontPackInstallFile(String(p).trim());
+}
+async function fontPackInstallGitHub() {
+  if (!FONT_PACK_LATEST) await fontPackCheck(false);
+  const j = FONT_PACK_LATEST;
+  if (!j || !j.zipUrl) { showToast("先检查字体更新", false, 5000); return; }
+  if (!(await dialog({
+    title: "安装字体包 " + (j.version || ""),
+    msg: "将从 GitHub 下载签名字体包，校验后替换内置字体。\n\n安装后会清空 TTC、时钟和计划缓存，并提示重新应用。",
+    okText: "下载并安装"
+  }))) return;
+  const name = String(j.zipUrl).split("/").pop().split("?")[0] || ("porsche-fonts-" + fontPackVariant() + ".zip");
+  const path = "/sdcard/Download/" + name;
+  showToast("正在下载字体包…", true);
+  try {
+    const out = String(await ksuExecTO(`mkdir -p /sdcard/Download; curl -L --connect-timeout 10 -m 300 -o ${shq(path)} ${shq(j.zipUrl)} 2>&1`, 330000) || "");
+    if (out && /error|failed|Could not/i.test(out) && !/100\s+100/i.test(out)) throw new Error(out.slice(-200));
+    clearToast();
+    await fontPackInstallFile(path);
+  } catch (e) {
+    clearToast();
+    showToast("字体包下载失败：" + errText(e), false, 8000);
+  }
+}
+async function fontPackInstallFile(path) {
+  if (!path) return;
+  if (!(await dialog({
+    title: "安装字体包",
+    msg: "将校验并安装：\n" + path + "\n\n只接受开发者签名的字体包。",
+    okText: "安装"
+  }))) return;
+  showToast("正在校验并安装字体包…", true);
+  let raw = "";
+  try { raw = String(await ksuExecTO(`sh ${MODDIR}/fontpack.sh install ${shq(path)} 2>&1`, 180000) || ""); } catch (e) { raw = "ERROR:" + errText(e); }
+  clearToast();
+  const m = raw.match(/OK:([^\s:]+):(\d+)/);
+  if (!m) { await dialog({ title: "字体包安装失败", msg: raw.trim().slice(0, 12000) || "没有返回结果", okText: "知道了" }); return; }
+  await fontPackState();
+  await dialog({
+    title: "字体包已安装",
+    msg: "字体包 " + m[1] + " 已安装。\n\nTTC、锁屏时钟和计划缓存已清空。\n请重新应用字体或重启后再生效。",
+    okText: "知道了"
+  });
+}
+
+async function porscheToolsUI() {
+  advConFootHide();
+  const sheet = document.getElementById("advConSheet");
+  if (sheet) sheet.classList.add("show");
+  const t = document.getElementById("advConTitle");
+  const h = document.getElementById("advConHint");
+  const out = document.getElementById("advConOut");
+  if (t) t.textContent = "字体工具箱";
+  if (h) { h.style.display = "block"; h.innerHTML = "工具列表和分类由 porsche 插件提供；先点工具，再选择字体。"; }
+  if (!out) return;
+  out.innerHTML = '<div style="padding:10px 0;opacity:.65">正在读取插件界面…</div>';
+
+  let plugin = null, css = "", ui = {};
+  try {
+    const raw = String(await ksuExecTO(`sh ${MODDIR}/engine.sh run ui --json 2>/dev/null`, 8000) || "");
+    const a = raw.indexOf("{");
+    const b = raw.lastIndexOf("}");
+    if (a >= 0 && b > a) plugin = JSON.parse(raw.slice(a, b + 1));
+  } catch (e) {}
+  if (plugin && Array.isArray(plugin.tools) && plugin.tools.length) {
+    PORSCHE_TOOLS = plugin.tools.map(x => ({
+      id: x.act || x.id || "",
+      name: x.name || x.act || "工具",
+      desc: x.desc || "",
+      group: x.g || "检查"
+    })).filter(x => x.id);
+    css = plugin.css || "";
+    ui = plugin.ui || {};
+  }
+  if (css) {
+    let st = document.getElementById("porscheToolCss");
+    if (!st) { st = document.createElement("style"); st.id = "porscheToolCss"; document.head.append(st); }
+    st.textContent = css;
+  }
+
+  let ver = "?", build = "", author = "";
+  try {
+    const est = String(await engineStatusRaw() || "");
+    ver = (est.match(/^VERSION=(.*)$/m) || [])[1] || "?";
+    build = (est.match(/^BUILD=(.*)$/m) || [])[1] || "";
+    author = (est.match(/^AUTHOR=(.*)$/m) || [])[1] || "";
+  } catch (e) {}
+
+  const groups = {};
+  PORSCHE_TOOLS.forEach(x => { (groups[x.group || "工具"] = groups[x.group || "工具"] || []).push(x); });
+  let html = '<div class="g-hint" style="margin:0 0 10px">' + cacheEsc(ui.homeHint || "点工具后选择字体，再执行。") + '</div>';
+  Object.keys(groups).forEach(g => {
+    html += '<div class="ft-group open"><div class="ft-ghead"><span>' + cacheEsc(g) + '</span>'
+      + '<span style="margin-left:auto;color:var(--text-dim);font-size:12px">' + groups[g].length + ' 项</span></div><div class="ft-gbody">'
+      + groups[g].map(x => '<div class="ft-item" onclick="porscheToolPick(\'' + x.id + '\')">'
+        + '<div class="t">' + cacheEsc(x.name) + '</div><div class="d">' + cacheEsc(x.desc) + '</div></div>').join("")
+      + '</div></div>';
+  });
+  const fmt = ui.footerFormat || "字体工具箱 v{version} · 构建 {build}";
+  html += '<div class="g-hint" id="porscheToolsFoot" style="text-align:center;margin-top:14px">'
+    + cacheEsc(fmt.replace(/\{version\}/g, "v" + ver).replace(/\{build\}/g, build || "-").replace(/\{author\}/g, author || "")) + '</div>';
+  out.innerHTML = html;
+}
+
+async function porscheToolPick(id) {
+  const tool = PORSCHE_TOOLS.find(x => x.id === id);
+  if (!tool) return;
+  if (porscheToolBusy) { showToast("上一个工具还在执行，请稍等", false, 4000); return; }
+  let paths = [];
+  try {
+    const raw = String(await ksuExecTO(`find ${BUILTINDIR} ${LIB} -maxdepth 1 -type f \\( -name "*.ttf" -o -name "*.otf" \\) 2>/dev/null`, 5000) || "");
+    paths = raw.split("\n").map(x => x.trim()).filter(Boolean);
+  } catch (e) {}
+  const seen = {};
+  paths = paths.filter(p => { const b = baseName(p); if (seen[b]) return false; seen[b] = 1; return true; });
+  if (!paths.length) { await dialog({ title: tool.name, msg: "字体库里没有可检查的 .ttf / .otf。", okText: "知道了" }); return; }
+  let cur = "";
+  try { cur = String(await ksuExecTO(`cat ${MODDIR}/active_font 2>/dev/null`, 3000) || "").trim(); } catch (e) {}
+  let def = paths[0];
+  paths.forEach(p => {
+    const b = baseName(p).replace(/\.[^.]+$/, "");
+    if (b === cur || b === "builtin_" + cur || b === "fonts/builtin_" + cur) def = p;
+  });
+  const opts = paths.map(p => {
+    const b = baseName(p).replace(/\.[^.]+$/, "");
+    let label = b;
+    try { label = labelOf(b) || b; } catch (e) {}
+    return { value: p, label: label };
+  });
+  const ans = await dialog({
+    title: tool.name,
+    msg: "选择要检查的字体",
+    select: { label: "字体", options: opts.map(x => [x.value, x.label]), value: def },
+    okText: "执行"
+  });
+  if (!ans) return;
+  const path = (ans && typeof ans === "object") ? ans.sel : ans;
+  if (!path) return;
+  await porscheToolRun(id, path);
+}
+
+function porscheToolParse(raw) {
+  const a = raw.indexOf("{"), b = raw.lastIndexOf("}");
+  if (a >= 0 && b > a) { try { return JSON.parse(raw.slice(a, b + 1)); } catch (e) {} }
+  return null;
+}
+
+async function porscheToolRun(id, path) {
+  const tool = PORSCHE_TOOLS.find(x => x.id === id);
+  if (!tool) return;
+  if (porscheToolBusy) { showToast("上一个工具还在执行，请稍等", false, 4000); return; }
+  if (!path) { await porscheToolPick(id); return; }
+  porscheToolBusy = true;
+  try {
+    showToast("正在执行：" + tool.name + "（大字体可能需要几十秒）…", true);
+    const cmd = `sh ${MODDIR}/engine.sh run ${id} --font ${shq(path)} --json`;
+    const raw = String(await ksuExecTO(cmd + " 2>&1", 180000) || "");
+    const o = porscheToolParse(raw);
+    if (!o) { clearToast(); await dialog({ title: tool.name, msg: raw.trim().slice(0, 12000) || "插件没有返回结果。", okText: "知道了" }); return; }
+    const lines = [];
+    if (id === "info") {
+      lines.push("文件：" + (o.file || ""));
+      lines.push("家族：" + (o.family || "?") + " / " + (o.subfamily || "?"));
+      lines.push("PS 名：" + (o.ps || "?"));
+      lines.push("版本：" + (o.version || "?"));
+      lines.push("设计者：" + (o.designer || "—"));
+      lines.push("厂商：" + (o.vendor || "—"));
+      lines.push("版权：" + (o.copyright || "—"));
+      lines.push("许可证：" + (o.license || "—"));
+      if (o.license_url) lines.push("许可地址：" + o.license_url);
+      lines.push("字形数：" + (o.glyphs || "?"));
+    } else if (id === "doctor") {
+      const issues = Array.isArray(o.issues) ? o.issues : [];
+      lines.push("文件：" + (o.file || ""));
+      lines.push("家族：" + (o.family || "?") + " / " + (o.subfamily || "?"));
+      lines.push("PS 名：" + (o.ps || "?"));
+      lines.push("字形：" + (o.glyphs || "?"));
+      lines.push("问题：" + issues.length + " 个");
+      lines.push("");
+      issues.slice(0, 18).forEach(x => lines.push("[" + (x.level || "info") + "] " + (x.msg || x.code || "")));
+    } else if (id === "analyze") {
+      lines.push("文件：" + (o.file || ""));
+      lines.push("总大小：" + Math.round((o.size || 0) / 1024) + " KB");
+      lines.push("");
+      (o.tables || []).slice(0, 15).forEach(x => lines.push(String(x.tag).padEnd(8) + " " + x.pct + "%  " + Math.round((x.bytes || 0) / 1024) + " KB"));
+    } else {
+      lines.push(JSON.stringify(o, null, 2).slice(0, 12000));
+    }
+    clearToast();
+    await dialog({ title: tool.name, msg: lines.join("\n"), okText: "知道了" });
+  } catch (e) {
+    clearToast();
+    showToast("执行失败：" + errText(e), false, 8000);
+  } finally {
+    porscheToolBusy = false;
+    clearToast();
+  }
+}
+
+async function porscheCheckFont() {
+  try {
+    let id = String(await ksuExec(`cat ${MODDIR}/active_font 2>/dev/null`) || "").trim();
+    if (!id || id === "none") id = "none";
+    const cands = [BUILTINDIR + "/" + id + ".ttf", LIB + "/builtin_" + id + ".ttf", LIB + "/" + id + ".ttf"];
+    let path = "";
+    for (const p of cands) {
+      try {
+        if (String(await ksuExec(`test -f ${shq(p)} && echo 1`) || "").includes("1")) { path = p; break; }
+      } catch (e) {}
+    }
+    if (!path) { await dialog({ title: "字体检查", msg: "找不到当前字体文件。", okText: "知道了" }); return; }
+    showToast("正在检查字体…", false, 6000);
+    const raw = String(await ksuExec(`sh ${MODDIR}/engine.sh run doctor --font ${shq(path)} --json 2>&1`) || "");
+    const a = raw.indexOf("{"), b = raw.lastIndexOf("}");
+    let o = null;
+    if (a >= 0 && b > a) { try { o = JSON.parse(raw.slice(a, b + 1)); } catch (e) {} }
+    if (!o) { await dialog({ title: "字体检查", msg: raw.trim().slice(0, 12000) || "插件没有返回结果。", okText: "知道了" }); return; }
+    const issues = Array.isArray(o.issues) ? o.issues : [];
+    const lines = [
+      "文件：" + (o.file || path),
+      "家族：" + (o.family || "?") + " / " + (o.subfamily || "?"),
+      "PS 名：" + (o.ps || "?"),
+      "字形：" + (o.glyphs || "?"),
+      "问题：" + issues.length + " 个",
+      "",
+    ];
+    issues.slice(0, 15).forEach(x => lines.push("[" + (x.level || "info") + "] " + (x.msg || x.code || "")));
+    if (issues.length > 15) lines.push("…还有 " + (issues.length - 15) + " 个");
+    await dialog({ title: "字体检查", msg: lines.join("\n"), okText: "知道了" });
+  } catch (e) { showToast("检查失败：" + errText(e), false, 7000); }
+}
+
+async function porscheClockChangelog() {
+  try {
+    const o = String(await ksuExec(`cat ${LIBROOT}/state/engine/CHANGELOG.md 2>/dev/null`) || "").trim();
+    await dialog({ title: "字体工具箱更新日志", msg: o.slice(0, 16000) || "还没有安装插件。", okText: "知道了" });
+  } catch (e) { showToast("读取失败：" + errText(e), false, 6000); }
+}
+async function porscheClockUI() {
+  advConFootHide();
+  const sheet = document.getElementById("advConSheet");
+  const title = document.getElementById("advConTitle");
+  const hint = document.getElementById("advConHint");
+  if (title) title.textContent = "锁屏时钟（porsche 插件）";
+  if (hint) { hint.style.display = "block"; hint.innerHTML = "只用于内置字体的锁屏时钟配套；主项目插件不能装到这里。"; }
+  if (sheet) sheet.classList.add("show");
+  await porscheClockRender();
+}
+async function porscheClockPickZip() {
+  const sheet = document.getElementById("advConSheet");
+  const title = document.getElementById("advConTitle");
+  const hint = document.getElementById("advConHint");
+  if (title) title.textContent = "选择插件 zip";
+  if (hint) { hint.style.display = "block"; hint.innerHTML = "调用模块文件管理器，只列出 .zip。只支持 porsche 插件；主项目插件会提示 id=cfs_fontlab。选中后会校验 MANIFEST 和签名。"; }
+  if (sheet) sheet.classList.add("show");
+  await porscheZipBrowse("/sdcard/Download");
+}
+function porscheZipB64(s) { return btoa(unescape(encodeURIComponent(s))); }
+async function porscheZipBrowse(path) {
+  const out = document.getElementById("advConOut");
+  if (!out) return;
+  out.innerHTML = '<div style="padding:10px 0;opacity:.65">正在读取目录…</div>';
+  let raw = "";
+  try { raw = String(await ksuExec(`sh ${MODDIR}/fontctl.sh lsz ${porscheZipB64(path)} 2>&1`) || ""); } catch (e) {}
+  const dirs = [], files = [];
+  let cur = path;
+  raw.split("\n").forEach(l => {
+    const p = l.replace(/\r$/, "").split("|");
+    if (p[0] === "P") cur = p.slice(1).join("|");
+    else if (p[0] === "D") dirs.push(p.slice(1).join("|"));
+    else if (p[0] === "F" && /\.zip$/i.test(p[1] || "")) files.push(p[1]);
+  });
+  window.__porscheZipCur = cur;
+  window.__porscheZipFiles = files;
+  window.__porscheZipPick = "";
+  let h = '<div style="font-size:12px;opacity:.65;overflow-wrap:anywhere;padding:4px 0 8px">' + cacheEsc(cur) + '</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+    + '<button class="g-btn" onclick="porscheZipBrowse(\'/sdcard\')">🏠 根目录</button>'
+    + '<button class="g-btn" onclick="porscheZipBrowse(\'/sdcard/Download\')">⬇ Download</button>'
+    + '<button class="g-btn" onclick="porscheZipUp()">↩ 上一级</button>'
+    + '<button class="g-btn" onclick="porscheZipSelectAll()">全选本页</button></div>'
+    + '<div style="margin-bottom:8px"><button class="g-btn" onclick="porscheZipClear()">清空已选</button></div>';
+  h += dirs.map(d => '<div class="switch-row fade" onclick="porscheZipBrowse(decodeURIComponent(\'' + encodeURIComponent(cur.replace(/\/$/, "") + "/" + d) + '\'))"><div><div class="t">📁 ' + cacheEsc(d) + '</div></div><div class="row-arrow">›</div></div>').join("");
+  h += files.map(f => {
+    const full = cur.replace(/\/$/, "") + "/" + f;
+    return '<div class="switch-row fade" data-zip="' + encodeURIComponent(full) + '" onclick="porscheZipSelect(decodeURIComponent(\'' + encodeURIComponent(full) + '\'),this)"><div><div class="t">' + cacheEsc(f) + '</div></div><div class="ckbox">✓</div></div>';
+  }).join("");
+  if (!dirs.length && !files.length) h += '<div style="padding:10px 0;opacity:.6">这个目录没有 zip</div>';
+  out.innerHTML = h;
+  const foot = document.getElementById("advConFoot");
+  if (foot) foot.style.display = "";
+  const ib = document.getElementById("porscheZipInstallBtn");
+  if (ib) { ib.textContent = "安装选中 (0)"; ib.disabled = true; }
+}
+function porscheZipSelect(enc, el) {
+  window.__porscheZipPick = decodeURIComponent(enc || "");
+  document.querySelectorAll('#advConOut [data-zip]').forEach(x => x.classList.remove('selected'));
+  if (el) el.classList.add('selected');
+  const b = document.getElementById("porscheZipInstallBtn");
+  if (b) { b.textContent = "安装选中 (1)"; b.disabled = false; }
+}
+function porscheZipSelectAll() {
+  const files = window.__porscheZipFiles || [];
+  if (!files.length) { showToast("这个目录没有 zip"); return; }
+  const cur = String(window.__porscheZipCur || "").replace(/\/$/, "");
+  porscheZipSelect(encodeURIComponent(cur + "/" + files[0]), document.querySelector('#advConOut [data-zip]'));
+}
+function porscheZipClear() {
+  window.__porscheZipPick = "";
+  document.querySelectorAll('#advConOut [data-zip]').forEach(x => x.classList.remove('selected'));
+  const b = document.getElementById("porscheZipInstallBtn");
+  if (b) { b.textContent = "安装选中 (0)"; b.disabled = true; }
+}
+async function porscheZipInstallSelected() {
+  const p = window.__porscheZipPick;
+  if (!p) { showToast("先选一个 zip"); return; }
+  await porscheZipChoose(p);
+}
+function porscheZipUp() {
+  const p = String(window.__porscheZipCur || "/sdcard/Download");
+  const up = p.replace(/\/[^/]+$/, "") || "/sdcard";
+  porscheZipBrowse(up);
+}
+async function porscheZipChoose(path) {
+  if (!(await dialog({
+    title: "安装字体工具箱？",
+    msg: "将安装所选插件：\n" + path + "\n\n安装前会校验 MANIFEST 和签名。",
+    okText: "安装"
+  }))) return;
+  advConClose();
+  const stEl = document.getElementById("porscheInstallStatus");
+  const setSt = (s, spin) => {
+    if (!stEl) return;
+    stEl.style.display = "block";
+    stEl.innerHTML = (spin ? '<span class="spin"></span> ' : '') + cacheEsc(s);
+  };
+  setSt("正在校验 / 解压 / 验签，约 30~90 秒…", true);
+  showToast("正在校验并安装插件…", false, 10000);
+  try {
+    const start = String(await ksuExec(`sh ${MODDIR}/engine.sh install-local-bg ${shq(path)}`) || "");
+    if (/^\s*ERROR/.test(start)) throw new Error(start.replace(/^\s*ERROR:?/, "").trim());
+    let code = "";
+    for (let i = 0; i < 240; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        code = String(await ksuExec(`cat ${LIBROOT}/state/engine.local.done 2>/dev/null`) || "").trim();
+      } catch (e) {}
+      if (code !== "") break;
+    }
+    let log = "";
+    try { log = String(await ksuExec(`tail -n 20 ${LIBROOT}/state/engine.local.log 2>/dev/null`) || "").trim(); } catch (e) {}
+    if (code === "0") {
+      setSt("安装完成，正在刷新界面…");
+      showToast("插件安装完成", false, 5000);
+      await porscheRefreshStatus();
+      await porscheRefreshLatest(true);
+      try { await refreshAll(true); } catch (e) {}
+      setSt("安装完成");
+    } else {
+      const last = log.split("\n").filter(Boolean).pop() || ("安装失败（退出码 " + (code || "超时") + "）");
+      setSt("安装失败：" + last.replace(/^ERROR:?/, ""));
+      showToast(last.replace(/^ERROR:?/, "安装失败："), false, 9000);
+    }
+  } catch (e) {
+    setSt("安装失败：" + errText(e));
+    showToast("安装失败：" + errText(e), false, 9000);
+  }
+}
+async function porscheClockInstall() {
+  if (!window.confirm("从 Download 安装 porsche 专用插件？\n文件名需为 fontlab-engine-porsche*.zip")) return;
+  try {
+    const o = String(await ksuExec(`sh ${MODDIR}/engine.sh install-local`) || "");
+    showToast(o.indexOf("OK") >= 0 || o.indexOf("安装") >= 0 ? "插件安装完成" : ("安装结果：" + o.slice(0, 80)), false, 8000);
+    await porscheClockRender();
+  } catch (e) { showToast("安装失败：" + errText(e), true, 8000); }
+}
+async function porscheClockUninstall() {
+  if (!(await dialog({ title: "卸载字体工具箱？", msg: "只删除插件文件和 engine 状态；锁屏时钟替换会自动关闭。\n\n字体库和设置不受影响。", okText: "卸载", danger: true }))) return;
+  try {
+    await ksuExec(`sh ${MODDIR}/fontctl.sh settings set replace_lockscreen 0`);
+    await ksuExec(`sh ${MODDIR}/engine.sh uninstall`);
+    try { localStorage.removeItem("cfs_porsche_engine"); } catch (e) {}
+    await porscheRefreshStatus();
+    await porscheClockRender();
+    showToast("已卸载插件，锁屏时钟替换已关闭");
+  } catch (e) { showToast("卸载失败：" + errText(e), false, 7000); }
+}
+async function porscheClockToggle() {
+  let on = "0";
+  try {
+    const g = String(await ksuExec(`grep '^replace_lockscreen=' ${MODDIR}/settings.conf 2>/dev/null || true`) || "");
+    if (/replace_lockscreen=1/.test(g)) on = "1";
+  } catch (e) {}
+  const want = on === "1" ? "0" : "1";
+  if (want === "1" && !window.confirm("开启后会用内置字体为锁屏时钟生成配套，可能需要一点时间。继续？")) return;
+  try {
+    const o = String(await ksuExec(`sh ${MODDIR}/fontctl.sh settings set replace_lockscreen ${want}`) || "");
+    if (o.indexOf("OK") !== 0) throw new Error(o.trim() || "设置失败");
+    if (want === "1") await ksuExec(`sh ${MODDIR}/fontctl.sh apply-bg`);
+    showToast(want === "1" ? "已开启，生成完成后重启生效" : "已关闭，重启后恢复系统时钟");
+    await porscheClockRender();
+  } catch (e) { showToast("修改失败：" + errText(e), true, 8000); }
+}
+function cacheEsc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+async function cacheUI() {
+  advConFootHide();
+  const sheet = document.getElementById("advConSheet");
+  const title = document.getElementById("advConTitle");
+  const hint = document.getElementById("advConHint");
+  const out = document.getElementById("advConOut");
+  if (title) title.textContent = "缓存管理";
+  if (hint) { hint.style.display = "block"; hint.innerHTML = "TTC 合集和锁屏时钟文件分开管理。删除只影响缓存，不会删除字体库里的字体。"; }
+  if (sheet) sheet.classList.add("show");
+  if (!out) return;
+  out.innerHTML = ''
+    + '<div class="switch-row fade" onclick="ttcCacheUI()"><div><div class="t">TTC 合集缓存</div><div class="d">按字体查看已合成中文合集；当前使用的缓存会锁定，不能删。</div><div class="d" style="opacity:.65">删除后下次切到该字体要重新合成。</div></div><span class="adv-chip">运行</span></div>'
+    + '<div class="switch-row fade" onclick="clockCacheUI()"><div><div class="t">锁屏时钟文件</div><div class="d">查看已生成的锁屏时钟配套；当前字体正在使用的会锁定。</div><div class="d" style="opacity:.65">删除后下次切换或重新开启会重新生成。</div></div><span class="adv-chip">运行</span></div>'
+    + '<div class="switch-row fade" onclick="cacheResidue()"><div><div class="t">清理残留缓存</div><div class="d">字体库里已经删掉、但 TTC 与时钟缓存还留着的文件，一次清干净。</div><div class="d" style="opacity:.65">不会动当前字体正在使用的缓存。</div></div><span class="adv-chip">运行</span></div>';
+}
+async function ttcCacheUI() {
+  advConFootHide();
+  const sheet = document.getElementById("advConSheet");
+  if (sheet) sheet.classList.add("show");
+  const t = document.getElementById("advConTitle");
+  const h = document.getElementById("advConHint");
+  if (t) t.textContent = "TTC 合集缓存";
+  if (h) { h.style.display = "block"; h.innerHTML = "按字体查看已合成的中文合集。正在挂载使用的缓存会锁定，不能删。"; }
+  await cacheRender("ttc");
+}
+async function clockCacheUI() {
+  advConFootHide();
+  const sheet = document.getElementById("advConSheet");
+  if (sheet) sheet.classList.add("show");
+  const t = document.getElementById("advConTitle");
+  const h = document.getElementById("advConHint");
+  if (t) t.textContent = "锁屏时钟文件";
+  if (h) { h.style.display = "block"; h.innerHTML = "按字体查看已生成的锁屏时钟配套。当前字体正在使用的文件会被锁定。"; }
+  await cacheRender("clock");
+}
+async function cacheRender(kind) {
+  const out = document.getElementById("advConOut");
+  if (!out) return;
+  kind = kind === "clock" ? "clock" : "ttc";
+  out.innerHTML = '<div style="padding:10px 0;opacity:.65">正在读取缓存…</div>';
+  let raw = "";
+  const cmd = kind === "clock" ? "clock-list" : "ttc-list";
+  try { raw = String(await ksuExec(`sh ${MODDIR}/fontctl.sh ${cmd}`) || ""); } catch (e) {}
+  const rows = raw.split("\n").filter(Boolean).map(l => {
+    const p = l.split("|");
+    return kind === "clock"
+      ? { id: p[0], inuse: p[1] === "1", state: p[2] || "idle", size: +p[3] || 0, path: p.slice(5).join("|") }
+      : { id: p[0], inuse: p[1] === "1", state: p[2] || "idle", size: +p[3] || 0, path: p.slice(5).join("|") };
+  });
+  const groups = {};
+  rows.forEach(r => { (groups[r.id] = groups[r.id] || []).push(r); });
+  let h = "";
+  if (kind === "ttc") {
+    let mode = "font";
+    try {
+      const m = String(await ksuExec(`grep '^ttc_cache_mode=' ${LIBROOT}/settings.conf 2>/dev/null || true`) || "");
+      const mm = m.match(/ttc_cache_mode=(\w+)/);
+      if (mm) mode = mm[1];
+    } catch (e) {}
+    const curName = mode === "none" ? "只保留当前" : "全部保留";    h += '<div style="border:1px solid rgba(128,128,128,.28);border-radius:12px;padding:10px;margin-bottom:12px">'
+      + '<div style="font-size:13px;line-height:1.7"><b>当前策略：' + curName + '</b>'
+      + '<div style="opacity:.65;margin-top:2px;font-size:11px">策略按「字体」计数；一个字体可能有 2 个 TTC（黑体 / 宋体各一个），文件数会更多。</div></div>'
+      + '<div style="display:grid;gap:6px;margin-top:8px">'
+      + '<button class="g-btn" onclick="cacheSetMode(\'none\')" style="text-align:left;padding:8px 10px;line-height:1.55;border:1px solid ' + (mode === "none" ? "var(--accent)" : "rgba(128,128,128,.28)") + '">'
+      + '<b>只保留当前</b>' + (mode === "none" ? '（当前）' : '')
+      + '<div style="font-size:11px;opacity:.75;margin-top:2px">优点：最省空间，只留正在用的那一套。</div>'
+      + '<div style="font-size:11px;opacity:.6;margin-top:1px">代价：切回旧字体时如果没有合集，要重新合成，可能多等十几秒。</div></button>'
+      + '<button class="g-btn" onclick="cacheSetMode(\'font\')" style="text-align:left;padding:8px 10px;line-height:1.55;border:1px solid ' + (mode !== "none" ? "var(--accent)" : "rgba(128,128,128,.28)") + '">'
+      + '<b>全部保留</b>' + (mode !== "none" ? '（当前）' : '')
+      + '<div style="font-size:11px;opacity:.75;margin-top:2px">优点：每个字体都保留一份，切任何字体都不再合成。</div>'
+      + '<div style="font-size:11px;opacity:.6;margin-top:1px">代价：TTC 体积大，字体多时会占很多空间。</div></button>'
+      + '</div></div>';
+  }
+  if (kind === "clock") {
+    let cmode = "none";
+    try {
+      const m = String(await ksuExec(`grep '^clock_cache_mode=' ${LIBROOT}/settings.conf 2>/dev/null || true`) || "");
+      const mm = m.match(/clock_cache_mode=(\w+)/);
+      if (mm) cmode = mm[1] === "all" ? "all" : "none";
+    } catch (e) {}
+    h += '<div style="border:1px solid rgba(128,128,128,.28);border-radius:12px;padding:10px;margin-bottom:12px">'
+      + '<div style="font-size:13px"><b>当前策略：' + (cmode === "all" ? "全部保留" : "只保留当前") + '</b></div>'
+      + '<div style="display:grid;gap:6px;margin-top:8px">'
+      + '<button class="g-btn" onclick="cacheSetClockMode(\'none\')" style="text-align:left;padding:8px 10px;border:1px solid ' + (cmode === "none" ? "var(--accent)" : "rgba(128,128,128,.28)") + '"><b>只保留当前</b><div style="font-size:11px;opacity:.65;margin-top:2px">最省空间；切回旧字体要重新生成。</div></button>'
+      + '<button class="g-btn" onclick="cacheSetClockMode(\'all\')" style="text-align:left;padding:8px 10px;border:1px solid ' + (cmode === "all" ? "var(--accent)" : "rgba(128,128,128,.28)") + '"><b>全部保留</b><div style="font-size:11px;opacity:.65;margin-top:2px">所有字体切过去都能直接复用。</div></button>'
+      + '</div></div>';
+  }
+  const ids = Object.keys(groups).sort((a, b) => {
+    const rank = id => {
+      const l = groups[id] || [];
+      if (l.some(x => x.state === "pend")) return 0;
+      if (l.some(x => x.state === "cur")) return 1;
+      return 2;
+    };
+    const d = rank(a) - rank(b);
+    return d || a.localeCompare(b);
+  });
+  // 组内也按“待生效 → 当前在用 → 未使用”排序
+  ids.forEach(id => {
+    const rank = x => x.state === "pend" ? 0 : x.state === "cur" ? 1 : 2;
+    groups[id].sort((a, b) => rank(a) - rank(b));
+  });
+  if (!ids.length) {
+    h += '<div style="padding:10px 0;opacity:.65">' + (kind === "clock" ? "没有锁屏时钟文件" : "没有 TTC 缓存") + '</div>';
+  } else {
+    ids.forEach(id => {
+      const list = groups[id];
+      const hasCur = list.some(x => x.state === "cur");
+      const hasPend = list.some(x => x.state === "pend");
+      const canDel = list.some(x => !x.inuse);
+      const total = list.reduce((a, b) => a + b.size, 0);
+      h += '<div class="cache-group" data-kind="' + kind + '" data-id="' + cacheEsc(id) + '" style="margin:12px 0 0;border:1px solid rgba(128,128,128,.22);border-radius:12px;padding:0 10px">'
+        + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(128,128,128,.14)">'
+        + '<div><b style="font-size:14px">' + cacheEsc(typeof nameOf === "function" ? nameOf(id) : id) + '</b>'
+        + (hasCur ? ' <span style="font-size:11px;color:#2e7d32;border:1px solid rgba(46,125,50,.45);padding:1px 5px;border-radius:6px">当前在用</span>' : '')
+        + (hasPend ? ' <span style="font-size:11px;color:#f59e0b;border:1px solid rgba(245,158,11,.45);padding:1px 5px;border-radius:6px">待生效</span>' : '') + '</div>'
+        + '<span style="font-size:11px;opacity:.6">' + list.length + ' 个文件 · ' + fmtSize(total) + '</span>'
+        + (canDel ? '<button class="g-btn" style="flex:0 0 auto;padding:5px 10px" onclick="cacheDelFont(\'' + kind + '\',\'' + cacheEsc(id) + '\')">删除该字体 ' + list.filter(x => !x.inuse).length + '</button>' : '')
+        + '</div>';
+      list.forEach((r, i) => {
+        h += '<div class="cache-file" data-lock="' + (r.inuse ? "1" : "0") + '" data-p="' + encodeURIComponent(r.path) + '" style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 0;'
+          + (i ? 'border-top:1px solid rgba(128,128,128,.10);' : '') + 'font-size:12px">'
+          + '<span style="min-width:0;overflow-wrap:anywhere">' + cacheEsc(r.path.split("/").pop()) + '<br><span style="opacity:.55">' + cacheEsc(r.path) + '</span></span>'
+          + '<span style="flex:0 0 auto;text-align:right">' + fmtSize(r.size) + '<br>'
+          + (r.inuse
+              ? '<span style="opacity:.6;color:' + (r.state === "pend" ? '#f59e0b' : '#2e7d32') + '">' + (r.state === "pend" ? "待生效" : "当前在用") + '</span>'
+              : '<button class="g-btn" data-p="' + encodeURIComponent(r.path) + '" onclick="cacheDel(\'' + kind + '\',this.dataset.p)">删除</button>')
+          + '</span></div>';
+      });
+      h += '</div>';
+    });
+  }
+  out.innerHTML = h;
+}
+async function cacheSetMode(mode) {
+  const label = mode === "none" ? "只保留当前" : "全部保留";
+  if (!(await dialog({
+    title: "切换 TTC 缓存策略？",
+    msg: "改为「" + label + "」。\n\n" +
+      (mode === "none"
+        ? "会清掉非当前字体的 TTC 缓存；切回旧字体需要重新合成。"
+        : "保留所有字体的 TTC 缓存，占用空间会增加。") +
+      "\n\n当前正在使用和待生效的缓存不会被删除。",
+    okText: "切换"
+  }))) return;
+  try {
+    await ksuExec(`sh ${MODDIR}/fontctl.sh settings set ttc_cache_mode ${mode}`);
+    await ksuExec(`sh ${MODDIR}/fontctl.sh ttc-mode-clean`);
+    showToast(mode === "none" ? "已设为只保留当前缓存" : "已设为全部保留", false, 5000);
+    await cacheRender();
+  } catch (e) { showToast("设置失败：" + errText(e), false, 6000); }
+}
+async function cacheSetClockMode(mode) {
+  const label = mode === "all" ? "全部保留" : "只保留当前";
+  if (!(await dialog({
+    title: "切换锁屏时钟缓存策略？",
+    msg: "改为「" + label + "」。\n\n" +
+      (mode === "all" ? "所有字体的时钟配套都会保留。" : "会清掉非当前字体的时钟配套，切回旧字体要重新生成。") +
+      "\n\n当前正在使用和待生效的缓存不会被删除。",
+    okText: "切换"
+  }))) return;
+  try {
+    await ksuExec(`sh ${MODDIR}/fontctl.sh settings set clock_cache_mode ${mode}`);
+    await ksuExec(`sh ${MODDIR}/fontctl.sh clock-prune`);
+    showToast(mode === "none" ? "已设为只保留当前时钟缓存" : "已设为全部保留", false, 5000);
+    await cacheRender("clock");
+  } catch (e) { showToast("设置失败：" + errText(e), false, 6000); }
+}
+async function cacheDel(kind, enc) {
+  const p = decodeURIComponent(enc || "");
+  if (!p) return;
+  if (!(await dialog({ title: "删除这个缓存文件？", msg: p + "\n\n只删除缓存，不会删字体库里的字体。", okText: "删除", danger: true }))) return;
+  try {
+    await ksuExec(`sh ${MODDIR}/fontctl.sh ${kind === "clock" ? "clock-del" : "ttc-del"} ${shq(p)}`);
+    await cacheRender(kind);
+  } catch (e) { showToast("删除失败：" + errText(e), false, 6000); }
+}
+async function cacheDelFont(kind, id) {
+  const group = document.querySelector('.cache-group[data-kind="' + kind + '"][data-id="' + id + '"]');
+  if (!group) return;
+  const paths = Array.from(group.querySelectorAll('.cache-file[data-lock="0"]'))
+    .map(r => { try { return decodeURIComponent(r.dataset.p || ""); } catch (e) { return ""; } })
+    .filter(Boolean);
+  if (!paths.length) { showToast("这个字体只剩当前/待生效缓存，重启后才能删", false, 5000); return; }
+  if (!(await dialog({
+    title: "删除这个字体的缓存？",
+    msg: "字体：" + (typeof nameOf === "function" ? nameOf(id) : id) + "\n共 " + paths.length + " 份可删缓存。\n\n当前在用和待生效的不会删，重启后才能删。",
+    okText: "删除", danger: true
+  }))) return;
+  let ok = 0, bad = 0;
+  for (const path of paths) {
+    try {
+      const o = String(await ksuExec(`sh ${MODDIR}/fontctl.sh ${kind === "clock" ? "clock-del" : "ttc-del"} ${shq(path)}`) || "");
+      if (/^OK/.test(o)) ok++; else bad++;
+    } catch (e) { bad++; }
+  }
+  showToast("已删除 " + ok + " 份" + (bad ? "，失败 " + bad + " 份" : ""), false, 5000);
+  await cacheRender(kind);
+}
+async function cacheResidue() {
+  if (!(await dialog({
+    title: "清理残留缓存？",
+    msg: "会清理字体库里已经删掉的字体留下的：\n\n· TTC 合集缓存\n· 锁屏时钟配套缓存\n\n字体库里还在的字体和当前正在使用的不受影响。",
+    okText: "清理", danger: true
+  }))) return;
+  try {
+    const o = String(await ksuExec(`sh ${MODDIR}/fontctl.sh cache-residue-clean`) || "");
+    showToast(o.trim().replace(/^OK:?/, "已清理：") || "已清理", false, 5000);
+    await cacheUI();
+  } catch (e) { showToast("清理失败：" + errText(e), false, 6000); }
+}
+
 const UI_ACTIONS = {
   uiPickBg, uiClearBg, uiToggleLightDark, uiExport, uiImport, uiReset,
   uiCycleAccent: () => uiCycleNext("accent"),
@@ -8810,6 +9974,11 @@ const UI_ACTIONS = {
   advRelock,
   pickRom,
   rescanAll,
+  porscheClockUI,
+  cacheUI,
+  ttcCacheUI,
+  clockCacheUI,
+  cacheResidue,
 };
 
 
@@ -8836,6 +10005,7 @@ async function advSaveText(key) {
 }
 
 async function advRun(cmd, hintEnc, name) {
+  advConFootHide();
   // 界面类命令直接调 JS，不经过 shell
   if (typeof UI_ACTIONS[cmd] === "function") {
     try { await UI_ACTIONS[cmd](); } catch (e) { showToast("操作失败：" + errText(e)); }
@@ -8866,7 +10036,20 @@ async function advRun(cmd, hintEnc, name) {
   if (out) out.textContent = text.trim() || "（没有输出）";
 }
 
+function advConBack() {
+  const t = document.getElementById("advConTitle");
+  const title = t ? String(t.textContent || "") : "";
+  if (title === "TTC 合集缓存" || title === "锁屏时钟文件") { cacheUI(); return; }
+  if (title === "选择插件 zip") { porscheZipUp(); return; }
+  advConClose();
+}
+
+function advConFootHide() {
+  const f = document.getElementById("advConFoot");
+  if (f) f.style.display = "none";
+}
 function advConClose() {
+  advConFootHide();
   const s = document.getElementById("advConSheet");
   if (s) s.classList.remove("show");
 }
@@ -8939,7 +10122,7 @@ function advApplyEntry() {
 function advUnlock() {
   try { localStorage.setItem("cfs_adv_unlocked", "1"); } catch (e) {}
   // ★ 2026-10-31：解锁标记同步落盘 $LIB（localStorage 丢了也能恢复，见 init）
-  ksuExec("echo unlocked > " + LIB + "/.adv_unlocked 2>/dev/null").catch(() => {});
+  ksuExec("echo unlocked > " + LIBROOT + "/state/adv_unlocked 2>/dev/null").catch(() => {});
   advApplyEntry();
 }
 /* ★ 2026-10-25 锁定前先确认，并提示怎么重新打开 */
@@ -8959,7 +10142,7 @@ function advRelock() {
     return;
   }
   try { localStorage.removeItem("cfs_adv_unlocked"); } catch (e) {}
-  ksuExec("rm -f " + LIB + "/.adv_unlocked 2>/dev/null").catch(() => {});
+  ksuExec("rm -f " + LIBROOT + "/state/adv_unlocked 2>/dev/null").catch(() => {});
   advApplyEntry();
   try { advClose(); } catch (e) {}
   showToast("已锁定高级设置（主界面入口已隐藏）");
@@ -8969,7 +10152,7 @@ function advOpen() {
   const s = document.getElementById("advSheet");
   if (!s) { showToast("找不到高级设置面板（安装包不完整，请重装模块）"); return; }
   __advPath = [];
-  // ★ 2026-10-25 修（作者反馈：口令对了却"没反应"）：
+  // ★ 2026-10-25 修（实测：口令对了却"没反应"）：
   //   原来只要 advRender() 抛一次异常，下面 add("show") 就执行不到 → 界面毫无反应。
   //   现在渲染单独兜住，并把显示写成内联样式，CSS 出问题也能弹出来。
   try {
@@ -9018,6 +10201,202 @@ async function advTap() {
 
 
 
+async function clockAuditUI() {
+  const out = document.getElementById("advConOut");
+  const title = document.getElementById("advConTitle");
+  const hint = document.getElementById("advConHint");
+  const id = (pendingId && pendingId !== "none") ? pendingId : activeId;
+  if (!id || id === "none") { showToast("先选一个字体"); return; }
+  if (title) title.textContent = "时钟配套体检";
+  if (hint) { hint.style.display = "block"; hint.textContent = "检查包围盒、度量、advance 是否和目标时钟字体一致。右上角 ‹ 返回。"; }
+  if (out) out.innerHTML = '<div style="padding:12px 0;opacity:.65">正在体检…</div>';
+  await nextPaint();
+  let raw = "";
+  try { raw = String(await ksuExec(`sh ${MODDIR}/fontctl.sh clock-audit ${shq(id)}`) || ""); } catch (e) { raw = errText(e) || ""; }
+  const esc = x => String(x == null ? "" : x).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const lines = raw.split("\n").filter(Boolean);
+  let summary = "";
+  const rows = [];
+  lines.forEach(l => {
+    if (l.indexOf("SUMMARY|") === 0) { summary = l.slice(8); return; }
+    const p = l.split("|");
+    if (p.length >= 2) rows.push({ path: p[0], st: p[1], detail: p.slice(2).join("|") });
+  });
+  if (!rows.length) {
+    if (out) out.innerHTML = '<div style="padding:10px 0;color:#ef4444">体检失败：' + esc(raw.trim() || "没有输出") + '</div>';
+    return;
+  }
+  let h = summary ? '<div style="padding:4px 0 10px;font-size:13px;font-weight:600">结果：' + esc(summary) + '</div>' : "";
+  rows.forEach(r => {
+    const good = r.st === "正常";
+    h += '<div style="padding:9px 0;border-top:1px solid rgba(128,128,128,.14)">'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">'
+      + '<span style="font-size:12px;font-weight:600;overflow-wrap:anywhere;min-width:0">' + esc(r.path.split("/").pop()) + '</span>'
+      + '<span style="flex:0 0 auto;font-size:11px;color:' + (good ? "#2e7d32" : "#ef4444") + '">' + esc(r.st) + '</span></div>'
+      + '<div style="font-size:11px;opacity:.6;margin-top:2px;overflow-wrap:anywhere">' + esc(r.detail) + '</div></div>';
+  });
+  if (out) out.innerHTML = h;
+}
+
+async function openStatusDetail(kind) {
+  const sheet = document.getElementById("advConSheet");
+  const title = document.getElementById("advConTitle");
+  const hint = document.getElementById("advConHint");
+  const out = document.getElementById("advConOut");
+  if (!sheet || !out) return;
+  const names = {
+    active: "当前实际生效", pending: "待生效字体", slots: "全部槽位",
+    replaced: "已替换槽位", scanx: "机型清单槽位", scanextra: "本机扫描补充槽位",
+    clock: "锁屏时钟详情", mount: "实际挂载", verify: "逐个核对", rom: "识别系统"
+  };
+  if (title) title.textContent = names[kind] || "状态详情";
+  if (hint) {
+    hint.style.display = "block";
+    hint.textContent = kind === "verify" ? "异常槽位优先列出，后面是正常槽位。右上角 ‹ 返回。"
+      : kind === "replaced" ? "当前计划里真正写入模块的槽位。右上角 ‹ 返回。"
+      : kind === "clock" ? "每个字体的锁屏时钟配套文件。右上角 ‹ 返回。"
+      : "右上角 ‹ 返回主界面。";
+  }
+  out.innerHTML = '<div style="padding:12px 0;opacity:.65">正在读取…</div>';
+  sheet.classList.add("show");
+  await nextPaint();
+
+  const esc = x => String(x == null ? "" : x).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const done = html => { out.innerHTML = html; };
+  try {
+    if (kind === "active" || kind === "pending") {
+      const id = kind === "active" ? activeId : pendingId;
+      const isNone = !id || id === "none";
+      done('<div style="padding:6px 0;line-height:1.8">'
+        + '<div style="font-size:13px;opacity:.6">' + (kind === "active" ? "当前系统实际使用的字体" : "下次重启后使用的字体") + '</div>'
+        + '<div style="font-size:18px;font-weight:700;margin:4px 0 10px">' + esc(isNone ? "无字体（系统默认）" : labelOf(id)) + '</div>'
+        + '<div style="font-size:12px;opacity:.65">' + (isNone ? "没有替换任何字体。" : "字体 ID：" + esc(id)) + '</div>'
+        + '</div>');
+      return;
+    }
+    if (kind === "clock") {
+      let raw = "";
+      try { raw = String(await ksuExec(`sh ${MODDIR}/fontctl.sh clock-list`) || ""); } catch (e) {}
+      const rows = raw.split("\n").filter(Boolean).map(l => {
+        const p = l.split("|");
+        return { id: p[0], inuse: p[1] === "1", state: p[2] || "idle", size: +p[3] || 0, path: p.slice(5).join("|") };
+      });
+      if (!rows.length) { done('<div style="padding:10px 0;opacity:.65">还没有生成锁屏时钟配套。</div>'); return; }
+      const gs = {};
+      rows.forEach(r => { (gs[r.id] = gs[r.id] || []).push(r); });
+      let h = '<div style="padding:4px 0 10px"><button class="g-btn" onclick="clockAuditUI()">体检当前字体的时钟配套</button></div>'
+        + '<div style="padding:4px 0 8px;font-size:12px;opacity:.65">共 ' + rows.length + ' 个文件</div>';
+      Object.keys(gs).forEach(id => {
+        const list = gs[id], inuse = list.some(x => x.inuse);
+        h += '<div style="margin:12px 0 4px;font-weight:700;font-size:14px">' + esc(nameOf(id))
+          + (inuse ? ' <span style="font-size:10px;color:#2e7d32;border:1px solid rgba(46,125,50,.45);border-radius:5px;padding:1px 4px">在用</span>' : '') + '</div>';
+        list.forEach(f => {
+          h += '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid rgba(128,128,128,.14);font-size:12px">'
+            + '<span style="min-width:0;overflow-wrap:anywhere">' + esc(f.path.split("/").pop()) + '</span>'
+            + '<span style="flex:0 0 auto;color:' + (f.state === "cur" ? '#2e7d32' : f.state === "pend" ? '#f59e0b' : 'var(--text-dim)') + '">' + (f.state === "cur" ? "当前在用" : f.state === "pend" ? "待生效" : "未使用") + '</span></div>';
+        });
+      });
+      done(h);
+      return;
+    }
+    if (kind === "scanx" || kind === "scanextra") {
+      let raw = "";
+      const _sf = kind === "scanx" ? "device.list" : "slots.list";
+      try { raw = String(await ksuExec(`cat ${LIBROOT}/state/scan/${_sf} 2>/dev/null`) || ""); } catch (e) {}
+      const lines = raw.split("\n").map(x => x.trim()).filter(Boolean);
+      if (!lines.length) { done('<div style="padding:10px 0;opacity:.65">还没有扫描清单，先重新扫描一次。</div>'); return; }
+      let h = '<div style="padding:4px 0 10px;font-size:12px;opacity:.65">'
+        + (kind === "scanx" ? "安装时扫描本机得到的槽位" : "机型清单 + 本机扫描合并后的最终槽位")
+        + ' · 共 ' + lines.length + ' 条</div>';
+      if (kind === "scanx") {
+        let _mark = "";
+        try { _mark = String(await ksuExec(`cat ${LIBROOT}/state/scan/.scanmarks 2>/dev/null`) || ""); } catch (e) {}
+        if (_mark.trim()) h = '<div style="padding:4px 0 8px;font-size:12px;opacity:.75;white-space:pre-wrap">扫描印记：' + esc(_mark.trim()) + '</div>' + h;
+      }
+      lines.forEach((ln, i) => {
+        h += '<div style="padding:7px 0;border-top:1px solid rgba(128,128,128,.14)">'
+          + '<div style="display:flex;gap:8px;align-items:flex-start">'
+          + '<span style="font-size:11px;opacity:.45;flex:0 0 auto">' + (i + 1) + '</span>'
+          + '<span style="font-size:12px;overflow-wrap:anywhere;min-width:0">' + esc(ln) + '</span>'
+          + '</div></div>';
+      });
+      done(h);
+      return;
+    }
+    if (kind === "mount" || kind === "rom") {
+      let raw = "";
+      try {
+        raw = kind === "mount"
+          ? String(await ksuExec(`sh ${MODDIR}/adv.sh status 2>&1`) || "")
+          : String(await ksuExec(`getprop ro.product.brand; getprop ro.product.model; getprop ro.build.version.release; getprop ro.build.version.sdk; getprop ro.build.display.id; getprop ro.product.device`) || "");
+      } catch (e) { raw = errText(e) || ""; }
+      done('<pre style="white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,monospace;font-size:12px;line-height:1.7;margin:0">' + esc(raw.trim() || "没有输出") + '</pre>');
+      return;
+    }
+    // slots / verify：列出计划里的每一个槽位，并标出实际状态
+    let raw = "";
+    try { raw = String(await ksuExec(`sh ${MODDIR}/adv.sh slotall 2>&1`) || ""); } catch (e) { raw = errText(e) || ""; }
+    const rows = raw.split("\n").filter(Boolean).map(l => {
+      const p = l.split("|");
+      return { rel: p[0], st: p[1] || "未知", src: p[2] || "", id: p[3] || "" };
+    });
+    if (!rows.length || /没有 slots\.map/.test(raw)) {
+      done('<div style="padding:10px 0;opacity:.7">还没有挂载计划。先应用一次字体。</div>');
+      return;
+    }
+    if (kind === "verify") rows.sort((a, b) => {
+      const ag = /已挂载|已生效/.test(a.st) ? 1 : 0;
+      const bg = /已挂载|已生效/.test(b.st) ? 1 : 0;
+      return ag - bg;
+    });
+    const ok = rows.filter(r => /已挂载|已生效/.test(r.st)).length;
+    const bad = rows.length - ok;
+    let h = "";
+    if (kind === "slots") {
+      const parts = {};
+      rows.forEach(r => { const p = String(r.rel).split("/")[0] || "?"; parts[p] = (parts[p] || 0) + 1; });
+      h += '<div style="padding:4px 0 10px;display:flex;gap:6px;flex-wrap:wrap">';
+      Object.keys(parts).forEach(p => {
+        h += '<span style="font-size:11px;padding:3px 7px;border:1px solid rgba(128,128,128,.25);border-radius:6px">'
+          + esc(p) + ' ' + parts[p] + '</span>';
+      });
+      h += '</div>';
+    }
+    h += '<div style="padding:4px 0 10px;font-size:12px;opacity:.7">'
+      + (kind === "verify" ? "异常优先 · " : kind === "replaced" ? "当前计划 · " : "全部计划 · ")
+      + '共 ' + rows.length + ' 个槽位 · <span style="color:#2e7d32">正常 ' + ok + '</span>'
+      + (bad > 0 ? ' · <span style="color:#f59e0b">异常/未生效 ' + bad + '</span>' : '')
+      + '</div>';
+    rows.forEach(r => {
+      const good = /已挂载|已生效/.test(r.st);
+      const bad2 = /缺失/.test(r.st);
+      const col = good ? "#2e7d32" : (bad2 ? "#ef4444" : "#f59e0b");
+      h += '<div style="padding:8px 0;border-top:1px solid rgba(128,128,128,.14)">'
+        + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">'
+        + '<span style="font-size:12px;font-weight:600;overflow-wrap:anywhere;min-width:0">' + esc(r.rel) + '</span>'
+        + '<span style="flex:0 0 auto;font-size:11px;color:' + col + '">' + esc(r.st) + '</span></div>'
+        + '<div style="font-size:11px;opacity:.55;margin-top:2px;overflow-wrap:anywhere">'
+        + (r.id ? esc(nameOf(r.id)) + ' · ' : '') + esc(r.src) + '</div></div>';
+    });
+    done(h);
+  } catch (e) {
+    done('<div style="padding:10px 0;color:#ef4444">读取失败：' + esc(errText(e)) + '</div>');
+  }
+}
+
+async function setTtcCache(mode) {
+  if (busy) return;
+  busy = true;
+  try {
+    const out = String(await ksuExec(`sh ${MODDIR}/fontctl.sh settings set ttc_cache_mode ${mode} && sh ${MODDIR}/fontctl.sh ttc-mode-clean`) || "");
+    if (/^\s*ERROR/.test(out)) throw new Error(out.replace(/^\s*ERROR:?/, "").trim());
+    showToast(mode === "none" ? "已设为只保留当前缓存" : "已设为全部保留", false, 5000);
+  } catch (e) {
+    showToast("设置缓存失败：" + errText(e), false, 6000);
+  }
+  busy = false;
+}
+
 async function toggleSetting(key) {
   if (busy) return;
   if (key.indexOf("__") === 0) {
@@ -9057,6 +10436,47 @@ async function toggleSetting(key) {
       });
       if (!ok) return;
     }
+  } else if (key === "replace_lockscreen") {
+    nv = settings.replace_lockscreen === "1" ? "0" : "1";
+    if (nv === "1") {
+      const est = String(await ksuExec(`sh ${MODDIR}/engine.sh status 2>/dev/null`) || "");
+      if (!/INSTALLED=1/.test(est)) {
+        await dialog({
+          title: "需要先安装字体工具箱插件",
+          msg: "替换锁屏时钟不是简单换字体文件。\n\n"
+             + "系统会按时钟族的 PostScript 名、字宽、垂直度量去认字体；直接塞主字体会错位或不生效。\n\n"
+             + "需要插件为每个时钟族单独生成配套字体。\n\n"
+             + "请到「高级设置 → 字体工具箱」安装 porsche 插件后再回来打开这个开关。",
+          okText: "知道了"
+        });
+        return;
+      }
+      const _sid = (pendingId && pendingId !== "none") ? pendingId : activeId;
+      let _ready = false, _ct = 0, _cg = 0;
+      if (_sid && _sid !== "none") {
+        try {
+          const cs = String(await ksuExec(`sh ${MODDIR}/fontctl.sh clock-check ${shq(_sid)}`) || "");
+          _ct = parseInt((cs.match(/^CT=(\d+)/m) || [])[1] || "0", 10) || 0;
+          _cg = parseInt((cs.match(/^CG=(\d+)/m) || [])[1] || "0", 10) || 0;
+          _ready = _ct > 0 && _cg >= _ct;
+        } catch (e) {}
+      }
+      const ok = await dialog(_ready ? {
+        title: "开启锁屏时钟替换？",
+        msg: "当前字体已经有完整的锁屏时钟配套（" + _cg + "/" + _ct + "）。\n\n"
+           + "打开开关后直接复用这些文件，不会再生成。\n重启后生效。",
+        okText: "开启"
+      } : {
+        title: "也替换锁屏时钟字体？",
+        msg: "当前字体还没有完整的锁屏时钟配套。\n\n"
+           + "打开后会：\n1. 检测系统实际使用的时钟字体族；\n"
+           + "2. 用插件为每个族生成一份配套字体，保留目标的 PS 名、字宽和度量；\n"
+           + "3. 写进模块的 clock 目录，重启后生效。\n\n"
+           + "首次要处理多个时钟族，可能需要一点时间；之后再切换会直接复用已生成的文件。",
+        okText: "开始生成", danger: true
+      });
+      if (!ok) return;
+    }
   } else {
     nv = settings[key] === "1" ? "0" : "1";
   }
@@ -9066,11 +10486,18 @@ async function toggleSetting(key) {
     row.classList.add("loading");
     const ov = document.createElement("div");
     ov.className = "overlay";
-    ov.innerHTML = '<span class="spin"></span><span>' + ("修改中…") + '</span>';
+    const _ovText = key === "replace_lockscreen"
+      ? (nv === "1" ? "正在生成锁屏时钟…" : "正在关闭锁屏时钟…")
+      : key === "theme_fonts"
+        ? (nv === "1" ? "正在替换主题字体…" : "正在恢复主题字体…")
+        : (nv === "1" ? "正在开启自带挂载…" : "正在切换到管理器挂载…");
+    ov.innerHTML = '<span class="spin"></span><span>' + _ovText + '</span>';
     row.appendChild(ov);
+    showToast(_ovText, true);
   }
   busy = true;
   let success = false;
+  let saved = false;
   let _resultMsg = "";   // ★ 2026-11-01：结果提示攒到最后弹（避免被顶掉，与主项目同版）
   try {
     // ★ 2026-10-17 修：这两步的后端返回必须**真的检查**。
@@ -9081,14 +10508,18 @@ async function toggleSetting(key) {
       showToast("保存设置失败：" + String(setOut).replace(/^\s*ERROR:?/, "").trim());
       throw new Error("settings set failed");
     }
+    saved = true;
     if (pendingId !== "none") {
-      const out = await ksuExec(`sh ${MODDIR}/fontctl.sh reapply`);
+      const _opLabel = key === "theme_fonts" ? "正在替换主题字体"
+        : key === "replace_lockscreen" ? "正在处理锁屏时钟"
+        : /mount/.test(key) ? "正在切换挂载方式" : "正在应用设置";
+      await ksuExec(`sh ${MODDIR}/fontctl.sh apply-bg`);
+      const out = await pollApplyResult(900000, txt => setOverlayText(row && row.querySelector(".overlay"), txt), _opLabel);
       // ★ 2026-11-01 修（与主项目同款正则）：旧版要求第四段必须是 kl=\d，
       //   后端带上 t= 耗时后匹配失败 → 一直误报"处理失败"。第四段放宽为任意。
       const m = out.match(/^OK:(.*?):(\d+):(\w+)(?::([^\n]*))?\s*$/m);
       if (!m) {
-        showToast("处理失败：" + String(out).replace(/^\s*ERROR:?/, "").trim());
-        throw new Error("reapply failed");
+        throw new Error(String(out || "").trim().slice(0, 300) || "reapply failed");
       }
       // ★ 2026-10-17：把模块**实际读到的开关值**显示出来。
       //   用户反馈"切了开关没反应"时，这能直接分辨是"设置没写进去"还是"过滤没生效"。
@@ -9097,7 +10528,10 @@ async function toggleSetting(key) {
       const klTag = _klM ? "（时钟开关=" + _klM[1] + "）" : "";
       const tTag = _tM ? " · 应用耗时 " + _tM[1] + " 秒" : "";
       // ★ 2026-11-01：提示攒到最后弹（refresh 结束后不会被顶掉），6 秒
-      _resultMsg = "已重新生成：" + m[2] + " 个槽位" + klTag + tTag + "，重启后生效";
+      _resultMsg = (_resultMsg ? _resultMsg + " " : "") + "已重新生成：" + m[2] + " 个槽位" + klTag + tTag + "，重启后生效";
+      if (key === "replace_lockscreen" && nv === "1" && _klM && _klM[1] === "1") {
+        _resultMsg = "锁屏时钟未生成：查看 state/logs/clock.log（插件或目标字体可能失败）";
+      }
       // ★ 2026-11-01（与主项目同版）：开关改了设置指纹 → 后台 prewarm-all 把
       //   其他字体的计划按新钥匙提前算好，之后切任何字体都是命中。
       try { ksuExec(`sh -c 'sh ${MODDIR}/fontctl.sh prewarm-all >/dev/null 2>&1 &'`); } catch (_) {}
@@ -9112,7 +10546,17 @@ async function toggleSetting(key) {
     //   后端、缓存、性能都没问题，就是前端状态没同步。
     settings[key] = nv;
   } catch (e) {
-    if (!/failed$/.test(String(e && e.message))) showToast("修改失败：" + errText(e));
+    if (saved) {
+      settings[key] = nv;
+      success = true;
+      if (/TIMEOUT|处理超时/.test(String(e && e.message || ""))) {
+        _resultMsg = "设置已保存；后台仍在生成，稍后看顶部状态，不要重复点";
+      } else {
+        _resultMsg = "设置已保存，但应用失败：" + errText(e).slice(0, 200);
+      }
+    } else if (!/failed$/.test(String(e && e.message))) {
+      showToast("修改失败：" + errText(e));
+    }
   }
   if (!success && sw) sw.classList.toggle("on"); // 回滚
   if (row) { row.classList.remove("loading"); const ov = row.querySelector(".overlay"); if (ov) ov.remove(); }
@@ -9128,7 +10572,7 @@ async function toggleSetting(key) {
   // ★ 2026-10-30（性能）：切开关不会改变字体列表，refreshAll（又一次 quick）省掉；
   //   顶部槽位统计 refreshStatusOnly 已经覆盖，1.2 秒后再补一次重的（VF/MO/verify）。
   // ★ 2026-11-01：结果提示**最后弹**（refresh 都结束了，没人再顶它），6 秒读得完
-  if (_resultMsg) showToast(_resultMsg, false, 3000);   // 统一 3 秒（作者定稿）
+  if (_resultMsg) showToast(_resultMsg, false, 3000);   // 统一 3 秒（定稿）
   setTimeout(() => { try { refreshStatusOnly(); } catch (e) {} }, 1200);
 }
 /* ---------- 诊断报告 ---------- */
@@ -9204,7 +10648,7 @@ const repTxt = () => repEl("reportText");
       cur.lines.push(l);
     }
     if (cur) secs.push(cur);
-    // ★ 2026-10-18（作者反馈：括号里 0/4/5/1/2/3 顺序乱）
+    // ★ 2026-10-18（实测：括号里 0/4/5/1/2/3 顺序乱）
     //   diag.sh 是按"算到哪写到哪"输出章节的，所以正文里出现顺序不一定是编号顺序。
     //   这里按编号升序重排，让用户从上往下看就是 0→1→2→…；
     //   "结论"卡没有 idx，固定留在最前面。
@@ -9412,10 +10856,10 @@ function repSetEta(etaSec) {
   repEtaBase = (e > 0) ? e : 0;      // 静态预估（秒），只做兜底
 }
 function repEtaText(kv, used) {
-  // ★ 2026-10-18（作者要求）：原来的"按实际速度推算"会让预计时间**来回跳**
+  // ★ 2026-10-18（设计）：原来的"按实际速度推算"会让预计时间**来回跳**
   //   （某一步快一点它就缩、慢一点它就涨，看着像坏了）。
   //   现在改成**固定倒计时**：给一个总时长，显示"还剩 X 分 Y 秒"，只减不增。
-  //   · 总时长 6 分钟是实测的中位值（作者机器上约 5 分 30）
+  //   · 总时长 6 分钟是实测的中位值（开发者机器上约 5 分 30）
   //   · 加一点**基于开始时间的稳定扰动**（±20 秒）：同一次生成里数字恒定不乱跳，
   //     不同次之间略有差别，不会让人以为"卡在同一个数"
   //   · 进度真的超时了就停在"马上就好"，不显示负数
@@ -9442,7 +10886,7 @@ function repPaintEta() {
     else if (e && e.left > 3) bits.push("还剩 <b>" + fmtClock(e.left) + "</b>");
     else if (!used) bits.push("正在启动检测…");
     // ★ 2026-10-14：**不再提示"可以关窗口去后台"**。
-    //   原因（作者的话）：Android 上切到后台很可能被墓碑/省电策略**冻结**，
+    //   原因（开发者的话）：Android 上切到后台很可能被墓碑/省电策略**冻结**，
     //   用户过几十分钟切回来看进度没动，会以为"这么慢"而直接中止 ——
     //   提示反而把事情搞坏。所以这里只说"要花点时间"+ 能停在哪。
     bits.push('<span style="opacity:.75;font-weight:400">（生成期间请留在这一页，切走可能被系统冻结）</span>');
@@ -9495,7 +10939,7 @@ function repPaintRunning(kv, sub) {
   repEl("reportRegenBtn").style.display = "none";
   repEl("reportChoice").style.display = "none";
   repEl("reportChoiceHint").style.display = "none";
-  // 新一轮生成开始 → 把上次那份的"上传给作者"收起来（避免误传旧报告）
+  // 新一轮生成开始 → 把上次那份的"上传给开发者"收起来（避免误传旧报告）
   try { repEl("reportServerBtn").style.display = "none"; } catch (e) {}
       repEl("reportTip").style.display = "block";
   repEl("reportTip").innerHTML = repTipText(kv);
@@ -9528,7 +10972,7 @@ async function repPaintDone(kv) {
   repEl("reportRegenBtn").style.display = "";
   repEl("reportChoice").style.display = "none";
   repEl("reportChoiceHint").style.display = "none";
-  // ★ 2026-10-16：生成完成了 → 才把"上传给作者"露出来（没生成就没有文件可传）
+  // ★ 2026-10-16：生成完成了 → 才把"上传给开发者"露出来（没生成就没有文件可传）
   try { repEl("reportServerBtn").style.display = ""; } catch (e) {}
   const meta = await readReportMeta();
   const size = +kv.size || +meta.size || 0;
@@ -9573,7 +11017,7 @@ function repPaintSimple(kind, msg) {
   repEl("reportChoice").style.display = "none";
   repEl("reportChoiceHint").style.display = "none";
   repEl("reportEtaText").style.display = "none";
-  // 中止/失败时没有新报告可传 → 收起"上传给作者"
+  // 中止/失败时没有新报告可传 → 收起"上传给开发者"
   // （注意：如果这次是"未完成"，文件里仍有已生成的部分，但由用户自己决定发不发；
   //   这里先收起，避免误发一份残缺的报告。）
     repEl("reportProgressBar").parentElement.classList.remove("running");
@@ -9895,7 +11339,7 @@ function liveBusy(on) {
 }
 
 // 只挂载（**界面上不再暴露这个按钮**）
-// 作者问过只挂载有什么意义 —— 确实没有：挂载成功与否用户看不出来，
+// 注意过只挂载有什么意义 —— 确实没有：挂载成功与否用户看不出来，
 // 而「让新字体生效」一次就把挂载+重读都做了。
 // 保留这个函数是为了以后排查（命令行 sh live.sh mount 也能做同样的事）。
 async function liveMountOnly() {
@@ -9908,7 +11352,7 @@ async function liveMountOnly() {
 }
 
 // 撤销现场挂载 —— 回到"原字体"
-// ★ 关键认知（作者问过"点撤销就变回默认字体吗"）：
+// ★ 关键认知（注意过"点撤销就变回默认字体吗"）：
 //   撤销只是把**文件**还原了；框架已经把字体读进内存，
 //   不重读的话**屏幕上的字不会变** —— 用户会以为撤销失败。
 //   所以这个按钮做两件事：撤销 + 让框架重读（这一步不可逆，先确认）。
@@ -9965,7 +11409,7 @@ async function liveFree() {
   } catch (e) { go = true; }
   if (!go) return;
 
-  // ★★ 2026-10-18 修「点第一下没反应」（作者真机反馈）
+  // ★★ 2026-10-18 修「点第一下没反应」（开发者真机反馈）
   //
   // 原因：ksu.exec 底层是同步的 —— 一调用，WebView 的 JS 线程就冻住。
   //       原来下一行立刻发 live.sh mount，于是上面那句"正在挂载…"**根本画不出来**，
@@ -10036,8 +11480,8 @@ function hideBusy() {
 // 给 Promise 套一个超时，避免弱网下按钮一直转、用户以为死机
 // 状态行（比 toast 好：能显示多行、能一直挂着让人看完）
 // 采集快捷报告 → 返回文本（失败抛错）
-// 「一键上报」：采集 → 发给 Web3Forms → 作者邮箱
-// ★ 2026-10-16 作者要求：**发送前必须有一次确认**，并把"不会泄露隐私"讲清楚。
+// 「一键上报」：采集 → 发给 Web3Forms → 开发者邮箱
+// ★ 2026-10-16 设计：**发送前必须有一次确认**，并把"不会泄露隐私"讲清楚。
 //   讲清"不采集什么"比空泛的"绝对安全"更有说服力 —— 用户能自己核对。
 //   注意 dialog() 的 msg 是走 textContent，所以换行直接写 \n 就是真换行。
 const FBK_PRIVACY =
@@ -10051,8 +11495,8 @@ const FBK_PRIVACY =
   "  ✗ IMEI / 序列号等设备标识\n" +
   "  ✗ 你装了哪些 App\n" +
   "  ✗ 照片 / 文件 / 聊天 / 位置\n\n" +
-  "只发到作者手里，不公开、不外传。\n" +
-  "（传到作者自己的服务器；服务器在国外，上传失败就挂个梯子再试）\n" +
+  "只发到开发者手里，不公开、不外传。\n" +
+  "（传到开发者自己的服务器；服务器在国外，上传失败就挂个梯子再试）\n" +
   "本地也留一份：Download/快捷报告.txt\n" +
   "（可先用「导出小报告」看一遍再发）";
 
@@ -10061,7 +11505,7 @@ const FBK_PRIVACY =
 //   WebView 会抛编码异常。实测复现报错：
 //     UnicodeEncodeError: 'latin-1' codec can't encode characters in position 6-12
 //   所以 X-CFS-* 这些头一律先 encodeURIComponent，Worker 那边再 decodeURIComponent。
-/* ★ 2026-10-16（作者要求）：上报前弹一次窗 —— 让用户**描述遇到的问题** + 确认隐私/VPN。
+/* ★ 2026-10-16（设计）：上报前弹一次窗 —— 让用户**描述遇到的问题** + 确认隐私/VPN。
    两条上报路径（完整报告 / 快捷上报）共用这一个函数，话术只有一份。
    返回：null = 用户取消；字符串（可能是空串）= 用户填的描述。 */
 /* ★ 2026-10-16 修（真机实测发现）：完整报告上传后，后台列表里设备显示 unknown、系统显示 ?
@@ -10081,11 +11525,11 @@ function repMetaFromText(txt) {
   return { dev, rom, ver };
 }
 
-/* ★ 2026-10-17（作者要求去掉悬浮窗）：
+/* ★ 2026-10-17（设计去掉悬浮窗）：
    原来这里是一层全屏遮罩，用来盖住"点上传时下半屏白"。
    现在改成**只用 toast 提示**（读报告 / 检查网络 / 上传中 / 重试 / 成功 / 失败）。
    下面两个函数保留成空操作 —— 调用点有 6 处，删掉会让它们抛 ReferenceError。 */
-// ★ 2026-10-17（作者要求）：**去掉上传悬浮窗** —— 有"已上传，谢谢！"那个提示就够了。
+// ★ 2026-10-17（设计）：**去掉上传悬浮窗** —— 有"已上传，谢谢！"那个提示就够了。
 //   这里保留成空函数，因为调用点有 6 处（包括"失败也要撤遮罩"那条路径），
 //   删掉函数会让那些地方抛 ReferenceError。空函数最安全。
 let _repBusyTimer = null;
@@ -10106,11 +11550,11 @@ function repBusyHide() { /* 悬浮窗已去掉 */ }
 async function askDesc(what) {
   try {
     const v = await dialog({
-      title: "把" + (what || "这份报告") + "发给作者？",
+      title: "把" + (what || "这份报告") + "发给开发者？",
       msg: "报告里是设备型号 / Android 版本 / 模块版本 / 字体挂载情况 /\n" +
            "字体文件名清单 / 挂载与开机日志。\n" +
            "不会采集：手机号、账号、通讯录、IMEI、你装了哪些 App、照片 / 聊天 / 位置。\n" +
-           "只发到作者手里，不公开、不外传。\n\n" +
+           "只发到开发者手里，不公开、不外传。\n\n" +
            "⚠️ 服务器在境外 —— 请先连上 VPN，否则会卡住或失败。",
       text: "",
       textHint: "遇到什么问题？（可不填）\n例：某个 App 里字体没变 / 中文变方块 / 只有桌面生效",
@@ -10126,7 +11570,7 @@ async function askDesc(what) {
 
 /* ★ 2026-10-24 v2：抓日志的界面交互
    · 启动用后台方式（exec 立刻返回），状态靠 fetch 读 webroot/logstate.txt —— 不卡界面
-   · 按钮变字 + 转圈；停止后可以一键上传给作者
+   · 按钮变字 + 转圈；停止后可以一键上传给开发者
 */
 let __lcTimer = null;
 
@@ -10200,7 +11644,7 @@ async function logcatchGo(act) {
       const out = String(await ksuExec("sh " + MODDIR + "/logcatch.sh stop 2>&1") || "");
       const esc = out.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>");
       lcUI(false);
-      lcSay(esc + "<br><span style='opacity:.75'>可以直接点「上传给作者」，或把这个文件发给作者。</span>", "#4ade80");
+      lcSay(esc + "<br><span style='opacity:.75'>可以直接点「上传给开发者」，或把这个文件发给开发者。</span>", "#4ade80");
       const m = out.match(/\/sdcard\/Download\/[^\s]+\.txt/);
       if (m) showToast("已导出：" + m[0].split("/").pop());
     }
@@ -10215,7 +11659,7 @@ async function logcatchUpload() {
   try {
     // ① 先问一句"遇到什么问题" + 隐私/VPN 说明（和完整报告同一个弹窗）
     const _d = await askDesc("这份日志");
-    if (_d === null) { lcSay("已取消上传（文件还在 Download 里，可以直接发给作者）"); return; }
+    if (_d === null) { lcSay("已取消上传（文件还在 Download 里，可以直接发给开发者）"); return; }
     const note = String(_d || "");
 
     // ② 找到刚导出的文件
@@ -10235,12 +11679,12 @@ async function logcatchUpload() {
       } catch (e) { _gate = false; }
       if (!_gate) {
         lcSay("连不上服务器 —— 服务器在境外，请先把梯子切成<b>全局模式</b>再点一次。<br>" +
-              "文件已经在这：<b>" + repEsc(path) + "</b>，也可以直接发给作者。", "#ff8f6b");
+              "文件已经在这：<b>" + repEsc(path) + "</b>，也可以直接发给开发者。", "#ff8f6b");
         return;
       }
     }
     if (!_gate) {
-      lcSay("已取消上传。文件已保存在：<br>" + repEsc(path) + "<br>可以直接发给作者。");
+      lcSay("已取消上传。文件已保存在：<br>" + repEsc(path) + "<br>可以直接发给开发者。");
       return;
     }
 
@@ -10253,18 +11697,18 @@ async function logcatchUpload() {
     if (/ok|OK/.test(out) && !/ERROR/.test(out)) {
       const id = (out.match(/[A-Z0-9]{6,}/) || [""])[0];
       lcSay("✅ 已上传，谢谢！" + (id ? "（编号 <b>" + repEsc(id) + "</b>）" : "") +
-            "<br><span style='opacity:.75'>作者能直接看到这份日志。</span>", "#4ade80");
+            "<br><span style='opacity:.75'>开发者能直接看到这份日志。</span>", "#4ade80");
     } else {
       lcSay("上传失败：<br>" + repEsc(out).replace(/\n/g, "<br>") +
-            "<br><span style='opacity:.75'>文件还在：" + repEsc(path) + " —— 可以直接发给作者。</span>", "#ff8f6b");
+            "<br><span style='opacity:.75'>文件还在：" + repEsc(path) + " —— 可以直接发给开发者。</span>", "#ff8f6b");
     }
   } catch (e) {
     lcSay("上传失败：" + errText(e), "#ff6b6b");
   } finally {
-    if (b) { b.classList.remove("cfs-busy"); b.textContent = "上传给作者"; }
+    if (b) { b.classList.remove("cfs-busy"); b.textContent = "上传给开发者"; }
   }
 }
-// 「开始/停止」同一个按钮：抓取中再点就是停止（作者反馈：开始后像没反应）
+// 「开始/停止」同一个按钮：抓取中再点就是停止（实测：开始后像没反应）
 async function logcatchStart() {
   const kv = await lcReadState();
   if (kv && kv.state === "on") return logcatchGo("stop");
@@ -10293,16 +11737,16 @@ async function shWriteB64(text, path) {
   await ksuExec("printf '%s' '" + b64 + "' | base64 -d > " + path);
 }
 
-// 走作者自己的 Worker（Cloudflare R2）—— 完整报告，不截断
+// 走开发者自己的 Worker（Cloudflare R2）—— 完整报告，不截断
 // 返回 { id, bytes }；失败抛错，调用方回退到 Web3Forms
 // 设备标签（给邮件主题 / Issue 标题用）
 // ★ 不从 DOM 取 —— 实测界面里没有 brandLabel/modelLabel 这两个 id，
 //   靠 textContent 会静默拿到空值。改成**从刚采集的报告文本里解析**，更可靠。
-// ---- 报告弹窗里的「上传给作者」----（2026-10-16 起走作者自己的服务器）
+// ---- 报告弹窗里的「上传给开发者」----（2026-10-16 起走开发者自己的服务器）
 // 只在生成完成后才出现（见 repPaintDone）。先把报告开头读出来当摘要，
 // 再打开 Issue 页面；完整报告本身作为附件由用户拖动上传。
-/* 上传【完整报告】到作者自己的服务器（Cloudflare Worker → R2）
-   ★ 2026-10-16 作者要求："完整报告也走这个渠道"
+/* 上传【完整报告】到开发者自己的服务器（Cloudflare Worker → R2）
+   ★ 2026-10-16 设计："完整报告也走这个渠道"
      · 以前这个按钮是"打开 GitHub 新建 Issue，让你把报告拖进去"
        —— 手机上 github.com 在没梯子时打不开，而且拖文件很别扭
      · 现在直接 POST 上来，一次到位；报告整份存 R2，**不截断**
@@ -10310,7 +11754,7 @@ async function shWriteB64(text, path) {
    两种上传方式（按文件大小自动选）：
      · 小于 1.5MB：用 fetch 直接发（简单，走 WebView 的网络栈）
      · 更大：用设备上的 curl 发（避免把几十万字符塞过 shell 桥）
-   两者都带上 x-cfs-* 头，作者后台列表里能直接看出是谁的问题。 */
+   两者都带上 x-cfs-* 头，开发者后台列表里能直接看出是谁的问题。 */
 // 上传结果弹窗（只弹一次；成功给编号、失败给原因）
 let __subUpResult = null;
 async function repShowUploadResult() {
@@ -10324,14 +11768,14 @@ async function repShowUploadResult() {
       const num = (String(r.raw || "").match(/[A-Z0-9]{6}/) || [])[0] || "";
       await dialog({
         title: "上传成功",
-        msg: "报告已收到，谢谢！" + (num ? "\n\n报告编号：" + num : "") + "\n\n作者能看到完整内容，不用再做什么了。",
+        msg: "报告已收到，谢谢！" + (num ? "\n\n报告编号：" + num : "") + "\n\n开发者能看到完整内容，不用再做什么了。",
         okText: "知道了"
       });
     } else {
       await dialog({
         title: "上传失败",
         msg: "原因：" + String(r.err || "未知") +
-             "\n\n报告已保存在 Download/，可以直接把文件发给作者。" +
+             "\n\n报告已保存在 Download/，可以直接把文件发给开发者。" +
              "\n\n想自己传：确认梯子是【全局模式】，或给管理器 App 开代理。",
         okText: "知道了"
       });
@@ -10385,11 +11829,11 @@ async function fbkQuickSend() {
       "command -v curl >/dev/null 2>&1 && curl -sS -m 6 -o /dev/null -w '%{http_code}' " +
       WORKER_URL + "/health 2>/dev/null || echo NOCURL")).trim();
     if (code === "NOCURL") {
-      fbkSay("设备上没有 curl，没法直传。报告已保存到 Download/快捷报告.txt，可以直接发给作者。", "err");
+      fbkSay("设备上没有 curl，没法直传。报告已保存到 Download/快捷报告.txt，可以直接发给开发者。", "err");
       return;
     }
     if (code === "000" || code === "") {
-      fbkSay("连不上服务器（多半是没连 VPN）。报告已保存到 Download/快捷报告.txt，可以直接发给作者。", "err");
+      fbkSay("连不上服务器（多半是没连 VPN）。报告已保存到 Download/快捷报告.txt，可以直接发给开发者。", "err");
       __subUpResult = { ok: false, err: "网络不通（服务器在境外，需要 VPN）" };
       __subUpShown = false;
       await repShowUploadResult();
@@ -10412,7 +11856,7 @@ async function fbkQuickSend() {
       await repShowUploadResult();
     } else {
       fbkSay("上传失败：" + (raw.slice(0, 120) || "服务器没响应") +
-             "<br>报告已保存到 Download/快捷报告.txt，可以直接发给作者。", "err");
+             "<br>报告已保存到 Download/快捷报告.txt，可以直接发给开发者。", "err");
       __subUpResult = { ok: false, err: raw.slice(0, 160) || "服务器没响应" };
       __subUpShown = false;
       await repShowUploadResult();
@@ -10461,11 +11905,11 @@ async function fbkSelfTest() {
     } else if (raw === "200" || raw === "204") {
       say("✅ 服务器能连上（HTTP " + raw + "），可以直接上传。", "#4ade80");
     } else if (raw === "401" || raw === "403") {
-      say("服务器能连上，但口令不对（HTTP " + raw + "）。<br>请把这条发给作者。", "#ffb84d");
+      say("服务器能连上，但口令不对（HTTP " + raw + "）。<br>请把这条发给开发者。", "#ffb84d");
     } else if (raw === "000" || raw === "") {
       say("❌ 连不上服务器（超时/被拦）。<br>服务器在境外 —— 先连 VPN（建议全局模式），或给管理器 App 开代理。", "#ff6b6b");
     } else {
-      say("服务器返回 HTTP " + raw + "（能连上，但状态异常）。<br>把这条发给作者。", "#ffb84d");
+      say("服务器返回 HTTP " + raw + "（能连上，但状态异常）。<br>把这条发给开发者。", "#ffb84d");
     }
   } catch (e) {
     say("检测失败：" + errText(e), "#ff6b6b");
@@ -10479,7 +11923,7 @@ async function repSendServer() {
   const btn = repEl("reportServerBtn");
   if (btn && btn.disabled) return;
 
-  // ★ 2026-10-16（作者要求）：上传前弹一次窗，同时做两件事 ——
+  // ★ 2026-10-16（设计）：上传前弹一次窗，同时做两件事 ——
   //   ① 让用户填「遇到什么问题」（可选，但填了排查快很多）
   //   ② 说清 VPN + 隐私（原来这段是只读话术）
   //   合成一个窗，避免连弹两次；用户取消就中止上传。
@@ -10502,9 +11946,9 @@ async function repSendServer() {
     } catch (e) {}
   }, 75000);
 
-  // ★ 2026-10-17（作者真机反馈"点上传时下半屏白，上传完才恢复"）：
+  // ★ 2026-10-17（开发者真机反馈"点上传时下半屏白，上传完才恢复"）：
   //   我第一版推断是"软键盘收起后 WebView 没重排"，加了下面这三步 ——
-  //   但作者实测**白屏仍在**，所以那个推断不成立（别把它当结论）。
+  //   但开发者实测**白屏仍在**，所以那个推断不成立（别把它当结论）。
   //   这三步无害，保留着（动一下版面，能救回一部分渲染问题）。
   //   （要真找根因得有真机 WebView 环境，我这边复现不了。）
   try {
@@ -10540,7 +11984,7 @@ async function repSendServer() {
     let sz = parseInt(szs, 10) || 0;
     let _usePath = path;
     if (!sz) {
-      const alt = LIB + "/font_diag.txt";
+      const alt = LIBROOT + "/font_diag.txt";
       const s2 = parseInt((await ksuExec(`wc -c < ${alt} 2>/dev/null`)).trim(), 10) || 0;
       if (s2) { sz = s2; _usePath = alt; }
     }
@@ -10556,7 +12000,7 @@ async function repSendServer() {
     showToast("正在上传 " + Math.round(sz / 1024) + " KB…（别退出）");
     showToast("正在检查网络…");
 
-    // ★ 2026-10-17（作者反馈"卡住不知道传没传"）：先花最多 6 秒探一下服务器通不通。
+    // ★ 2026-10-17（实测"卡住不知道传没传"）：先花最多 6 秒探一下服务器通不通。
     //   网络对国内大多不通 —— 不通就**立刻**告诉他，不用等 3 分钟。
     try {
       await ksuExec("command -v curl >/dev/null 2>&1 && curl -sS -m 6 -o /dev/null -w '%{http_code}' " +
@@ -10577,7 +12021,7 @@ async function repSendServer() {
                 // ★ 用户填的"遇到什么问题"（百分号编码 —— 头里不能有中文/换行）
                 " -H 'x-cfs-desc: " + fbkHdr(repDesc, 700) + "'" +
                 " -H 'Content-Type: text/plain; charset=utf-8'";
-    // ★ 2026-10-17（作者真机反馈"卡住不动、不知道传没传"）：
+    // ★ 2026-10-17（开发者真机反馈"卡住不动、不知道传没传"）：
     //   原来是单次 curl -m 90 —— 连接阶段卡住就要干等 90 秒，失败也没原因。
     //   现在：**每次 35 秒（连接 8 秒就超时）+ 最多 3 次重试**，
     //   每次更新遮罩的"第 N/3 次"，失败时把 curl 的最后一句话带出来。
@@ -10798,7 +12242,7 @@ function resetInstallButton(has) {
 
 /* ---------- 更新下载进度条 ---------- */
 // ratio = 进度（0~1）；noBar = true 时**不显示进度条**，只显示文字。
-// ★ 2026-10-19（作者要求）：安装阶段不要进度条 —— 管理器的解包进度无法测量，
+// ★ 2026-10-19（设计）：安装阶段不要进度条 —— 管理器的解包进度无法测量，
 //   画个条子只能是编的。装的时候只写「正在安装中…」，别的一概不表示。
 function updProg(text, ratio, noBar) {
   const box = document.getElementById("updProgress");
@@ -10817,7 +12261,7 @@ function hideUpdProg() {
   if (box) box.classList.remove("show");
 }
 
-// ★ 2026-10-19（作者反馈「没安装完就提示重启」）：
+// ★ 2026-10-19（实测「没安装完就提示重启」）：
 //   这个标志让界面明确知道"此刻正在下载/安装"，装完之前**绝不**显示红色重启按钮。
 //   以前是根据"版本号 + 开机标识"间接推断，安装期间就会被误判成"已装完待重启"。
 let updRunning = false;
@@ -10853,7 +12297,7 @@ function startUpdateProgress() {
           //   而安装阶段是从 97% 起算的 —— 于是"下载满 100% → 进入安装掉回 97.5%"，
           //   进度条倒退一下，看着像出错。
           //   现在下载封顶 97%，跟安装段衔接上，全程单调上升。
-          // ★ 2026-10-18（作者反馈「一秒到头」）：下载只占 0~85%，
+          // ★ 2026-10-18（实测「一秒到头」）：下载只占 0~85%，
           //   把 85~100% 留给安装段 —— 否则网快的时候一下子冲到 97%、
           //   然后安装在 3% 里几乎看不出变化，像卡死。
           const raw = Math.min(1, cur / total);
@@ -10884,7 +12328,7 @@ function startUpdateProgress() {
       } else if (stage === "verify") {
         updProg("正在校验刷机包…", 0.96);
       } else if (stage === "install") {
-        // ★ 2026-10-19（作者要求：别搞太复杂）：**安装阶段不再显示百分比**。
+        // ★ 2026-10-19（设计：别搞太复杂）：**安装阶段不再显示百分比**。
         //   管理器的输出节奏完全不可控，百分比只能按耗时瞎猜 → 条子来回跳，
         //   用户看着像"出错了"。现在让条子停在 97% 不动，只写"正在安装中"，
         //   真装完了才跳到 100%。慢就是慢，不假装知道进度。
@@ -10924,7 +12368,7 @@ function renderUpdate(u) {
   updateInfo = u;
   const has = u.HAS === "1";
   const done = updateDoneCode();
-  // ★ 2026-10-15 修「装完了按钮却变回『下载并安装』」（作者真机实测）：
+  // ★ 2026-10-15 修「装完了按钮却变回『下载并安装』」（开发者真机实测）：
   //   原来只信 localStorage 里那个标记（它只在"UI 认为成功"时才写）。
   //   而 UI 可能误报失败（那条路上不写标记）→ 重启后 has 变 false（已是最新）
   //   → pendingReboot 直接为假 → 按钮变回「下载并安装」，用户以为没装上。
@@ -10969,7 +12413,7 @@ function renderUpdate(u) {
 
 // 线上更新：取「线上最新」的更新日志。
 // ★ 一定要用 fetch，不能用 ksuExec —— ksuExec 底层同步，会把 JS 线程整个冻住，
-//   联网那几秒里连"关闭"都点不动（作者真机反馈过两次）。
+//   联网那几秒里连"关闭"都点不动（开发者真机反馈过两次）。
 //   fetch 是真异步：界面不卡、随时能关、还能 abort。
 // 给 Promise 套一个超时。fetch 在部分 WebView/弱网下会一直挂着不返回，
 // 不套超时的话"看线上最新"会永远转圈（这正是之前更新日志卡死的那类问题）。
@@ -11084,7 +12528,7 @@ async function installUpdate() {
     okText: "下载并安装"
   });
   if (!ok) return;
-  // ★ 2026-10-19（作者反馈：退出 UI 重进还能再点安装 → 可能并发装两次）：
+  // ★ 2026-10-19（实测：退出 UI 重进还能再点安装 → 可能并发装两次）：
   //   前端这里加一道互斥；后端 installbg 也会拒绝（返回 OK:running）。
   if (updRunning) { showToast("正在安装中，请等它结束（不要重复点击）", true); return; }
   busy = true;
@@ -11223,7 +12667,7 @@ async function waitUpdateWorker() {
     if (lastStage === "finished" || lastStage === "error") {
       return { stage: lastStage, msg: lastMsg, rc: kv.done };
     }
-    // ★ 2026-10-18 修「没装完就提示重启」（作者真机反复反馈）：
+    // ★ 2026-10-18 修「没装完就提示重启」（开发者真机反复反馈）：
     //   原来这里写的是——状态文件消失(none)就当成"装完了"。
     //   而安装失败时 worker 也会清状态文件；轮询只要错过那一刻的 error，
     //   就会读到 none → 误判成功 → 提示重启 → 用户一重启，安装就断了。
@@ -11244,7 +12688,7 @@ async function waitUpdateWorker() {
 }
 
 /* ---------- 重进页面时，接管"上一次还没跑完"的安装 ---------- */
-// ★ 2026-10-19（作者反馈）：点安装后退出 UI 再进来，按钮又是可点的，
+// ★ 2026-10-19（实测）：点安装后退出 UI 再进来，按钮又是可点的，
 //   万一再点一次就可能并发安装。这里在页面加载时先看一眼后端状态：
 //   还在下载/安装 → 禁用按钮、恢复进度显示、继续等它结束（装完照常提示重启）。
 async function resumeRunningUpdate() {
@@ -11319,13 +12763,14 @@ async function resumeRunningUpdate() {
 // 注意：以前是 refreshAll() 还没回来就去比对 curVerLabel，结果缓存永远对不上、用不上
 (async function init() {
   setCacheLoad();   // 先用上次记录渲染（同步、秒出）
+  try { porscheApplyCachedStatus(); } catch (e) {}
   loadSettings();  // 再从模块读真值覆盖
   try { uiApply(); } catch (e) {}
   // ★ 2026-10-31（永久目录）：界面设置与高级解锁标记以 $LIB 里的文件为正本——
   //   localStorage 在更新模块 / 清 WebView 数据后会丢，$LIB 里的不会。
   //   ui.json 恢复后再调一次 uiApply，壁纸（bg=./bg.jpg）也会跟着回来。
   try {
-    const _uiRaw = String(await ksuExec(`cat ${LIB}/ui.json 2>/dev/null`) || "").trim();
+    const _uiRaw = String(await ksuExec(`cat ${LIBROOT}/ui.json 2>/dev/null`) || "").trim();
     if (_uiRaw) {
       const _o = JSON.parse(_uiRaw);
       if (_o && typeof _o === "object") {
@@ -11352,6 +12797,12 @@ async function resumeRunningUpdate() {
   setTimeout(() => { ensureFontData().catch(() => {}); }, 1200);
   setTimeout(() => { ensureScanCache().catch(() => {}); }, 900);
   setTimeout(() => { refreshGoogle().catch(() => {}); }, 400);
+  setTimeout(async () => {
+    try {
+      const r = await porscheRefreshStatus();
+      if (r && r.ins) await porscheRefreshLatest(true);
+    } catch (e) {}
+  }, 1000);
   // ★ 2026-10-25：进页面读一次全部开关（之后就靠内存，不再每次开菜单都读）
   setTimeout(() => { advSyncFromDump().catch(() => {}); }, 800);
   /* 旧缓存渲染已移除（新版会自己查一次） */
@@ -11362,7 +12813,7 @@ async function resumeRunningUpdate() {
 })();
 
 /* ===========================================================================
-   ★ 2026-10-25 更新区重写（作者要求：别在旧逻辑上修，整块换掉）
+   ★ 2026-10-25 更新区重写（设计：别在旧逻辑上修，整块换掉）
 
    状态机：idle → checking → downloading（有进度条）→ installing（只有转圈/文字）
            → done（按钮变「立即重启生效」）→ error
@@ -11473,6 +12924,7 @@ async function u2curVer() {
 /* 检查更新（浏览器 fetch，不冻结界面） */
 
 const UPD_JSON_URLS = [
+  "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/" + fontPackVariant() + "/manager-update.json",
   "https://raw.githubusercontent.com/ayss2188/porsche-font/main/update.json",
   "https://cdn.jsdelivr.net/gh/ayss2188/porsche-font@main/update.json",
   "https://raw.githubusercontent.com/ayss2188/porsche-font/main/update-718.json"
@@ -11709,11 +13161,17 @@ async function updResume() {
   <div class="sheet" id="advConSheet" style="z-index:16">
     <div class="sheet-head">
       <div class="sheet-title" id="advConTitle">运行结果</div>
-      <button class="sheet-x" onclick="advConClose()" aria-label="关闭">✕</button>
+      <div style="display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 auto">
+        <button class="sheet-back" onclick="advConBack()" aria-label="返回上一级">‹</button>
+        <button class="sheet-x" onclick="advConClose()" aria-label="关闭">✕</button>
+      </div>
     </div>
     <div class="fbk-body" style="padding:0 16px 24px">
       <div class="g-hint" id="advConHint" style="display:none;margin:8px 0 10px"></div>
       <div class="adv-out" id="advConOut">正在执行…</div>
+    </div>
+    <div class="sheet-foot" id="advConFoot" style="display:none">
+      <button class="g-btn primary-blue" id="porscheZipInstallBtn" onclick="porscheZipInstallSelected()" disabled>安装选中 (0)</button>
     </div>
   </div>
 

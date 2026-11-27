@@ -11,7 +11,16 @@
 #
 # 分区（开关只决定读不读某个分区，不用扫描）：
 #   [main]    主力字体（中/英/数字）—— 永远读
-#   [clock]   时钟字体 —— 「保留锁屏时钟」开着时不读
+#   # 实测 OriginOS 7（vivo PD2602，Android 17，17.0.15.22.W10）：
+#   时钟字体全部在 /system/fonts，fonts.xml 不引用，必须按文件名检测。
+#   vivoSansClockVF / RoundedVF / SerifVF / SlabVF / StencilVF / InlineVF：
+#       upem 2048，wght 100-850 默认 400，另有 slnt 0-10
+#   vivoSansClockHAVF/HA Serif/HASquare：
+#       upem 2048，wght 100-850 或 ytde 轴
+#   vivoSansClockSilkVF：wght + wdth + slnt
+#   静态 vivoSansClock-*：upem 1000，digit 611-728
+
+[clock]   时钟字体 —— 「保留锁屏时钟」开着时不读
 #   [theme]   主题字体（圆体/方体/衬线/斜体/等宽/装饰）
 #   [cjk]     中文（繁中/兰亭）
 #   [kana]    日文     [hangul] 韩文
@@ -20,6 +29,26 @@
 [clock]
 AndroidClock.ttf
 VivoClock.ttf
+vivoSansClockVF.ttf
+vivoSansClock-Bold.ttf
+vivoSansClock-Light.ttf
+vivoSansClockHASerifVF-OS7.ttf
+vivoSansClockHASerifVF.ttf
+vivoSansClockHASquareVF.ttf
+vivoSansClockHAVF-OS7.ttf
+vivoSansClockHAVF.ttf
+vivoSansClockInline.ttf
+vivoSansClockInlineVF.ttf
+vivoSansClockRounded.ttf
+vivoSansClockRoundedVF.ttf
+vivoSansClockSerif-Bold.ttf
+vivoSansClockSerif-Light.ttf
+vivoSansClockSerifVF.ttf
+vivoSansClockSilkVF.ttf
+vivoSansClockSlab.ttf
+vivoSansClockSlabVF.ttf
+vivoSansClockStencil.ttf
+vivoSansClockStencilVF.ttf
 [main]
 GoogleSans-Bold.ttf
 GoogleSans-Medium.ttf
@@ -54,6 +83,19 @@ iQOOSans-Regular.ttf
 vivoSans-Regular.ttf
 VivoFont.ttf
 vivofont.ttf
+vivoSansStdVF.ttf
+vivoSansENVF.ttf
+vivoSansSCVF.ttf
+vivoSansTCVF.ttf
+vivoSansSCL3.ttf
+vivoSansCondVF.ttf
+vivoSansCompVF.ttf
+vivoSansStdItalicVF.ttf
+vivoSansCondItalicVF.ttf
+vivoSansCompItalicVF.ttf
+vivoSansArabic-VF.ttf
+vivoSansArabicUI0428VF.ttf
+vivoSansCameraVF.ttf
 [theme]
 VivoSansCondensed-Bold.ttf
 VivoSansCondensed-Medium.ttf

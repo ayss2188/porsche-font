@@ -25,7 +25,8 @@
 
 MODDIR=${0%/*}
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
-LIB="${LIB:-/data/adb/custom_font_lib}"
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
 MAP="$MODDIR/slots.map"
 DL="/sdcard/Download"
 
@@ -41,10 +42,11 @@ _pack() {
     [ -f "$MODDIR/$f" ] && cp -f "$MODDIR/$f" "$_tmp/" 2>/dev/null
   done
   mkdir -p "$_tmp/lib" 2>/dev/null
-  for f in mount.log ttc.log boot_events.log .scanmarks rescue_count; do
-    [ -f "$LIB/$f" ] && cp -f "$LIB/$f" "$_tmp/lib/" 2>/dev/null
+  for f in "$LOGDIR/mount.log" "$LOGDIR/ttc.log" "$LOGDIR/boot_events.log" \
+           "$STATEDIR/scan/.scanmarks" "$STATEDIR/rescue_count"; do
+    [ -f "$f" ] && cp -f "$f" "$_tmp/lib/" 2>/dev/null
   done
-  ls -l "$LIB" 2>/dev/null > "$_tmp/lib/list.txt"
+  ls -l "$LIBROOT" 2>/dev/null > "$_tmp/lib/list.txt"
   # 计划 vs 实际
   { echo "== 计划条数 =="; grep -c . "$MAP" 2>/dev/null
     echo "== 实际挂载 =="; grep -c 'custom_font_lib' /proc/mounts 2>/dev/null
@@ -120,7 +122,7 @@ _status() {
   echo "字体       : $(tr -d '[:space:]' < "$MODDIR/pending_font" 2>/dev/null)"
   echo "当前生效   : $(tr -d '[:space:]' < "$MODDIR/active_font" 2>/dev/null)"
   echo "mount.state: $(tr -d '\r' < "$MODDIR/mount.state" 2>/dev/null | head -n1)"
-  _rc=$(tr -d '[:space:]' < "$LIB/rescue_count" 2>/dev/null)
+  _rc=$(tr -d '[:space:]' < "$STATEDIR/rescue_count" 2>/dev/null)
   echo "抢救计数   : ${_rc:-无（没有触发过）}"
   [ -e "$MODDIR/mount_missed" ] && echo "！本次开机没有执行自带挂载"
 }
@@ -167,9 +169,9 @@ _dropbox() {
 }
 
 _boot() {
-  [ -s "$LIB/boot_events.log" ] || { echo "没有 boot_events.log"; return 0; }
+  [ -s "$LOGDIR/boot_events.log" ] || { echo "没有 boot_events.log"; return 0; }
   echo "== 最近 20 条开机事件 =="
-  tail -n 20 "$LIB/boot_events.log"
+  tail -n 20 "$LOGDIR/boot_events.log"
 }
 
 _conflicts() {
@@ -210,11 +212,11 @@ _conflicts() {
 }
 
 _theme() {
-  echo "== 主题字体物理替换备份（$LIB/.orig） =="
-  ls -l "$LIB/.orig" 2>/dev/null | head -n 20
+  echo "== 主题字体物理替换备份（$BACKUPDIR/orig） =="
+  ls -l "$BACKUPDIR/orig" 2>/dev/null | head -n 20
   echo ""
   echo "== 替换清单 =="
-  cat "$LIB/.datafonts" 2>/dev/null | head -n 20
+  cat "$STATEDIR/datafonts" 2>/dev/null | head -n 20
 }
 
 _hash() {
@@ -266,8 +268,8 @@ _remount() {
 
 _rescan() {
   if [ -f "$MODDIR/fontctl.sh" ]; then
-    rm -rf "$LIB/scanned" 2>/dev/null
-    : > "$LIB/.force_rescan" 2>/dev/null
+    rm -rf "$STATEDIR/scan" 2>/dev/null
+    : > "$STATEDIR/force_rescan" 2>/dev/null
     sh "$MODDIR/fontctl.sh" rescan 2>&1 | tail -n 6
   fi
 }
@@ -280,7 +282,7 @@ _replan() {
 }
 
 # ★ 2026-10-31：手动预热全部字体的切换计划 + 中文合集产物（高级设置按钮用）
-#   输出逐字体的进度行；产物落 $LIB/.ttc.cache 永久保存，做完之后切任何字体都是秒级。
+#   输出逐字体的进度行；产物落 $CACHEDIR/ttc 永久保存，做完之后切任何字体都是秒级。
 _prewarm_all() {
   [ -f "$MODDIR/fontctl.sh" ] || { echo "ERROR:没有 fontctl.sh"; return 1; }
   echo "开始预生成（有中文合集的机型每字体要几十秒，请等它跑完）…"
@@ -346,31 +348,40 @@ _umount_fix() {
 #   输出：/sdcard/Download/fontlib-YYYYmmdd-HHMMSS.tar.gz
 #   注意：字体动辄几十 MB，备份文件可能很大；界面会提示耗时。
 _FB_DIR=/sdcard/Download
-_FB_ITEM=''
+_FB_FONT=''
+_FB_EXTRA=''
 _fb_pick() {   # 列出可备份的东西
-  _FB_ITEM=""
+  _FB_FONT=""
+  _FB_EXTRA=""
   for _f in "$LIB"/f*.ttf "$LIB"/f*.otf "$LIB"/*.meta "$LIB"/*.name; do
-    [ -f "$_f" ] && _FB_ITEM="$_FB_ITEM${_FB_ITEM:+ }${_f##*/}"
+    [ -f "$_f" ] && _FB_FONT="$_FB_FONT${_FB_FONT:+ }${_f##*/}"
   done
-  for _f in settings.conf last_selection pending_font; do
-    [ -f "$LIB/$_f" ] && _FB_ITEM="$_FB_ITEM${_FB_ITEM:+ }$_f"
+  for _f in settings.conf pending_font; do
+    [ -f "$LIBROOT/$_f" ] && _FB_EXTRA="$_FB_EXTRA${_FB_EXTRA:+ }$_f"
   done
+  [ -f "$STATEDIR/last_selection" ] && _FB_EXTRA="$_FB_EXTRA${_FB_EXTRA:+ }state/last_selection"
 }
 
 _fontbackup() {
   echo "== 备份字体库 =="
   _fb_pick
-  if [ -z "$_FB_ITEM" ]; then echo "字体库里没有可备份的内容（还没有导入过字体）"; return 1; fi
+  if [ -z "$_FB_FONT$_FB_EXTRA" ]; then echo "字体库里没有可备份的内容（还没有字体）"; return 1; fi
   mkdir -p "$_FB_DIR" 2>/dev/null
   _ts=$(date +%Y%m%d-%H%M%S 2>/dev/null)
   _out="$_FB_DIR/fontlib-$_ts.tar.gz"
   echo "正在打包（字体大时要几十秒，别退出）…"
-  # shellcheck disable=SC2086
-  ( cd "$LIB" && tar -czf "$_out" $_FB_ITEM ) 2>/dev/null
+  (
+    cd "$LIBROOT" || exit 1
+    set --
+    for _f in $_FB_EXTRA; do set -- "$@" "$_f"; done
+    for _f in $_FB_FONT; do set -- "$@" "fonts/$_f"; done
+    tar -czf "$_out" "$@" 2>/dev/null
+  )
   if [ -s "$_out" ]; then
     _sz=$(du -h "$_out" 2>/dev/null | awk '{print $1}')
+    _n=$(tar -tzf "$_out" 2>/dev/null | grep -c . | tr -d ' ')
     echo "✅ 已备份：$_out（${_sz:-?}）"
-    echo "   里面包含：$(printf '%s' "$_FB_ITEM" | tr ' ' '\n' | wc -l | tr -d ' ') 个文件"
+    echo "   里面包含：${_n:-?} 个文件"
     echo "   Download 里如果看不到，说明需要给文件管理器存储权限。"
   else
     echo "❌ 备份失败：写不进 $_FB_DIR（检查存储空间 / 权限）"
@@ -390,10 +401,16 @@ _fontrestore() {
   _sel=$(printf '%s\n' "$_list" | sed -n "${_pick}p")
   [ -n "$_sel" ] || { echo "没有第 $_pick 个备份"; return 1; }
   echo "选中：${_sel##*/}"
-  _tmp="$LIB/.restore.$$"
+  _tmp="$STATEDIR/restore.$$"
   rm -rf "$_tmp"; mkdir -p "$_tmp" 2>/dev/null
   if ! tar -xzf "$_sel" -C "$_tmp" 2>/dev/null; then
     echo "❌ 解包失败：文件可能损坏"; rm -rf "$_tmp"; return 1
+  fi
+  if [ -d "$_tmp/fonts" ]; then
+    for _f in "$_tmp"/fonts/*; do [ -f "$_f" ] && mv -f "$_f" "$_tmp/" 2>/dev/null; done
+  fi
+  if [ -f "$_tmp/state/last_selection" ]; then
+    mv -f "$_tmp/state/last_selection" "$_tmp/last_selection" 2>/dev/null
   fi
   # 先校验：字体头 + 大小
   _bad=0; _ok=0
@@ -414,7 +431,8 @@ _fontrestore() {
     [ -f "$_f" ] || continue
     _b=${_f##*/}
     case "$_b" in
-      settings.conf|last_selection|pending_font) cp -f "$_f" "$LIB/$_b" 2>/dev/null ;;
+      settings.conf|pending_font) cp -f "$_f" "$LIBROOT/$_b" 2>/dev/null ;;
+      last_selection) cp -f "$_f" "$STATEDIR/$_b" 2>/dev/null ;;
       *) cp -f "$_f" "$LIB/$_b" 2>/dev/null ;;
     esac
   done
@@ -432,10 +450,36 @@ _fontbackuplist() {
 
 _otareport() {
   echo "== 系统更新后的自动适配记录 =="
-  if [ -s "$LIB/ota.log" ]; then tail -n 30 "$LIB/ota.log"; else echo "  （还没有触发过：要么没做过系统更新，要么系统版本没变）"; fi
+  if [ -s "$LOGDIR/ota.log" ]; then tail -n 30 "$LOGDIR/ota.log"; else echo "  （还没有触发过：要么没做过系统更新，要么系统版本没变）"; fi
   echo
   echo "当前系统：$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r')"
-  echo "上次记录：$(cat "$LIB/.sysfp" 2>/dev/null | tr -d '\r')"
+  echo "上次记录：$(cat "$STATEDIR/sysfp" 2>/dev/null | tr -d '\r')"
+}
+
+_slot_all() {
+  [ -s "$MAP" ] || { echo "没有 slots.map（还没应用过字体）"; return 1; }
+  _mode=$(tr -d '[:space:]' < "$MODDIR/payload.mode" 2>/dev/null)
+  _mnt=$(awk '{print $5}' /proc/1/mountinfo 2>/dev/null | tr '\n' ' ')
+  while read -r _id _rel _src; do
+    [ -n "$_rel" ] || continue
+    case "$_rel" in /*) _t="$_rel" ;; *) _t="/$_rel" ;; esac
+    [ -n "$_src" ] || _src="$LIB/$_id.ttf"
+    if [ ! -f "$_t" ]; then
+      echo "$_rel|目标缺失|$_src|$_id"
+    elif [ ! -f "$_src" ]; then
+      echo "$_rel|源缺失|$_src|$_id"
+    elif [ "$_mode" = manager ]; then
+      _a=$(stat -L -c '%s' "$_src" 2>/dev/null)
+      _b=$(stat -L -c '%s' "$_t" 2>/dev/null)
+      if [ -n "$_a" ] && [ "$_a" = "$_b" ]; then echo "$_rel|已生效|$_src|$_id"
+      else echo "$_rel|未生效|$_src|$_id"; fi
+    else
+      case "$_mnt" in
+        *" $_t "*) echo "$_rel|已挂载|$_src|$_id" ;;
+        *) echo "$_rel|未挂载|$_src|$_id" ;;
+      esac
+    fi
+  done < "$MAP"
 }
 
 case "${1:-}" in
@@ -446,9 +490,10 @@ case "${1:-}" in
   otareport)    _otareport ;;
   pack)      _pack ;;
   plan)      echo "== slots.map（前 60 行 / 共 $(grep -c . "$MAP" 2>/dev/null) 行） =="; head -n 60 "$MAP" 2>/dev/null ;;
-  mountlog)  echo "== mount.log（末 60 行） =="; tail -n 60 "$LIB/mount.log" 2>/dev/null ;;
-  ttclog)    echo "== ttc.log（末 60 行） =="; tail -n 60 "$LIB/ttc.log" 2>/dev/null ;;
+  mountlog)  echo "== mount.log（末 60 行） =="; tail -n 60 "$LOGDIR/mount.log" 2>/dev/null ;;
+  ttclog)    echo "== ttc.log（末 60 行） =="; tail -n 60 "$LOGDIR/ttc.log" 2>/dev/null ;;
   slots)     _slots_check ;;
+  slotall)   _slot_all ;;
   status)    _status ;;
   selinux)   _selinux ;;
   avc)       _avc ;;
@@ -483,7 +528,7 @@ case "${1:-}" in
     fi
     ;;
   targets-hits)
-    _m="$LIB/scanned/slots.meta"
+    _m="$STATEDIR/scan/slots.meta"
     if [ -s "$_m" ]; then
       echo "== 槽位来源统计 =="
       echo "  机型清单命中 : $(sed -n 's/^targets=//p' "$_m" | head -n1)"

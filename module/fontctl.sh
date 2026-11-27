@@ -26,8 +26,9 @@
 # 切换采用"先生成、再校验、最后提交"：新字体文件全部就绪才替换旧的，中途失败保留原来的字体。
 
 MODDIR=$(cd "$(dirname "$0")" && pwd)
-LIB=/data/adb/custom_font_lib
-PART="$LIB/.upload.part"
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+PART="$STATEDIR/upload.part"
 # 直接读 /data/media/0 比走 /sdcard(FUSE) 快得多
 STORAGE=${STORAGE:-/data/media/0}
 [ -d "$STORAGE" ] || STORAGE=/storage/emulated/0
@@ -38,7 +39,7 @@ STORAGE=${STORAGE:-/data/media/0}
 #   后面的命令一行都不执行，退出码 2）。
 #   后果不是"少个功能"：fontctl.sh 是界面的唯一入口，它当场退出 = 卡片空白、切不了字体、
 #   诊断打不开、所有开关失效，而且用户拿不到任何线索。
-#   （2026-10-11 姊妹项目同步 v1.0.5 时抓到的，原来是 `. ... 2>/dev/null`）
+#   （2026-10-11 旧版实现同步 v1.0.5 时抓到的，原来是 `. ... 2>/dev/null`）
 # ★★ 2026-10-31（性能·第二轮）：**按命令分级加载**
 #   一次 ksuExec 的固定开销 = 解析这些脚本；slots.sh 约 11 万字符、mount.sh 约 3 万。
 #   之前除 settings 外所有命令都要把三份全解析 —— 现在按实际需要加载：
@@ -255,7 +256,7 @@ has_outline() {
   local f="$1" num tot bytes v b4 id mv sv sz
   [ -f "$f" ] || return 1
   id=${f##*/}; id=${id%.ttf}
-  # ★ 2026-10-15（作者的建议）：**检测只做一次，结果记住** —— 以后切换不再读字体文件。
+  # ★ 2026-10-15（开发者的建议）：**检测只做一次，结果记住** —— 以后切换不再读字体文件。
   #   ⚠️ 性能教训：第一版用 `sed|tail|tr|wc` 分别去读 meta，**每条都是一次进程创建**，
   #      5 个进程的开销把"省下一次读文件"吃掉了（实测命中缓存 395ms/次，读文件 730ms/次，
   #      只快一倍）。改成 **cat 一次读进变量 + 纯 shell 字符串匹配** → 零额外进程。
@@ -273,7 +274,7 @@ has_outline() {
         mv=${_HO_META##*outline_sz=}; mv=${mv%%[!0-9]*} ;;
       *) mv="" ;;
     esac
-    # ★ 2026-10-17（作者意见）：meta 里已有结论就直接用，**连 stat 都不做**。
+    # ★ 2026-10-17（开发者意见）：meta 里已有结论就直接用，**连 stat 都不做**。
     #
     #   为什么可以不校验大小：字体文件只会通过 store_font 写进字体库，
     #   而 store_font 每次都会重写 outline= / outline_sz= 这两行 ——
@@ -389,6 +390,13 @@ in_use() {
 # 入库：store_font <源文件> <名称> <cp|mv>
 store_font() {
   local src="$1" name="$2" mode="$3" id dst sz need free
+  # ColorOS：PS 名非 ASCII 会被系统当成"找不到这个字体"，整片中文方框
+  if [ "$(tr -d '[:space:]' 2>/dev/null < "${MODDIR:-}/current_rom")" = "coloros" ]; then
+    if ! ps_name_ok "$src"; then
+      echo "ERROR:ColorOS 会按字体内部的 PostScript 名找字体；这份字体的 PS 名不是纯 ASCII，装上会整片方框。请安装「字体工具箱」，用「修复（ColorOS）」处理后重新导入。"
+      return 1
+    fi
+  fi
   if ! valid_font "$src"; then
     rm -f "$PART"
     echo "ERROR:这份字体无法使用：内部结构不完整（可能已损坏/被截断/少了字形轮廓表）。TTC 合集请先在电脑上用 tools/optimize_font.py --face 拆出单个字体再导入"
@@ -428,7 +436,7 @@ store_font() {
   chcon u:object_r:system_file:s0 "$dst" 2>/dev/null
   [ -n "$name" ] || name=$(basename "$src" | sed 's/\.[^.]*$//')
   printf '%s' "$(clean_name "$name")" > "$LIB/$id.name"
-  # ★ 2026-10-15（作者的建议）：**导入时就把"有没有轮廓"验一次并记进 meta**。
+  # ★ 2026-10-15（开发者的建议）：**导入时就把"有没有轮廓"验一次并记进 meta**。
   #   这样以后每次切换直接读记录，不用再读字体文件（切换更快）。
   #   在 store_font 里做最合适：valid_font 刚刚已经完整验过一遍，这里只是把结论落盘。
   _sf_sz=$(stat -c '%s' "$dst" 2>/dev/null)
@@ -472,7 +480,7 @@ _conf_fonts_in() {
 #   这里包一层结果缓存：模块目录的 mtime 没变就直接读缓存，原逻辑一字不改
 #   （真算的那部分在 _list_conflicts_raw 里，跟以前完全一样）。
 list_conflicts() {
-  local _ck _cf="$LIB/.conflicts.cache"
+  local _ck _cf="$STATEDIR/conflicts.cache"
   _ck=$(stat -c '%Y-%s' /data/adb/modules 2>/dev/null)
   if [ -s "$_cf" ] && [ "$(sed -n '1p' "$_cf" 2>/dev/null)" = "$_ck" ]; then
     sed -n '2,$p' "$_cf" 2>/dev/null
@@ -540,13 +548,13 @@ refresh_prop() {
   local A P ROM_NAME D PROP_FILE warn=""
   A=$(cur_active); P=$(cur_pending)
   ROM_NAME=$(rom_name "$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')")
-  # ★ 2026-10-17（作者要求：apply 要快）：这里不再查冲突模块。
+  # ★ 2026-10-17（设计：apply 要快）：这里不再查冲突模块。
   #   界面的「冲突模块」那一栏会单独显示（status 里查），
   #   apply 路径上没必要为了一句警告去扫一遍模块目录。
   if [ "$A" = "$P" ]; then
-    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")] 在 WebUI 导入自己的字体并切换，默认不替换任何字体。$warn"
+    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")] 在 WebUI 选择内置配色字体并切换，默认不替换任何字体。$warn"
   else
-    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")，待重启后生效：$(label_of "$P")] 在 WebUI 导入自己的字体并切换，默认不替换任何字体。$warn"
+    D="[系统：$ROM_NAME | 当前生效：$(label_of "$A")，待重启后生效：$(label_of "$P")] 在 WebUI 选择内置配色字体并切换，默认不替换任何字体。$warn"
   fi
   PROP_FILE="$MODDIR/module.prop"
   [ -f "$PROP_FILE" ] || return 0
@@ -560,6 +568,296 @@ refresh_rom() {
 }
 
 # 生成计划到文件（每行 "角色 目标路径"）；输出 scope
+
+clock_configs() {
+  local f R="${CFS_SYSROOT:-}"
+  for f in "$R/system/etc/fonts.xml" "$R/system_ext/etc/fonts.xml" \
+           "$R/product/etc/fonts.xml" "$R/my_product/etc/fonts.xml" \
+           "$R/vendor/etc/fonts.xml"; do
+    [ -f "$f" ] && echo "$f"
+  done
+  slot_xml_files 2>/dev/null | while IFS= read -r f; do
+    case "$f" in *font*.xml|*Font*.xml) echo "$f" ;; esac
+  done
+}
+
+clock_detect() {
+  local R="${CFS_SYSROOT:-}" d f
+  # 从所有字体配置里找 family 名带 clock/time/digit/watch 的字体文件
+  clock_configs | while IFS= read -r x; do
+    [ -f "$x" ] || continue
+    awk '
+      function low(s){ return tolower(s) }
+      {
+        l=low($0)
+        if (l ~ /<family/ && l ~ /name="/ && l ~ /(clock|time|digit|watch|lockscreen)/) infam=1
+        if (infam && l ~ /<font/) {
+          line=$0
+          while (match(line, />[^<>]+</)) {
+            s=substr(line, RSTART+1, RLENGTH-2)
+            gsub(/^[ \t]+|[ \t]+$/, "", s)
+            if (s ~ /\.(ttf|otf|ttc)$/ && s ~ /(Clock|clock|Digit|digit|Time|time|Mitype)/) print s
+            line=substr(line, RSTART+RLENGTH-1)
+          }
+        }
+        if (infam && l ~ /<\/family>/) infam=0
+      }' "$x" 2>/dev/null
+  done
+  # 文件名兜底：不在 XML 里的时钟/数字字体
+  for d in "$R/system/fonts" "$R/system_ext/fonts" "$R/product/fonts" \
+           "$R/my_product/fonts" "$R/vendor/fonts"; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*Clock*.ttf "$d"/*Clock*.otf "$d"/*clock*.ttf "$d"/*clock*.otf \
+             "$d"/*Digit*.ttf "$d"/*Digit*.otf "$d"/*digit*.ttf "$d"/*digit*.otf \
+             "$d"/*Time*.ttf "$d"/*time*.ttf; do
+      [ -f "$f" ] && echo "${f##*/}"
+    done
+  done
+}
+
+clock_targets() {
+  local n d f rom list R="${CFS_SYSROOT:-}"
+  rom=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")
+  {
+    clock_detect | while IFS= read -r n; do
+      [ -n "$n" ] || continue
+      for d in "$R/system/fonts" "$R/system_ext/fonts" "$R/product/fonts" \
+               "$R/my_product/fonts" "$R/vendor/fonts"; do
+        [ -f "$d/$n" ] && { echo "$d/$n"; break; }
+      done
+    done
+    # 静态清单只作兜底：检测不到的旧机型
+    list="$MODDIR/targets/${rom:-aosp}.list"
+    [ -f "$list" ] || list="$MODDIR/targets/$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom").list"
+    [ -f "$list" ] || return 0
+    awk 'index($0, "[clock]") == 1 { f = 1; next }
+         substr($0, 1, 1) == "[" { f = 0 }
+         f && NF && substr($0, 1, 1) != "#" && $0 ~ /(Clock|clock|Digit|digit|Time|time|Mitype)/ { print }' "$list" 2>/dev/null |
+    while IFS= read -r n; do
+      [ -n "$n" ] || continue
+      for d in "$R/system/fonts" "$R/product/fonts"; do
+        [ -f "$d/$n" ] && { echo "$d/$n"; break; }
+      done
+    done
+  } | awk 'NF && !seen[$0]++'
+}
+
+
+engine_ready() {
+  [ -f "$MODDIR/engine.sh" ] || return 1
+  _st=$(sh "$MODDIR/engine.sh" status 2>/dev/null)
+  echo "$_st" | grep -q 'INSTALLED=1'
+}
+apply_msg() {
+  printf 'msg=%s\n' "$*" > "$STATEDIR/apply.state" 2>/dev/null
+}
+
+ensure_clock_companion() {
+  local sel="$1" rom target slug out mode _src _msg _sig _stamp _st _total _i _new
+  [ "${CFS_SKIP_CLOCK:-0}" = "1" ] && return 0
+  sel=$(clock_font_of "$sel")
+  _new=0
+  umask 022
+  rom=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")
+  _src="$LIB/$sel.ttf"
+  [ -f "$_src" ] || _src="$LIB/builtin_$sel.ttf"
+  [ -f "$_src" ] || _src="$BUILTINDIR/$sel.ttf"
+  if [ ! -f "$_src" ]; then
+    echo "$(date '+%m-%d %H:%M:%S' 2>/dev/null) 字体文件不存在 sel=$sel" >> "$LOGDIR/clock.log" 2>/dev/null
+    return 0
+  fi
+  if ! engine_ready; then
+    echo "$(date '+%m-%d %H:%M:%S' 2>/dev/null) 插件未就绪 sel=$sel" >> "$LOGDIR/clock.log" 2>/dev/null
+    return 0
+  fi
+  if [ "$(cfg_get replace_lockscreen 0 2>/dev/null)" != "1" ]; then
+    echo "$(date '+%m-%d %H:%M:%S' 2>/dev/null) replace_lockscreen 不是 1" >> "$LOGDIR/clock.log" 2>/dev/null
+    return 0
+  fi
+  mkdir -p "$CLOCKDIR" 2>/dev/null
+  find "$CLOCKDIR" -maxdepth 1 -name '*.clock.*.ttf' -size 0 -delete 2>/dev/null
+  clock_targets > "$STATEDIR/clock.targets.$$" 2>/dev/null
+  _st="${CLOCKGEN_STATE:-}"
+  _total=$(grep -c . "$STATEDIR/clock.targets.$$" 2>/dev/null)
+  case "${_total:-}" in ''|*[!0-9]*) _total=0 ;; esac
+  _i=0
+  [ -n "$_st" ] && printf 'stage=running 0/%s\n' "$_total" > "$_st" 2>/dev/null
+  if [ ! -s "$STATEDIR/clock.targets.$$" ]; then
+    echo "$(date '+%m-%d %H:%M:%S' 2>/dev/null) 没有检测到时钟字体 target" >> "$LOGDIR/clock.log" 2>/dev/null
+  fi
+  _stamp="$CLOCKDIR/$sel.clock.src"
+  _sig="$(stat -c '%s' "$_src" 2>/dev/null):$(sed -n 's/^version=//p' "$STATEDIR/engine/plugin.prop" 2>/dev/null | head -n1 | tr -d '\r ')"
+  while IFS= read -r target; do
+    [ -f "$target" ] || continue
+    _i=$((_i + 1))
+    [ -n "$_st" ] && printf 'stage=running %s/%s %s\n' "$_i" "$_total" "${target##*/}" > "$_st" 2>/dev/null
+    slug=$(printf '%s' "${target##*/}" | sed 's/[^A-Za-z0-9]/_/g')
+    out="$CLOCKDIR/$sel.clock.$slug.ttf"
+    if [ -s "$out" ]; then
+      chmod 644 "$out" 2>/dev/null
+      if [ ! -s "$_stamp" ] || [ "$(cat "$_stamp" 2>/dev/null)" = "$_sig" ]; then
+        [ -s "$_stamp" ] || printf '%s\n' "$_sig" > "$_stamp" 2>/dev/null
+        continue
+      fi
+    fi
+    mode=auto
+    apply_msg "生成锁屏时钟配套 $_i/$_total：${target##*/}…"
+    _cf_out="$out.tmp.$$"
+    if command -v timeout >/dev/null 2>&1; then
+      _cf_cmd="timeout 180 sh \"$MODDIR/engine.sh\" run clockfit --font \"$_src\" --target \"$target\" --out \"$_cf_out\" --mode \"$mode\""
+    else
+      _cf_cmd="sh \"$MODDIR/engine.sh\" run clockfit --font \"$_src\" --target \"$target\" --out \"$_cf_out\" --mode \"$mode\""
+    fi
+    _msg=$(eval "$_cf_cmd" 2>&1)
+    if [ -s "$_cf_out" ]; then
+      mv -f "$_cf_out" "$out" 2>/dev/null && _new=1 && chmod 644 "$out" 2>/dev/null
+    else
+      { echo "$(date '+%m-%d %H:%M:%S' 2>/dev/null) target=$target sel=$sel"; echo "$_msg" | tail -n 8; } >> "$LOGDIR/clock.log" 2>/dev/null
+    fi
+    rm -f "$_cf_out" 2>/dev/null
+  done < "$STATEDIR/clock.targets.$$"
+  [ -n "$_st" ] && printf 'stage=done %s/%s\n' "$_i" "$_total" > "$_st" 2>/dev/null
+  [ -n "$_sig" ] && printf '%s\n' "$_sig" > "$_stamp" 2>/dev/null
+  chmod 644 "$CLOCKDIR/$sel".clock.*.ttf 2>/dev/null
+  rm -f "$STATEDIR/clock.targets.$$" 2>/dev/null
+  return 0
+}
+
+decorate_clock_map() {
+  # 缓存命中用的轻量装饰：slots.map 格式是 “字体id 目标 源文件”。
+  # 只把 clock 目标对应的源替换成 clock 配套，缺少的 clock 目标补一行。
+  local sel="$1" map="$2" id rel src slug comp tmp clk alt target _sid
+  [ "${CFS_SKIP_CLOCK:-0}" = "1" ] && return 0
+  [ "$(cfg_get replace_lockscreen 0 2>/dev/null)" = "1" ] || return 0
+  clk=$(clock_font_of "$sel")
+  alt="${clk%%_*}"
+  tmp="$map.clock.$$"
+  : > "$tmp"
+  while read -r id rel src; do
+    [ -n "$rel" ] || continue
+    slug=$(printf '%s' "${rel##*/}" | sed 's/[^A-Za-z0-9]/_/g')
+    comp=""
+    for _sid in "$clk" "$alt"; do
+      [ -n "$_sid" ] || continue
+      [ -s "$CLOCKDIR/$_sid.clock.$slug.ttf" ] && { comp="$CLOCKDIR/$_sid.clock.$slug.ttf"; break; }
+    done
+    if [ -n "$comp" ]; then printf '%s %s %s\n' "$id" "$rel" "$comp"
+    else
+      # 缓存可能是“有 clock 行”的旧计划，但配套后来被删了：
+      # 不能让 slots.map 继续指向不存在的 clock 文件。
+      case "$src" in */clock/*) src="$LIB/$id.ttf" ;; esac
+      printf '%s %s %s\n' "$id" "$rel" "$src"
+    fi
+  done < "$map" > "$tmp"
+  clock_targets | while IFS= read -r target; do
+    [ -f "$target" ] || continue
+    rel=${target#/}
+    slug=$(printf '%s' "${target##*/}" | sed 's/[^A-Za-z0-9]/_/g')
+    comp=""
+    for _sid in "$clk" "$alt"; do
+      [ -n "$_sid" ] || continue
+      [ -s "$CLOCKDIR/$_sid.clock.$slug.ttf" ] && { comp="$CLOCKDIR/$_sid.clock.$slug.ttf"; break; }
+    done
+    [ -n "$comp" ] || continue
+    grep -q " $rel " "$tmp" 2>/dev/null || printf '%s %s %s\n' "$clk" "$rel" "$comp" >> "$tmp"
+  done
+  mv -f "$tmp" "$map" 2>/dev/null
+}
+
+normalize_clock_map() {
+  # 关闭锁屏时钟时，把缓存里指向 clock/ 的源换回普通字体；
+  # 只改 map，不重算计划。
+  local map="$1" id rel src tmp
+  [ "$(cfg_get replace_lockscreen 0 2>/dev/null)" = "1" ] && return 0
+  tmp="$map.clock.$$"
+  : > "$tmp"
+  while read -r id rel src; do
+    [ -n "$rel" ] || continue
+    case "$src" in */clock/*) src="$LIB/$id.ttf" ;; esac
+    printf '%s %s %s\n' "$id" "$rel" "$src"
+  done < "$map" > "$tmp"
+  mv -f "$tmp" "$map" 2>/dev/null
+}
+
+decorate_clock_plan() {
+  local sel="$1" plan="$2" rom target rel slug comp tmp role r rest _alt _sid _clk
+  [ "${CFS_SKIP_CLOCK:-0}" = "1" ] && return 0
+  rom=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")
+  [ "$(cfg_get replace_lockscreen 0 2>/dev/null)" = "1" ] || return 0
+  _clk=$(clock_font_of "$sel")
+  _alt="${_clk%%_*}"
+  tmp="$plan.clock.$$"
+  : > "$tmp"
+  while read -r role rel rest; do
+    [ -n "$rel" ] || continue
+    comp=""
+    slug=$(printf '%s' "${rel##*/}" | sed 's/[^A-Za-z0-9]/_/g')
+    for _sid in "$_clk" "$_alt"; do
+      [ -n "$_sid" ] || continue
+      [ -s "$CLOCKDIR/$_sid.clock.$slug.ttf" ] && { comp="$CLOCKDIR/$_sid.clock.$slug.ttf"; break; }
+    done
+    if [ -n "$comp" ]; then
+      printf '%s %s %s\n' "$role" "$rel" "$comp"
+    else
+      printf '%s %s%s\n' "$role" "$rel" "${rest:+ $rest}"
+    fi
+  done < "$plan" > "$tmp"
+  clock_targets | while IFS= read -r target; do
+    [ -f "$target" ] || continue
+    rel=${target#/}
+    slug=$(printf '%s' "${target##*/}" | sed 's/[^A-Za-z0-9]/_/g')
+    comp=""
+    for _sid in "$_clk" "$_alt"; do
+      [ -n "$_sid" ] || continue
+      [ -s "$CLOCKDIR/$_sid.clock.$slug.ttf" ] && { comp="$CLOCKDIR/$_sid.clock.$slug.ttf"; break; }
+    done
+    [ -n "$comp" ] || continue
+    grep -q " $rel" "$tmp" 2>/dev/null || printf 'clock %s %s\n' "$rel" "$comp" >> "$tmp"
+  done
+  mv -f "$tmp" "$plan" 2>/dev/null
+}
+
+
+ensure_flyme_companion() {
+  local sel="$1" target out
+  [ "$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")" = "flyme" ] || return 0
+  [ "$(cfg_get flyme_static 0 2>/dev/null)" = "1" ] || return 0
+  [ -f "$LIB/$sel.ttf" ] || return 0
+  engine_ready || return 0
+  target="/system/fonts/FlymeSansVF.ttf"
+  [ -f "$target" ] || target="/system/fonts/SourceHanSansSC-VF.ttf"
+  [ -f "$target" ] || return 0
+  out="$LIB/$sel.flyme.ttf"
+  if [ -s "$out" ] && [ "$out" -nt "$LIB/$sel.ttf" ] 2>/dev/null; then
+    return 0
+  fi
+  if timeout 240 sh "$MODDIR/engine.sh" run staticize --font "$LIB/$sel.ttf" \
+       --target "$target" --out "$out.tmp.$$" --weight 400 >/dev/null 2>&1; then
+    mv -f "$out.tmp.$$" "$out" 2>/dev/null || rm -f "$out.tmp.$$"
+  fi
+  rm -f "$out.tmp.$$" 2>/dev/null
+  return 0
+}
+
+decorate_flyme_plan() {
+  local sel="$1" plan="$2" comp tmp role rel rest
+  comp="$LIB/$sel.flyme.ttf"
+  [ -s "$comp" ] || return 0
+  tmp="$plan.flyme.$$"
+  : > "$tmp"
+  while read -r role rel rest; do
+    [ -n "$rel" ] || continue
+    case "${rel##*/}" in
+      FlymeSansVF.ttf|SourceHanSansSC-VF.ttf) printf '%s %s %s\n' "$role" "$rel" "$comp" ;;
+      *) printf '%s %s%s\n' "$role" "$rel" "${rest:+ $rest}" ;;
+    esac
+  done < "$plan" > "$tmp"
+  for rel in system/fonts/FlymeSansVF.ttf system/fonts/SourceHanSansSC-VF.ttf; do
+    [ -f "/$rel" ] && ! grep -q " $rel" "$tmp" 2>/dev/null && printf 'main %s %s\n' "$rel" "$comp" >> "$tmp"
+  done
+  mv -f "$tmp" "$plan" 2>/dev/null
+}
+
 make_plan() {
   local sel="$1" out="$2" scope kl ks
   _eff_scope "$sel"          # 不用 $(...)：SCOPE_VIA 要留在当前 shell 里给决策记录用
@@ -573,6 +871,9 @@ make_plan() {
   #     精确判据在 slots.sh 的 slot_lockscreen_files（看 family 名带不带 clock），
   #     实测一台小米机认出 34 个锁屏文件，正正好好。
   #   keep_lang / keep_special 仍然保留读取只为兼容老配置文件。
+  SEL_FONT="$sel"
+  ensure_clock_companion "$sel"
+  ensure_flyme_companion "$sel"
   klk=$(keep_lockscreen_val)
   KLLAST="kl=$klk"      # 给 do_apply 的返回值用（诊断用，看模块实际读到几）
   # 1.0.9：界面已删掉那两个开关（默认全替换）；保留读取只为兼容老配置文件。
@@ -603,6 +904,8 @@ make_plan() {
   # 除了 echo，还留一份到全局变量：调用方常用 $(...) 取返回值，那会开子 shell，
   # 而 SCOPE_VIA（判定依据）是在子 shell 里设的，外面拿不到 —— 所以调用方直接读 PLAN_SCOPE。
   PLAN_SCOPE="$scope"
+  decorate_clock_plan "$sel" "$out"
+  decorate_flyme_plan "$sel" "$out"
   echo "$scope"
 }
 
@@ -662,7 +965,7 @@ slot_weight() {
 # 把某个字体所在族的全部字重读进来（一次 apply 最多两次：组合模式下中英各一次）
 # 结果放 GRP_PAIRS="id:字重 id:字重 …"，没配对时只有它自己
 #
-# ★ 2026-10-21（作者要求：怕混挂不同字体导致缺字 / 开不了机）：
+# ★ 2026-10-21（设计：怕混挂不同字体导致缺字 / 开不了机）：
 #   同族配对**默认关闭**（cfg pair_family=0）。每份字体各自独立，不自动组族。
 #   想用的人需要在设置里显式打开；打开后依然逐份校验，只配"确实像同一套字体的不同字重"：
 #     · 轮廓可用（outline=1）
@@ -762,25 +1065,23 @@ remove_manager_files() {
 # ★ 2026-10-31（manager 专用·单点翻转）：**符号链接 payload + .active 间接层**
 #   目标：manager 挂载下切换字体从「154 次硬链接」降到「1~3 次翻转」。
 #   结构：
-#     模块目录槽位文件 = 符号链接 → $LIB/.active/<n>（稳定名，n = 计划内
+#     模块目录槽位文件 = 符号链接 → $STATEDIR/active/<n>（稳定名，n = 计划内
 #                        该源首次出现的序号，跨字体稳定）
-#     $LIB/.active/<n> = 指向当前字体的硬链接
+#     $STATEDIR/active/<n> = 指向当前字体的硬链接
 #   切字体：对每个 n，若 .active/<n> 的 inode ≠ 新计划的 src → ln -f 翻转
 #   （单字体计划 = 1 次翻转）。payload 符号链接**从不重建**（布局签名一致时零操作）。
 #   风险与回退：依赖管理器挂载跟随符号链接（bind mount 会解析路径）；
 #   若重启后字体没变，高级设置 → 挂载方式 → 关闭「符号链接 payload」再应用一次即回旧行为。
 # ---------------------------------------------------------------------------
 _symlink_on() {
-  # ★ 2026-10-31（真机结论）：默认**关** —— 符号链接 payload 在用户的
-  #   Hybrid Mount 链路上卡开机 2 屏（挂载器早期暂存不跟随符号链接，
-  #   悬空链接 → 框架读字体失败）。代码保留作实验开关，默认走 v18 硬链接。
+  # 符号链接 payload 仍按用户设置启用；时钟配套不走符号链接
   [ "$(cfg_get symlink_payload 0 2>/dev/null)" = 1 ]
 }
 
 _mgr_symlink_apply() {   # $1=map 文件（id rel src）→ 0=成功
   local _mapf="$1" _cls _newsig _sig
   [ -s "$_mapf" ] || return 0
-  mkdir -p "$LIB/.active" 2>/dev/null
+  mkdir -p "$STATEDIR/active" 2>/dev/null
   _cls="${TMPDIR:-/data/local/tmp}/.pw.cls.$$"
   # class 表：src 在 map 顺序里首次出现 → 编号；并生成 payload 布局签名
   awk '{ if (!($3 in S)) { S[$3] = ++N } print $1 "|" $2 "|" $3 "|" S[$3] }' "$_mapf" \
@@ -790,8 +1091,8 @@ _mgr_symlink_apply() {   # $1=map 文件（id rel src）→ 0=成功
   # ② 翻转间接文件：每个 class 的 .active/<n> → 该 class 的 src（内容变了才动，1~3 次）
   awk -F'|' '{ print $4, $3 }' "$_cls" 2>/dev/null | sort -u -k1,1 | while read -r _n _src; do
     [ -n "$_n" ] && [ -n "$_src" ] || continue
-    if [ "$(stat -c %i "$LIB/.active/$_n" 2>/dev/null)" != "$(stat -c %i "$_src" 2>/dev/null)" ]; then
-      ln -f "$_src" "$LIB/.active/$_n" 2>/dev/null || cp -f "$_src" "$LIB/.active/$_n" 2>/dev/null
+    if [ "$(stat -c %i "$STATEDIR/active/$_n" 2>/dev/null)" != "$(stat -c %i "$_src" 2>/dev/null)" ]; then
+      ln -f "$_src" "$STATEDIR/active/$_n" 2>/dev/null || cp -f "$_src" "$STATEDIR/active/$_n" 2>/dev/null
     fi
   done
   # ③ payload 符号链接：布局签名一致 → 全部已就位（零操作）
@@ -804,12 +1105,23 @@ _mgr_symlink_apply() {   # $1=map 文件（id rel src）→ 0=成功
     [ -n "${_rel:-}" ] || continue
     case "$_rel" in data/*) continue ;; esac
     _dest="$MODDIR/$(mgr_path "$_rel")"
-    _want="$LIB/.active/$_n"
+    # ★ 时钟配套不做符号链接：Hybrid Mount 早期不跟随，悬空会卡开机。
+    #   普通字体链接仍保留；时钟文件直接落成真实文件。
+    case "${_src:-}" in
+      */clock/*)
+        mkdir -p "${_dest%/*}" 2>/dev/null
+        rm -f "$_dest" 2>/dev/null
+        ln -f "$_src" "$_dest" 2>/dev/null || cp -f "$_src" "$_dest" 2>/dev/null
+        chmod 644 "$_dest" 2>/dev/null
+        continue
+        ;;
+    esac
+    _want="$STATEDIR/active/$_n"
     mkdir -p "${_dest%/*}" 2>/dev/null
     [ "$(readlink "$_dest" 2>/dev/null)" = "$_want" ] && continue
     if ! ln -sfn "$_want" "$_dest" 2>/dev/null; then
       echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 符号链接失败 $_dest -> $_want" \
-        >> "$LIB/ttc.log" 2>/dev/null
+        >> "$LOGDIR/ttc.log" 2>/dev/null
       rm -f "$_cls"
       return 1
     fi
@@ -833,11 +1145,49 @@ _ln_batch_run() {   # _ln_batch_run <失败记录文件>
   _LN_FAILN=0
   [ -n "${_ACC_LN:-}" ] || return 0
   printf '%s' "${_ACC_LN}wait
-" > "$LIB/.lnbatch.$$" 2>/dev/null
-  sh "$LIB/.lnbatch.$$" 2>/dev/null
+" > "$STATEDIR/lnbatch.$$" 2>/dev/null
+  sh "$STATEDIR/lnbatch.$$" 2>/dev/null
   _LN_FAILN=$(wc -l 2>/dev/null < "$1" | tr -d ' ')
   case "${_LN_FAILN:-}" in ''|*[!0-9]*) _LN_FAILN=0 ;; esac
-  rm -f "$LIB/.lnbatch.$$" 2>/dev/null
+  rm -f "$STATEDIR/lnbatch.$$" 2>/dev/null
+  return 0
+}
+
+repair_payload_from_map() {
+  # 物化后的兜底：按 slots.map 逐个核对模块目录。
+  # 解决“计划/pending 已切回 A，但模块目录还停在上一次的 B”的问题。
+  [ "$(mount_mode 2>/dev/null)" = manager ] || return 0
+  [ -s "$MODDIR/slots.map" ] || return 0
+  local id rel src dest si di ss ds n=0
+  while read -r id rel src; do
+    [ -n "${rel:-}" ] || continue
+    case "$rel" in data/*) continue ;; esac
+    [ -n "${src:-}" ] || src="$LIB/$id.ttf"
+    [ -f "$src" ] || continue
+    dest="$MODDIR/$(mgr_path "$rel")"
+    mkdir -p "${dest%/*}" 2>/dev/null
+    ss=$(stat -c '%s' "$src" 2>/dev/null)
+    ds=$(stat -c '%s' "$dest" 2>/dev/null)
+    si=$(stat -c '%i' "$src" 2>/dev/null)
+    di=$(stat -c '%i' "$dest" 2>/dev/null)
+    [ -n "$ss" ] && [ "$ss" = "$ds" ] && [ -n "$si" ] && [ "$si" = "$di" ] && continue
+    # 不同 inode、大小相同：如果是本次 apply 刚复制出来的，mtime 是新的，跳过；
+    # 如果 mtime 早于本次 apply，说明还是上一次字体留下的旧文件，必须重写。
+    if [ -n "$ss" ] && [ "$ss" = "$ds" ]; then
+      _pdm=$(stat -c '%Y' "$dest" 2>/dev/null)
+      case "${_pdm:-}" in ''|*[!0-9]*) _pdm=0 ;; esac
+      [ "$_pdm" -ge "${_APPLY_EPOCH:-0}" ] 2>/dev/null && continue
+    fi
+    rm -f "$dest" "$dest.tmp" 2>/dev/null
+    if cp -f "$src" "$dest.tmp" 2>/dev/null && mv -f "$dest.tmp" "$dest" 2>/dev/null; then
+      chmod 644 "$dest" 2>/dev/null
+      n=$((n + 1))
+    else
+      rm -f "$dest.tmp" 2>/dev/null
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] payload 兜底复制失败：$dest" >> "$LOGDIR/ttc.log" 2>/dev/null
+    fi
+  done < "$MODDIR/slots.map"
+  [ "$n" -gt 0 ] && echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] payload 兜底修复 $n 个文件" >> "$LOGDIR/ttc.log" 2>/dev/null
   return 0
 }
 
@@ -874,14 +1224,31 @@ commit_payload() {
   fi
   rm -rf "$stage" 2>/dev/null
 
-  if [ -f "$stage.list" ]; then mv -f "$stage.list" "$APPLIED"; else : > "$APPLIED"; fi
+  if [ -s "$stage.list" ]; then
+    mv -f "$stage.list" "$APPLIED"
+  elif [ "${CFS_SEL_NONE:-0}" = "1" ]; then
+    : > "$APPLIED"
+  elif [ -s "$APPLIED" ]; then
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 提交保护：stage.list 为空，保留旧 slots.applied" >> "$LOGDIR/ttc.log" 2>/dev/null
+  else
+    : > "$APPLIED"
+  fi
   # ★ 2026-10-19：覆盖前备份上一份计划。
     #   切「保留锁屏时钟」会让计划变少（151 → 119），少掉的正是时钟槽位；
     #   软重启时按差集撤掉这些槽位，才不会"显示成功但时钟还是被换掉"。
     if [ -s "$MODDIR/slots.map" ]; then
       cp -f "$MODDIR/slots.map" "$MODDIR/slots.map.prev" 2>/dev/null
     fi
-    if [ -f "$stage.map" ]; then mv -f "$stage.map" "$MODDIR/slots.map"; else : > "$MODDIR/slots.map"; fi
+    if [ -f "$stage.map" ] && [ -s "$stage.map" ]; then
+      mv -f "$stage.map" "$MODDIR/slots.map"
+    elif [ "${CFS_SEL_NONE:-0}" = "1" ]; then
+      : > "$MODDIR/slots.map"
+    elif [ -s "$MODDIR/slots.map" ]; then
+      # 不拿空/缺失的 map 覆盖上一份有效计划
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 提交保护：stage.map 为空，保留旧 slots.map" >> "$LOGDIR/ttc.log" 2>/dev/null
+    else
+      : > "$MODDIR/slots.map"
+    fi
   echo "$mode" > "$MODDIR/payload.mode"
 }
 
@@ -895,6 +1262,384 @@ commit_payload() {
 # （slots.map 的第 3 个字段就是它）。删掉正在被 bind 挂载的文件是安全的 ——
 # 挂载持有的是 inode，文件名消失不影响本次开机已经挂好的东西，重启后会按新计划挂。
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# TTC 缓存清理
+#   产物名形如 <id>.ttc5_2-3_NotoSansCJK（不以 .ttc 结尾），
+#   旧代码只删 *.ttc，导致缓存无限增长（用户实测 100GB）。
+#   规则：
+#     · 当前 slots.map 引用的文件绝不删
+#     · 先删陈旧 .tmp
+#     · 只保留最近 12 份
+#     · 总大小超过 2GB 时按最旧删到 1.5GB 以下
+#   删除后清掉计划缓存，避免旧计划指向已删文件。
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 只保留当前 slots.map 正在用的 TTC 产物，其余全删。
+# 开机/OTA 后跑一次：旧字体、旧设置留下的合集立即释放。
+# 代价：切回旧字体要重新合成（慢一次），换来空间不会越积越多。
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 按策略清理 TTC 缓存
+#   none   : 只留当前 slots.map 正在用的
+#   font   : 每份字体只留最新一份（在用的优先保留）
+#   recent : 当前字体 + 最近用过的 2 个，各留一份
+# ---------------------------------------------------------------------------
+
+# 字体库里已经没有对应字体文件（<id>.ttf/.otf）的 TTC 残留
+ttc_orphan_clean() {
+  local d="$CACHEDIR/ttc" f base id n=0
+  if [ -d "$d" ]; then
+    for f in "$d"/*; do
+      [ -f "$f" ] || continue
+      base=${f##*/}; id=${base%%.ttc*}
+      if [ ! -f "$LIB/$id.ttf" ] && [ ! -f "$LIB/$id.otf" ]; then
+        rm -f "$f" 2>/dev/null
+        n=$((n + 1))
+      fi
+    done
+  fi
+  for f in "$CLOCKDIR"/*.clock.*.ttf; do
+    [ -f "$f" ] || continue
+    id=${f##*/}; id=${id%%.clock.*}
+    [ -f "$LIB/$id.ttf" ] || [ -f "$LIB/builtin_$id.ttf" ] || {
+      rm -f "$CLOCKDIR/$id".clock.*.ttf "$CLOCKDIR/$id.clock.src" 2>/dev/null
+      n=$((n + 1))
+    }
+  done
+  for f in "$LIB"/*.flyme.ttf; do
+    [ -f "$f" ] || continue
+    id=${f##*/}; id=${id%%.flyme.ttf}
+    [ -f "$LIB/$id.ttf" ] || { rm -f "$f" 2>/dev/null; n=$((n + 1)); }
+  done
+  echo "OK:$n"
+}
+
+ttc_cache_mode_clean() {
+  local d="$CACHEDIR/ttc" mode used f base id keepids=" " ids=0
+  [ -d "$d" ] || { echo "OK:0"; return 0; }
+  mode=$(cfg_get ttc_cache_mode recent 2>/dev/null)
+  case "$mode" in none|font|recent) ;; *) mode=font ;; esac
+  ttc_touch_recent_usage
+  used=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
+  ttc_orphan_clean >/dev/null 2>&1
+
+  # 当前在用的字体 ID：整组文件全部保留
+  for f in "$d"/*; do
+    [ -f "$f" ] || continue
+    case "$used" in *" $f "*) ;; *) continue ;; esac
+    base=${f##*/}; id=${base%%.ttc*}
+    case " $keepids " in *" $id "*) ;; *) keepids="$keepids$id "; ids=$((ids + 1)) ;; esac
+  done
+
+  # 从新到旧按“字体”计数，不是按文件计数。
+  # 同一字体的两个 ttc 文件（Sans/Serif）必须一起保留/一起删除。
+  for f in $(ls -1t "$d"/* 2>/dev/null); do
+    [ -f "$f" ] || continue
+    case "$used" in *" $f "*) continue ;; esac
+    base=${f##*/}; id=${base%%.ttc*}
+    case " $keepids " in *" $id "*) continue ;; esac
+    case "$mode" in
+      none) rm -f "$f" 2>/dev/null ;;
+      font)
+        keepids="$keepids$id "
+        ;;
+      recent)
+        if [ "$ids" -lt 3 ]; then
+          keepids="$keepids$id "; ids=$((ids + 1))
+        else
+          rm -f "$f" 2>/dev/null
+        fi
+        ;;
+    esac
+  done
+  echo "OK:$mode"
+}
+
+# 输出缓存清单：fontid|inuse|state|size|mtime|path
+ttc_cache_list() {
+  local d="$CACHEDIR/ttc" f base id used used_boot used_now sz mt inuse state
+  [ -d "$d" ] || return 0
+  used_boot=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
+  used_now=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" 2>/dev/null | tr '\n' ' ') "
+  for f in $(ls -1t "$d"/* 2>/dev/null); do
+    [ -f "$f" ] || continue
+    base=${f##*/}; id=${base%%.ttc*}
+    inuse=0; state="idle"
+    case "$used_boot" in *" $f "*) inuse=1; state="cur" ;; esac
+    if [ "$inuse" = 0 ]; then
+      case "$used_now" in *" $f "*) inuse=1; state="pend" ;; esac
+    fi
+    sz=$(stat -c %s "$f" 2>/dev/null); mt=$(stat -c %Y "$f" 2>/dev/null)
+    printf '%s|%s|%s|%s|%s|%s\n' "$id" "$inuse" "$state" "${sz:-0}" "${mt:-0}" "$f"
+  done
+}
+
+# 删除单个缓存；当前在用的拒绝删
+ttc_cache_del() {
+  local f="$1" used
+  [ -n "$f" ] || { echo "ERROR:缺少文件"; return 1; }
+  case "$f" in "$CACHEDIR/ttc/"*) ;; *) echo "ERROR:路径不在缓存目录"; return 1 ;; esac
+  [ -f "$f" ] || { echo "ERROR:文件不存在"; return 1; }
+  used=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
+  case "$used" in *" $f "*) echo "ERROR:这份正在使用，先切换字体再删"; return 1 ;; esac
+  rm -f "$f" && echo "OK:deleted"
+}
+
+
+clock_cache_list() {
+  local f base id used_boot used_now inuse state sz mt
+  used_boot=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
+  used_now=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" 2>/dev/null | tr '\n' ' ') "
+  for f in "$CLOCKDIR"/*.clock.*.ttf; do
+    [ -f "$f" ] || continue
+    base=${f##*/}; id=${base%%.clock.*}
+    inuse=0; state="idle"
+    case "$used_boot" in *" $f "*) inuse=1; state="cur" ;; esac
+    if [ "$inuse" = 0 ]; then
+      case "$used_now" in *" $f "*) inuse=1; state="pend" ;; esac
+    fi
+    sz=$(stat -c %s "$f" 2>/dev/null); mt=$(stat -c %Y "$f" 2>/dev/null)
+    printf '%s|%s|%s|%s|%s|%s\n' "$id" "$inuse" "$state" "${sz:-0}" "${mt:-0}" "$f"
+  done
+}
+
+clock_cache_del() {
+  local f used cur n=0 _any _f2
+  cur=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font")
+  used=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
+  for f in "$@"; do
+    case "$f" in "$CLOCKDIR"/*.clock.*.ttf) ;; *) echo "ERROR:路径不在时钟配套目录"; return 1 ;; esac
+    [ -f "$f" ] || continue
+    case "$used" in *" $f "*) echo "ERROR:这份正在使用，先切换字体再删"; return 1 ;; esac
+    base=${f##*/}; id=${base%%.clock.*}
+    rm -f "$f" 2>/dev/null && n=$((n + 1))
+    # 这个字体已没有配套文件时，来源标记也一起删，避免下次误判
+    _any=0
+    for _f2 in "$CLOCKDIR/$id".clock.*.ttf; do [ -e "$_f2" ] && { _any=1; break; }; done
+    [ "$_any" = 0 ] && rm -f "$CLOCKDIR/$id.clock.src" 2>/dev/null
+  done
+  echo "OK:$n"
+}
+
+clock_orphan_clean() {
+  local f id n=0
+  for f in "$CLOCKDIR"/*.clock.*.ttf; do
+    [ -f "$f" ] || continue
+    id=${f##*/}; id=${id%%.clock.*}
+    [ -f "$LIB/$id.ttf" ] && continue
+    [ -f "$LIB/builtin_$id.ttf" ] && continue
+    rm -f "$CLOCKDIR/$id".clock.*.ttf "$CLOCKDIR/$id.clock.src" 2>/dev/null
+    n=$((n + 1))
+  done
+  # 清掉没有主字体的 clock.src
+  for f in "$CLOCKDIR"/*.clock.src; do
+    [ -f "$f" ] || continue
+    id=${f##*/}; id=${id%%.clock.src}
+    [ -f "$LIB/$id.ttf" ] || [ -f "$LIB/builtin_$id.ttf" ] && continue
+    rm -f "$f" 2>/dev/null
+  done
+  echo "$n"
+}
+
+clock_cache_prune() {  local mode cur used f base id keepids=" " keep=0 mt tmp
+  mode=$(cfg_get clock_cache_mode recent 2>/dev/null)
+  [ "$mode" = "all" ] && return 0
+  cur="${1:-}"
+  [ -n "$cur" ] || cur=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font")
+  clock_touch_recent_usage
+  used=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
+  tmp="$STATEDIR/clock.prune.$$"
+  : > "$tmp"
+  # 当前在用的字体 ID：整组 8 个时钟文件全部保留
+  for f in "$CLOCKDIR"/*.clock.*.ttf; do
+    [ -f "$f" ] || continue
+    case "$used" in *" $f "*) ;; *) continue ;; esac
+    base=${f##*/}; id=${base%%.clock.*}
+    case " $keepids " in *" $id "*) ;; *) keepids="$keepids$id " ;; esac
+  done
+  for f in "$CLOCKDIR"/*.clock.*.ttf; do
+    [ -f "$f" ] || continue
+    case "$used" in *" $f "*) continue ;; esac
+    base=${f##*/}; id=${base%%.clock.*}
+    mt=$(stat -c %Y "$f" 2>/dev/null)
+    printf '%s|%s\n' "${mt:-0}" "$id" >> "$tmp"
+  done
+  sort -rn "$tmp" 2>/dev/null | while IFS='|' read -r mt id; do
+    [ -n "$id" ] || continue
+    case " $keepids " in *" $id "*) continue ;; esac
+    if [ "$mode" = "recent" ] && [ "$keep" -lt 2 ]; then
+      keepids="$keepids$id "; keep=$((keep + 1))
+      continue
+    fi
+    rm -f "$CLOCKDIR/$id".clock.*.ttf "$CLOCKDIR/$id.clock.src" 2>/dev/null
+  done
+  rm -f "$tmp" 2>/dev/null
+}
+
+clock_touch_active() {
+  local id _cf
+  id="${1:-}"
+  [ -n "$id" ] || id=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font")
+  [ -n "$id" ] || return 0
+  for _cf in "$CLOCKDIR/$id".clock.*.ttf; do
+    [ -e "$_cf" ] && touch "$_cf" 2>/dev/null
+  done
+}
+
+clock_touch_used() {
+  local id rel src _c _log="$STATEDIR/clock.used"
+  [ -s "$MODDIR/slots.map" ] || return 0
+  while read -r id rel src; do
+    [ -n "$rel" ] || continue
+    case "$src" in
+      "$CLOCKDIR"/*.clock.*.ttf)
+        [ -f "$src" ] && touch "$src" 2>/dev/null
+        _c=${src##*/}; _c=${_c%%.clock.*}
+        printf '%s %s\n' "$(date +%s 2>/dev/null || echo 0)" "$_c" >> "$_log" 2>/dev/null
+        ;;
+    esac
+  done < "$MODDIR/slots.map"
+  [ -f "$_log" ] && tail -n 300 "$_log" > "$_log.$$" 2>/dev/null && mv -f "$_log.$$" "$_log" 2>/dev/null
+}
+
+clock_touch_recent_usage() {
+  local _log="$STATEDIR/clock.used" id f
+  [ -s "$_log" ] || return 0
+  for id in $(sort -rn "$_log" 2>/dev/null | awk '!seen[$2]++ {print $2}' | head -n 3); do
+    for f in "$CLOCKDIR/$id".clock.*.ttf; do [ -f "$f" ] && touch "$f" 2>/dev/null; done
+  done
+}
+
+ttc_touch_used() {
+  local f id rel src _log="$STATEDIR/ttc.used"
+  [ -s "$MODDIR/slots.map" ] || return 0
+  while read -r id rel src; do
+    [ -n "$rel" ] || continue
+    case "$src" in
+      "$CACHEDIR/ttc"/*|"$LIB"/*.ttc[0-9]*)
+        [ -f "$src" ] && touch "$src" 2>/dev/null
+        printf '%s %s\n' "$(date +%s 2>/dev/null || echo 0)" "$id" >> "$_log" 2>/dev/null
+        ;;
+    esac
+  done < "$MODDIR/slots.map"
+  [ -f "$_log" ] && tail -n 300 "$_log" > "$_log.$$" 2>/dev/null && mv -f "$_log.$$" "$_log" 2>/dev/null
+}
+
+ttc_touch_recent_usage() {
+  local d="$CACHEDIR/ttc" _log="$STATEDIR/ttc.used" id f
+  [ -s "$_log" ] || return 0
+  for id in $(sort -rn "$_log" 2>/dev/null | awk '!seen[$2]++ {print $2}' | head -n 3); do
+    for f in "$d/$id".* "$LIB/$id".ttc[0-9]*; do
+      [ -f "$f" ] && touch "$f" 2>/dev/null
+    done
+  done
+}
+
+ttc_committed_has() {
+  [ -n "${1:-}" ] || return 1
+  [ -s "$STATEDIR/ttc.committed" ] || return 1
+  grep -qxF "$1" "$STATEDIR/ttc.committed" 2>/dev/null
+}
+
+prune_unused_ttc() {
+  local d="$CACHEDIR/ttc" used f id
+  [ -s "$MODDIR/slots.map" ] || return 0
+  if ! awk 'NF >= 2 { ok = 1 } END { exit !ok }' "$MODDIR/slots.map" 2>/dev/null; then
+    return 0
+  fi
+  used=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
+  [ "$used" != "  " ] || return 0
+  for f in "$LIB"/*.ttc[0-9]*; do
+    [ -f "$f" ] || continue
+    id=${f##*/}; id=${id%%.ttc*}
+    ttc_committed_has "$id" && continue
+    case "$used" in *" $f "*) continue ;; esac
+    rm -f "$f" 2>/dev/null
+  done
+  if [ -d "$d" ]; then
+    for f in "$d"/*; do
+      [ -f "$f" ] || continue
+      id=${f##*/}; id=${id%%.ttc*}
+      ttc_committed_has "$id" && continue
+      case "$used" in *" $f "*) continue ;; esac
+      rm -f "$f" 2>/dev/null
+    done
+  fi
+  return 0
+}
+
+clean_ttc_cache() {
+  local d="$CACHEDIR/ttc" used f base id ids sz n del=0 oldest _bt _best _id _mt
+  [ -d "$d" ] || { echo "OK:0"; return 0; }
+  # 全部保留：不做文件数/空间上限清理，交用户手动管理
+  [ "$(cfg_get ttc_cache_mode font 2>/dev/null)" = "font" ] && { echo "OK:cache-kept"; return 0; }
+  used=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
+  find "$d" -type f -name '*.tmp.*' -mmin +60 -delete 2>/dev/null
+
+  ids=""
+  for f in "$d"/*; do
+    [ -f "$f" ] || continue
+    base=${f##*/}; id=${base%%.ttc*}
+    case " $ids " in *" $id "*) ;; *) ids="$ids$id " ;; esac
+  done
+
+  _id_used() {
+    local _x="$1" _f
+    for _f in "$d/$_x".ttc*; do
+      [ -f "$_f" ] || continue
+      case "$used" in *" $_f "*) return 0 ;; esac
+    done
+    return 1
+  }
+
+  _oldest_unused_id() {
+    _best=""; _bt=""
+    for _id in $ids; do
+      _id_used "$_id" && continue
+      local _min=""
+      for _f in "$d/$_id".ttc*; do
+        [ -f "$_f" ] || continue
+        _mt=$(stat -c %Y "$_f" 2>/dev/null)
+        case "${_mt:-}" in ''|*[!0-9]*) _mt=0 ;; esac
+        if [ -z "$_min" ] || [ "$_mt" -lt "$_min" ]; then _min="$_mt"; fi
+      done
+      [ -n "$_min" ] || continue
+      if [ -z "$_best" ] || [ "$_min" -lt "$_bt" ]; then
+        _best="$_id"; _bt="$_min"
+      fi
+    done
+    printf '%s' "$_best"
+  }
+
+  # ① 文件数上限：按字体整组删除，避免 Sans/Serif 只删一个
+  n=$(find "$d" -maxdepth 1 -type f | wc -l | tr -d ' ')
+  case "${n:-}" in ''|*[!0-9]*) n=0 ;; esac
+  while [ "$n" -gt 12 ]; do
+    oldest=$(_oldest_unused_id)
+    [ -n "$oldest" ] || break
+    rm -f "$d/$oldest".ttc* 2>/dev/null
+    n=$(find "$d" -maxdepth 1 -type f | wc -l | tr -d ' ')
+    case "${n:-}" in ''|*[!0-9]*) n=0 ;; esac
+    del=$((del + 1))
+  done
+
+  # ② 空间上限：同样整组删除
+  sz=$(du -sk "$d" 2>/dev/null | awk '{print $1}')
+  case "${sz:-}" in ''|*[!0-9]*) sz=0 ;; esac
+  while [ "$sz" -gt 2097152 ]; do
+    oldest=$(_oldest_unused_id)
+    [ -n "$oldest" ] || break
+    rm -f "$d/$oldest".ttc* 2>/dev/null
+    sz=$(du -sk "$d" 2>/dev/null | awk '{print $1}')
+    case "${sz:-}" in ''|*[!0-9]*) sz=0 ;; esac
+    del=$((del + 1))
+  done
+  echo "OK:cache-cleaned"
+}
+
 prune_wrapped_ttc() {
   local f
   # ★ 2026-10-16 加一道保险（真机出过"产物不见了"）：
@@ -909,9 +1654,11 @@ prune_wrapped_ttc() {
   fi
   # ★ 2026-10-17 提速：原来每个 ttc 产物都跑一次 awk 读整份 slots.map（O(产物数×计划行数)）。
   #   现在先用一个 awk 把"计划里用到的文件"导出来，循环里只做字符串匹配。
-  _ptused=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" 2>/dev/null | tr '\n' ' ') "
+  _ptused=" $(awk 'NF >= 3 { print $NF }' "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null | tr '\n' ' ') "
   for f in "$LIB"/*.ttc[0-9]* ; do
     [ -f "$f" ] || continue
+    _ptid=${f##*/}; _ptid=${_ptid%%.ttc*}
+    ttc_committed_has "$_ptid" && continue
     case "$_ptused" in
       *" $f "*) continue ;;
     esac
@@ -1034,7 +1781,7 @@ plan_cache_key() {   # $1=sel（调用方须已算好 $EFF_SCOPE）
   #    （真机实锤：开关 A→B→A 一次之后，切字体 3 秒 → 8 秒）。
   #    现在只取计划真正依赖的那几个开关的**值**，格式/顺序怎么变都无所谓；
   #    这些键全走 cfg_get 的内存缓存（本进程首次读盘一次，之后零进程）。
-  _pc_ssv="$(cfg_get keep_lang 0),$(cfg_get keep_special 0),$(keep_lockscreen_val),$(cfg_get keep_samsung 0),$(cfg_get skip_product 0),$(cfg_get skip_vf 0),$(cfg_get theme_fonts 0),$(cfg_get ttc_replace 0),$(cfg_get ttc_no_mix 0),$(cfg_get ttc_all_faces 0),$(cfg_get main_only 0)"
+  _pc_ssv="$(cfg_get keep_lang 0),$(cfg_get keep_special 0),0,$(cfg_get keep_samsung 0),$(cfg_get skip_product 0),$(cfg_get skip_vf 0),$(cfg_get theme_fonts 0),$(cfg_get ttc_replace 0),$(cfg_get ttc_no_mix 0),$(cfg_get ttc_all_faces 0),$(cfg_get main_only 0),vf=${CFS_SEL_VF:-0}"
   _pc_ss=$(printf '%s' "$_pc_ssv" | md5sum 2>/dev/null | awk '{ printf "%s", substr($1, 1, 8) }')
   case "${_pc_ss:-}" in '') _pc_ss="nosettings" ;; esac
   # ③ 槽位清单（**内容哈希进 key**）+ 脚本版本。
@@ -1043,17 +1790,20 @@ plan_cache_key() {   # $1=sel（调用方须已算好 $EFF_SCOPE）
   #    ★ 清单用 **md5 内容哈希** 而不是 mtime —— 刷入/重扫会"删了重建"这些文件，
   #    mtime 必变但内容不变；哈希只认内容：内容一样 = 钥匙一样 = 缓存跨刷入命中。
   _pc_sl=$(stat -c '%s' "$MODDIR/slots.sh" 2>/dev/null)
-  _pc_sl2=$(md5sum "$LIB/scanned/slots.list" "$LIB/scanned/slots.kl1.list" \
-                 "$LIB/scanned/slots.th1.list" "$LIB/scanned/slots.kl1th1.list" 2>/dev/null \
+  _pc_sl2=$(md5sum "$STATEDIR/scan/slots.list" "$STATEDIR/scan/slots.kl1.list" \
+                 "$STATEDIR/scan/slots.th1.list" "$STATEDIR/scan/slots.kl1th1.list" \
+                 "$STATEDIR/scan/ttc.list" 2>/dev/null \
             | awk '{ printf "%s", substr($1, 1, 8) }')
   case "${_pc_sl2:-}" in
     '') # md5sum 不可用（极老系统）→ 退回 mtime（老行为）
-      _pc_sl2=$(stat -c '%Y' "$LIB/scanned/slots.list" \
-                    "$LIB/scanned/slots.kl1.list" "$LIB/scanned/slots.th1.list" \
-                    "$LIB/scanned/slots.kl1th1.list" 2>/dev/null | tr '\n' '+') ;;
+      _pc_sl2=$(stat -c '%Y' "$STATEDIR/scan/slots.list" \
+                    "$STATEDIR/scan/slots.kl1.list" "$STATEDIR/scan/slots.th1.list" \
+                    "$STATEDIR/scan/slots.kl1th1.list" "$STATEDIR/scan/ttc.list" 2>/dev/null | tr '\n' '+') ;;
   esac
   _pc_sl="${_pc_sl%+}"
   # ④ 拼成 key（sel/scope/轻量apply标志/挂载模式 都是语义维度，直接进 key）
+  #    prewarm / 安装阶段跳过时钟只影响计划里的 clock 行；
+  #    clock 行由 apply 命中缓存后 decorate_clock_map 现场补，所以 sk 不进 key。
   printf 'p%s.%s.%s.%s.%s.%s.%s.%s' \
     "$1" "${EFF_SCOPE:-}" "${CFS_NO_TTC:-0}" "$(mount_mode 2>/dev/null)" \
     "${_pc_ss// /-}" "$_pc_sl" "${_pc_sl2%+}" "$_pc_mf"
@@ -1065,13 +1815,20 @@ plan_cache_lookup() {   # $1=sel $2=stage.map $3=stage.list → 命中置 PC_* �
   #   manager 命中后只做轻量物化（硬链接副本），重算计划/合成合集全省掉。
   case "$(mount_mode 2>/dev/null)" in self|manager) ;; *) return 1 ;; esac
   local _d _k _map _hdr _miss=0 _pid _rel _src
-  _d="$LIB/.plancache"
+  _d="$CACHEDIR/plan"
   _k=$(plan_cache_key "$1")
   [ -n "$_k" ] || return 1
+  # 当前正在用的字体：强制重算一次，不复用缓存。
+  # 真机出现过“切回当前字体命中一份 4 行坏计划，模块目录被删到只剩 4 个”；
+  # 当前字体本来就有 slots.boot.map 作为权威计划，重算比冒险用坏缓存安全。
+  if [ "$1" = "$(cur_active 2>/dev/null)" ]; then
+    printf 'plancache bypass sel=%s reason=active-font\n' "$1" >> "$LOGDIR/ttc.log" 2>/dev/null
+    return 1
+  fi
   _map="$_d/$_k.map"; _hdr="$_d/$_k.hdr"
   # ★ 2026-10-31：钥匙留痕（ttc.log）——save/lookup 各记一行，
   #   两次钥匙一对比，哪个分量变了直接看得到（sel/设置/清单/档案逐段可读）
-  printf 'plancache lookup sel=%s key=%s\n' "$1" "$_k" >> "$LIB/ttc.log" 2>/dev/null
+  printf 'plancache lookup sel=%s key=%s\n' "$1" "$_k" >> "$LOGDIR/ttc.log" 2>/dev/null
   [ -s "$_map" ] && [ -s "$_hdr" ] || return 1
   # 逐行核对源文件还在（while + 内建 test，零进程）
   while read -r _pid _rel _src; do
@@ -1090,6 +1847,16 @@ plan_cache_lookup() {   # $1=sel $2=stage.map $3=stage.list → 命中置 PC_* �
   done < "$_hdr" 2>/dev/null
   case "$PC_SCOPE" in all|latin|cjk|combo) ;; *) return 1 ;; esac
   case "$PC_COUNT" in ''|*[!0-9]*) return 1 ;; esac
+  # 防御：同一字体的正常计划应有完整槽位（本机常见 149）。
+  # 如果缓存里只有个位数，说明这份缓存是异常退出/半套物化时写进去的，
+  # 直接丢弃重算，不能拿它去删模块目录里的完整 payload。
+  local _bn
+  _bn=$(grep -c . "$MODDIR/slots.boot.map" 2>/dev/null)
+  case "${_bn:-}" in ''|*[!0-9]*) _bn=0 ;; esac
+  if [ "$_bn" -gt 20 ] && [ "$PC_COUNT" -lt $((_bn / 2)) ]; then
+    printf 'plancache reject sel=%s count=%s boot=%s reason=too-small\n' "$1" "$PC_COUNT" "$_bn" >> "$LOGDIR/ttc.log" 2>/dev/null
+    return 1
+  fi
   # ★ 2026-10-31：临时文件 + mv 原子落位（预热和 apply 可能并发写同一个目标）
   cp -f "$_map" "$2.tmp.$$" 2>/dev/null && mv -f "$2.tmp.$$" "$2" 2>/dev/null || \
     { rm -f "$2.tmp.$$" 2>/dev/null; return 1; }
@@ -1105,11 +1872,11 @@ plan_cache_save() {   # $1=sel $2=stage.map $3=stage.list $4=scope $5=kllast $6=
   case "$(mount_mode 2>/dev/null)" in self|manager) ;; *) return 0 ;; esac
   [ -s "$2" ] && [ -s "$3" ] || return 0
   local _d _k
-  _d="$LIB/.plancache"
+  _d="$CACHEDIR/plan"
   _k=$(plan_cache_key "$1")
   [ -n "$_k" ] || return 0
   mkdir -p "$_d" 2>/dev/null || return 0
-  printf 'plancache save sel=%s key=%s\n' "$1" "$_k" >> "$LIB/ttc.log" 2>/dev/null
+  printf 'plancache save sel=%s key=%s\n' "$1" "$_k" >> "$LOGDIR/ttc.log" 2>/dev/null
   # ★ 2026-10-31：全部 tmp + mv 原子写（两个进程同时保存同一 key 时不会写坏）
   cp -f "$2" "$_d/$_k.map.tmp.$$" 2>/dev/null && \
     mv -f "$_d/$_k.map.tmp.$$" "$_d/$_k.map" 2>/dev/null || \
@@ -1130,13 +1897,50 @@ plan_cache_save() {   # $1=sel $2=stage.map $3=stage.list $4=scope $5=kllast $6=
 
 do_apply() {
   # ★ 2026-11-06：记录切换历史（诊断报告【22】会显示）
-  printf '%s %s%s\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "${1:-?}" "${CFS_PREWARM:+ (prewarm)}" >> "${LIB:-/data/adb/custom_font_lib}/switch.log" 2>/dev/null
+  printf '%s %s%s\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "${1:-?}" "${CFS_PREWARM:+ (prewarm)}" >> "${LOGDIR}/switch.log" 2>/dev/null
   local sel scope plan role rel id src dest stage mode COUNT=0 fail=0 wid
   GRP_LAST=""; GRP_PAIRS=""     # 多字重配对的缓存（见 grp_load）
   sel=$(check_sel "$1") || { echo "$sel"; exit 1; }
+  CFS_SEL_NONE=0
+  [ "$sel" = none ] && CFS_SEL_NONE=1
+  export CFS_SEL_NONE
+  # 串行化 apply：两个真正的 apply 同时改 slots.map 时，
+  # 后一个可能把空 stage 或半成品覆盖上去。
+  # prewarm 只生成计划和 TTC，不提交 slots.map，不能让它挡住用户切字体。
+  _ap_lock="$STATEDIR/apply.lock"
+  if [ "${CFS_PREWARM:-0}" != "1" ]; then
+    if [ -d "$_ap_lock" ]; then
+      _ap_age=$(( $(date +%s 2>/dev/null || echo 0) - $(stat -c %Y "$_ap_lock" 2>/dev/null || echo 0) ))
+      [ "${_ap_age:-0}" -gt 180 ] 2>/dev/null && rmdir "$_ap_lock" 2>/dev/null
+    fi
+    if ! mkdir "$_ap_lock" 2>/dev/null; then
+      echo "ERROR:另一个应用正在处理字体，请稍等几秒再试"
+      exit 1
+    fi
+    trap 'rmdir "$_ap_lock" 2>/dev/null' EXIT INT TERM HUP
+  fi
+  # 上次异常退出留下空计划时，先用上一份计划恢复，别让界面停在全 0
+  if [ ! -s "$MODDIR/slots.map" ] && [ -s "$MODDIR/slots.map.prev" ]; then
+    cp -f "$MODDIR/slots.map.prev" "$MODDIR/slots.map" 2>/dev/null
+    cp -f "$MODDIR/slots.map.prev" "$APPLIED" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 恢复空计划：使用 slots.map.prev" >> "$LOGDIR/ttc.log" 2>/dev/null
+  fi
+  # 手动删过 TTC：只有用户明确切换字体（CFS_ALLOW_TTC=1）才允许重新合成；
+  # 后台 reapply / 开机补计划 / prewarm 一律不补。
+  if [ -f "$STATEDIR/ttc.manual_hold" ] && [ "${CFS_ALLOW_TTC:-0}" != "1" ]; then
+    CFS_NO_TTC=1
+    export CFS_NO_TTC
+  fi
+  CFS_SEL_VF=0
+  if [ -f "$LIB/$sel.ttf" ] && font_has_fvar "$LIB/$sel.ttf"; then
+    CFS_SEL_VF=1
+  fi
+  export CFS_SEL_VF
   # ★ 2026-10-31 计时基准（/proc/uptime，10ms 精度；结果写进 ttc.log 和 OK 返回行，
   #   用户切完字立刻能在提示里看到「应用耗时 X 秒」—— 慢不慢用数据说话）
   _cfs_t0=$(cut -d' ' -f1 /proc/uptime 2>/dev/null | tr -d ' ')
+  _APPLY_EPOCH=$(date +%s 2>/dev/null); case "${_APPLY_EPOCH:-}" in ''|*[!0-9]*) _APPLY_EPOCH=0 ;; esac
+  apply_msg "准备应用：读取设置与当前字体…"
 
   # ★★ 2026-10-14：**应用前再验一遍轮廓表**（不只是导入时验）。
   #
@@ -1152,7 +1956,7 @@ do_apply() {
   #   一个都没有 = 空壳，挂上去只会满屏方框 —— 宁可不动、也不要给用户造这个。
   if [ -f "$LIB/$sel.ttf" ] && ! has_outline "$LIB/$sel.ttf"; then
     printf '%s %s %s\n' "$sel" "系统槽位" "scope=blocked via=nooutline detail=字体没有轮廓表(glyf/CFF)，挂上去只会显示方框" \
-      >> "$LIB/ttc.log" 2>/dev/null
+      >> "$LOGDIR/ttc.log" 2>/dev/null
     echo "ERROR:这份字体里没有任何字形轮廓（缺 glyf/CFF）—— 挂上去会让中文全变成方框。请删掉它重新导入一份正常的字体"
     exit 1
   fi
@@ -1171,9 +1975,11 @@ do_apply() {
     refresh_rom
   fi
   mode=$(mount_mode)
+  # manager 模式绝不能留着 skip_mount，否则管理器整个 system 目录都不挂
+  [ "$mode" = manager ] && rm -f "$MODDIR/skip_mount" 2>/dev/null
   # 记下这次实际用的 keep_lockscreen（取自 make_plan，见下面一行之后）
   KLLAST=""
-  plan="$LIB/.plan.$$"
+  plan="$STATEDIR/plan.$$"
   stage="$MODDIR/.stage.$$"
   # ★ 2026-11-06（真机：开关主题字体时报 can't open .stage.<pid>.map）：
   #   打开/关闭开关会同时拉起 rescan / apply / prewarm 多个 fontctl，
@@ -1195,13 +2001,22 @@ do_apply() {
   # 真正的内容在下面 make_plan 之后写（那时才知道计划数和判定依据），这里先占位。
   # ★ 2026-10-31：预热模式不清空 ttc.log —— 那是"上次真正 apply"的诊断记录，
   #   预热只是后台补缓存，别把证据洗掉（预热自己的行带 tag=prewarm）。
-  [ "${CFS_PREWARM:-0}" = 1 ] || : > "$LIB/ttc.log" 2>/dev/null
+  [ "${CFS_PREWARM:-0}" = 1 ] || : > "$LOGDIR/ttc.log" 2>/dev/null
 
   if [ "$sel" != none ]; then
+    # 先确保当前字体的时钟配套存在，再算缓存 key。
+    # 否则 prewarm 生成的“无时钟计划”会被缓存命中，切开关后永远不生成。
+    [ "${CFS_SKIP_CLOCK:-0}" = "1" ] || { apply_msg "检查锁屏时钟配套…"; ensure_clock_companion "$sel"; }
+    # 缓存命中时由 decorate_clock_map 现场补 clock 行，不再删除整份计划缓存。
     # ★ 2026-10-30（性能）：先查计划缓存 —— 同一字体 + 同一组开关直接复用上次结果
     _eff_scope "$sel"
     scope="$EFF_SCOPE"
+    # ★ 2026-11-20：时钟开启时仍然允许命中带 clock 行的计划缓存。
+    #   上面已经把“没有 /clock/ 行”的旧缓存删掉了，所以只要缓存存在就是带时钟的。
+    #   之前为了绕开坏缓存直接禁用全部缓存，导致每次切换都重算 154 槽位 + 重做合集，慢十几秒。
+    apply_msg "检查计划缓存…"
     if plan_cache_lookup "$sel" "$stage.map" "$stage.list"; then
+      apply_msg "计划缓存命中：跳过槽位过滤与 TTC 合成…"
       scope="$PC_SCOPE"
       COUNT="$PC_COUNT"
       KLLAST="$PC_KLLAST"
@@ -1209,7 +2024,17 @@ do_apply() {
       {
         echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=$sel${CFS_PREWARM:+ tag=prewarm}"
         echo "plan=$COUNT scope=$scope 判定依据=${SCOPE_VIA:-?} keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0)"
-      } >> "$LIB/ttc.log" 2>/dev/null
+      } >> "$LOGDIR/ttc.log" 2>/dev/null
+      # 缓存里的基础计划可能没有 clock 行；这里只做轻量替换/补齐，
+      # 不重算 154 槽位、不重做 TTC。
+      if [ "$(cfg_get replace_lockscreen 0 2>/dev/null)" = "1" ]; then
+        decorate_clock_map "$sel" "$stage.map"
+      else
+        normalize_clock_map "$stage.map"
+      fi
+      _newc=$(grep -c . "$stage.map" 2>/dev/null)
+      case "${_newc:-}" in ''|*[!0-9]*) ;; *) COUNT="$_newc" ;; esac
+      KLLAST="kl=$(keep_lockscreen_val)"
       # ★ 2026-10-31：manager 挂载命中缓存后**仍要物化模块目录副本**——
       #   缓存省掉的是"重算计划 + 合成合集"，物化这步必须做（元模块挂的是这些文件）。
       #   data/ 槽位不物化（由 datafont_apply 在开机时处理，与原逻辑一致）。
@@ -1252,7 +2077,7 @@ ${_oldr}
         fi
         unset _NEWLIST
         # ★ 2026-11-01（第三轮提速）：命中物化也走批量并行（同生成路径）
-        _LF_ERR="$LIB/.lnfail.$$"
+        _LF_ERR="$STATEDIR/lnfail.$$"
         : > "$_LF_ERR" 2>/dev/null
         _LN_N=0; _ACC_LN=""
         while read -r _cmid _cmrel _cmsrc; do
@@ -1260,7 +2085,7 @@ ${_oldr}
           case "$_cmrel" in data/*) continue ;; esac
           [ -n "${_cmsrc:-}" ] || _cmsrc="$LIB/$_cmid.ttf"
           _cmdest="$MODDIR/$(mgr_path "$_cmrel")"
-          _ACC_LN="${_ACC_LN}ln -f '${_cmsrc}' '${_cmdest}' || echo '${_cmdest}' >> '${_LF_ERR}'
+          _ACC_LN="${_ACC_LN}rm -f '${_cmdest}'; ln -f '${_cmsrc}' '${_cmdest}' || { cp -f '${_cmsrc}' '${_cmdest}.tmp' && mv -f '${_cmdest}.tmp' '${_cmdest}'; } || echo '${_cmdest}' >> '${_LF_ERR}'; chmod 644 '${_cmdest}' 2>/dev/null
 "
           _LN_N=$((_LN_N + 1))
           case ${_LN_N} in *0) _ACC_LN="${_ACC_LN}wait
@@ -1269,8 +2094,30 @@ ${_oldr}
         _ln_batch_run "$_LF_ERR"
         if [ "${_LN_FAILN:-0}" -gt 0 ]; then
           echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 命中物化失败 ${_LN_FAILN} 个，首个：$(head -n1 "$_LF_ERR" 2>/dev/null)（/data 剩余 $(df -k /data 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4) KB）" \
-            >> "$LIB/ttc.log" 2>/dev/null
-          fail=1
+            >> "$LOGDIR/ttc.log" 2>/dev/null
+          # 缓存命中路径也要有第二次逐个复制，否则 A→B→A 会留下半套 B 文件
+          _rt_bad=0
+          while read -r _rt_id _rt_rel _rt_src; do
+            [ -n "$_rt_rel" ] || continue
+            case "$_rt_rel" in data/*) continue ;; esac
+            [ -n "${_rt_src:-}" ] || _rt_src="$LIB/$_rt_id.ttf"
+            _rt_dest="$MODDIR/$(mgr_path "$_rt_rel")"
+            mkdir -p "${_rt_dest%/*}" 2>/dev/null
+            rm -f "$_rt_dest" "$_rt_dest.tmp" 2>/dev/null
+            if cp -f "$_rt_src" "$_rt_dest.tmp" 2>>"$LOGDIR/ttc.log" && mv -f "$_rt_dest.tmp" "$_rt_dest" 2>>"$LOGDIR/ttc.log"; then
+              chmod 644 "$_rt_dest" 2>/dev/null
+            else
+              rm -f "$_rt_dest.tmp" 2>/dev/null
+              _rt_bad=$((_rt_bad + 1))
+            fi
+          done < "$stage.map"
+          if [ "$_rt_bad" = 0 ]; then
+            fail=0
+            echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 命中物化重试成功" >> "$LOGDIR/ttc.log" 2>/dev/null
+          else
+            echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 命中物化重试仍失败 $_rt_bad 个" >> "$LOGDIR/ttc.log" 2>/dev/null
+            fail=1
+          fi
         fi
         rm -f "$_LF_ERR" 2>/dev/null
         unset _ACC_LN _LN_N _cmdest
@@ -1281,17 +2128,21 @@ ${_oldr}
       fi
     else
     # ★ 2026-10-31：走到这里说明缓存未命中，才需要 slots.sh（懒加载，见函数注释）
+    apply_msg "没有计划缓存：读取永久槽位清单，按当前字体过滤…"
     _ensure_slots
     _GEN_NEW=1
     # 不用 $(...)：那会开子 shell，make_plan 里设的 SCOPE_VIA（判定依据）就拿不到了
     make_plan "$sel" "$plan" >/dev/null
     scope="$PLAN_SCOPE"
+    printf 'clockplan sel=%s targets=%s rows=%s\n' "$sel" \
+      "$(clock_targets 2>/dev/null | grep -c .)" \
+      "$(grep -c '^clock ' "$plan" 2>/dev/null)" >> "$LOGDIR/ttc.log" 2>/dev/null
     {
       echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=$sel${CFS_PREWARM:+ tag=prewarm}"
       echo "plan=$(grep -c . "$plan" 2>/dev/null) scope=$scope 判定依据=${SCOPE_VIA:-?} keep_lang=$(cfg_get keep_lang 0) keep_special=$(cfg_get keep_special 0)"
-    } >> "$LIB/ttc.log" 2>/dev/null
+    } >> "$LOGDIR/ttc.log" 2>/dev/null
     # ★ 2026-10-27：清单为空时先自动重扫一次（升级后常见），再决定是否报错
-    if [ ! -s "$plan" ] && [ ! -s "$LIB/scanned/slots.list" ]; then
+    if [ ! -s "$plan" ] && [ ! -s "$STATEDIR/scan/slots.list" ]; then
       sh "${MODDIR:-$MODPATH}/fontctl.sh" rescan >/dev/null 2>&1
       make_plan "$sel" "$plan" >/dev/null
       scope="$PLAN_SCOPE"
@@ -1301,7 +2152,7 @@ ${_oldr}
       echo "ERROR:没有找到可替换的槽位（范围：$scope）。已尝试自动重扫，仍为空的话请到「高级设置 → 通用 → 重新数一遍系统的字体」点一次，再切换"
       exit 1
     fi
-    # ★ 2026-10-17（作者：切换必须快）：**这里不再逐个 chmod/chcon 字体文件**。
+    # ★ 2026-10-17（开发者：切换必须快）：**这里不再逐个 chmod/chcon 字体文件**。
     #   字体被写进字体库时（store_font）已经设过权限和 SELinux 上下文，
     #   而 apply 只是"记录哪套字体对应哪个槽位"，根本不改字体文件本身。
     #   原来每次 apply 都要对字体跑一遍 chmod + chcon ——
@@ -1320,7 +2171,7 @@ ${_oldr}
     _LF_ERR=""
     if [ "$mode" = manager ] && [ "${CFS_PREWARM:-0}" != 1 ] && ! _symlink_on; then
       _DIRWRITE=1
-      _LF_ERR="$LIB/.lnfail.$$"
+      _LF_ERR="$STATEDIR/lnfail.$$"
       : > "$_LF_ERR" 2>/dev/null
     fi
     _LN_N=0; _ACC_LN=""
@@ -1336,7 +2187,7 @@ ${_oldr}
     else
       _SEL_FIXED=""
     fi
-    while read -r role rel; do
+    while read -r role rel src_override; do
       [ -n "$rel" ] || continue
       # ★ 单字体（不带 +）时 id 恒等于 $sel，循环外已经算好，这里直接取
       if [ -n "${_SEL_FIXED:-}" ]; then
@@ -1374,19 +2225,21 @@ ${_oldr}
         grp_pick_for "${rel##*/}"; wid="$GRP_WID"
       fi
       [ -n "$wid" ] && [ -f "$LIB/$wid.ttf" ] && id="$wid"
-      src="$LIB/$id.ttf"
+      src="${src_override:-$LIB/$id.ttf}"
       # .ttc 合集槽位（三星简中这类，见 common.sh 的 ttc_enabled）：
       # 把用户的字体包成"和目标合集一样多 face"的 TTC 再顶替 —— 系统配置里的 index 依然有效，
       # 不用改任何系统配置。（实测 SM-S9280 / Android 16：中文能跟着变，Minikin 认 index 就够。）
       # 生成失败就跳过这个槽位、保持系统原样 —— 绝不挂一个坏文件上去。
       case "$rel" in
         *.ttc|*.TTC)
+          # 用户手动删过 TTC：后台 prewarm 不再自动补，等真正切字体时再生成
+          [ "${CFS_NO_TTC:-0}" = "1" ] && continue
           # 生成器不在（包不完整 / 老包）→ **明确记一笔再跳过**。
           # 不这么写的话，用户看到的是"开关亮着、中文一点没变"，而报告里也看不出为什么
           # （ttc_faces_of / isnum 都在 ttcwrap.sh 里，没它连 faces 都读不出来）。
           if ! command -v ttc_wrap_mix >/dev/null 2>&1; then
             printf '%s %s via=no-generator detail=缺少 ttcwrap.sh（包不完整，请重新安装模块）\n' \
-              "$id" "$rel" >> "$LIB/ttc.log" 2>/dev/null
+              "$id" "$rel" >> "$LOGDIR/ttc.log" 2>/dev/null
             continue
           fi
           nf=$(ttc_faces_of "/$rel" 2>/dev/null)
@@ -1398,7 +2251,7 @@ ${_oldr}
           # ★ 2026-10-24 B4：合集策略（默认 = 只换中文那几号）
           if [ "$(cfg_get ttc_no_mix 0 2>/dev/null)" = 1 ]; then
             printf '%s %s faces=%s via=skip detail=B4 不生成混合合集（高级设置）\n' \
-              "$id" "$rel" "$nf" >> "$LIB/ttc.log" 2>/dev/null
+              "$id" "$rel" "$nf" >> "$LOGDIR/ttc.log" 2>/dev/null
             continue
           fi
           if [ "$(cfg_get ttc_all_faces 0 2>/dev/null)" = 1 ]; then
@@ -1408,16 +2261,16 @@ ${_oldr}
             cn=$(printf '%s' "$cn" | sed 's/^ //')
             cn_src="all-faces"; cn_detail="B4 全 face 替换（高级设置）"
           else
-            ttc_cn_indices "${rel##*/}" "$nf" > "$LIB/.ttccn.$$" 2>/dev/null
-            cn=$(tr '\n' ' ' < "$LIB/.ttccn.$$" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')
+            ttc_cn_indices "${rel##*/}" "$nf" > "$STATEDIR/ttccn.$$" 2>/dev/null
+            cn=$(tr '\n' ' ' < "$STATEDIR/ttccn.$$" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//')
             cn_src="$TTC_CN_SRC"; cn_detail="$TTC_CN_DETAIL"
-            rm -f "$LIB/.ttccn.$$" 2>/dev/null
+            rm -f "$STATEDIR/ttccn.$$" 2>/dev/null
           fi
           # 决策记录：报告里那份 fonts.xml 是被截断的，看不出代码到底怎么判的，
           # 所以这里把"换了哪几号、凭什么"写进 ttc.log，诊断报告会原样打印。
           printf '%s %s faces=%s replace=%s via=%s detail=%s\n' \
             "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "$cn_src" "${cn_detail:-无}" \
-            >> "$LIB/ttc.log" 2>/dev/null
+            >> "$LOGDIR/ttc.log" 2>/dev/null
           [ -n "$cn" ] || continue
           tag=$(printf '%s' "$cn" | tr ' ' '-')
           # ★ 2026-10-19 修（三星必踩）：产物名必须带上**源合集**的标识。
@@ -1430,9 +2283,9 @@ ${_oldr}
           # ★ 2026-10-31（关键重构）：合成产物**直接落在永久缓存目录**，不再写字体库根目录。
           #   根目录产物会在切到别的字体时被 prune 判成"没人引用"删掉 →
           #   切回来时计划缓存失效、又要重新合成几十 MB（真机实测 B→A 又变 30 秒）。
-          #   缓存路径稳定 ⇒ 计划缓存一次生成永久命中 ⇒ 合成一次永久保存（作者的设计）。
+          #   缓存路径稳定 ⇒ 计划缓存一次生成永久命中 ⇒ 合成一次永久保存（开发者的设计）。
           #   新鲜度由下面的 -ot 门把守：字体或系统合集更新了才重做。
-          TTC_CACHE="$LIB/.ttc.cache"
+          TTC_CACHE="$CACHEDIR/ttc"
           cand="$TTC_CACHE/${id}.ttc${nf}_${tag}_${_csrc:-ttc}"
           if [ ! -s "$cand" ] || [ "$cand" -ot "$src" ] 2>/dev/null || [ "$cand" -ot "/$rel" ] 2>/dev/null; then
             # 先算空间：这次要合成 = 原合集大小 + 用户字体大小。宁可这一个槽位不换，
@@ -1445,8 +2298,8 @@ ${_oldr}
               _need=$(( (_osz + _usz) / 1024 + 8192 ))
               if [ "$_free" -lt "$_need" ] 2>/dev/null; then
                 printf '%s %s faces=%s replace=空间不足跳过 via=space detail=需要%sMB只剩%sMB\n' \
-                  "$id" "$rel" "$nf" "$(( _need / 1024 ))" "$(( _free / 1024 ))" >> "$LIB/ttc.log" 2>/dev/null
-                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 空间不足，跳过合集 $rel（需要约 $(( _need / 1024 ))MB，只剩 $(( _free / 1024 ))MB）" >> "$LIB/mount.log" 2>/dev/null
+                  "$id" "$rel" "$nf" "$(( _need / 1024 ))" "$(( _free / 1024 ))" >> "$LOGDIR/ttc.log" 2>/dev/null
+                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 空间不足，跳过合集 $rel（需要约 $(( _need / 1024 ))MB，只剩 $(( _free / 1024 ))MB）" >> "$LOGDIR/mount.log" 2>/dev/null
                 continue
               fi
             fi
@@ -1459,9 +2312,10 @@ ${_oldr}
             #   下次走到这里时上面的 -ot 门直接放行，零合成零拷贝。
             mkdir -p "$TTC_CACHE" 2>/dev/null
             cand_tmp="$cand.tmp.$$"
+            apply_msg "生成中文合集：${rel##*/}…"
             # ★ 预热模式：向状态文件报告"正在合成哪个合集"（UI 轮询显示进度）
             if [ "${CFS_PREWARM:-0}" = 1 ]; then
-              printf 'stage=ttc id=%s rel=%s\n' "$sel" "${rel##*/}" > "$LIB/.pw.$sel.state" 2>/dev/null
+              printf 'stage=ttc id=%s rel=%s\n' "$sel" "${rel##*/}" > "$STATEDIR/pw.$sel.state" 2>/dev/null
             fi
             _twerr=$(ttc_wrap_mix "$src" "$nf" "$cand_tmp" "/$rel" "$cn" 2>&1)
             _twrc=$?
@@ -1473,7 +2327,7 @@ ${_oldr}
                 "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" \
                 "${_twrc:-?}" "${_twsz:-无}" "${_twfree:-?}" \
                 "$(printf '%s' "$_twerr" | head -n1 | cut -c1-80)" \
-                >> "$LIB/ttc.log" 2>/dev/null
+                >> "$LOGDIR/ttc.log" 2>/dev/null
               rm -f "$cand_tmp" 2>/dev/null
               cand_tmp=""
             fi
@@ -1488,7 +2342,7 @@ ${_oldr}
               if ! _tv=$(ttc_verify "$cand_tmp" "$nf"); then
                 printf '%s %s faces=%s replace=%s via=ttcbad detail=产物结构不合格（%s），已删除并跳过\n' \
                   "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "${_tv:-unknown}" \
-                  >> "$LIB/ttc.log" 2>/dev/null
+                  >> "$LOGDIR/ttc.log" 2>/dev/null
                 rm -f "$cand_tmp" 2>/dev/null
                 cand_tmp=""
               fi
@@ -1498,8 +2352,8 @@ ${_oldr}
               if ! isnum "$_csz" || [ "$_csz" -lt 1024 ] 2>/dev/null; then
                 printf '%s %s faces=%s replace=%s via=toosmall detail=产物只有%s字节，已删除并跳过\n' \
                   "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "${_csz:-?}" \
-                  >> "$LIB/ttc.log" 2>/dev/null
-                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 合集产物异常（只有 ${_csz:-?} 字节，已删除）：$cand_tmp" >> "$LIB/mount.log" 2>/dev/null
+                  >> "$LOGDIR/ttc.log" 2>/dev/null
+                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 合集产物异常（只有 ${_csz:-?} 字节，已删除）：$cand_tmp" >> "$LOGDIR/mount.log" 2>/dev/null
                 rm -f "$cand_tmp" 2>/dev/null
                 cand_tmp=""
               fi
@@ -1510,7 +2364,7 @@ ${_oldr}
               case "${_tc_free:-}" in ''|*[!0-9]*) _tc_free=0 ;; esac
               if [ "$_tc_free" -gt 0 ] && [ "$_tc_free" -lt 307200 ]; then
                 printf '%s %s via=ttc-no-store detail=剩余空间不足(%sKB)，产物不保存\n' \
-                  "$id" "$rel" "${_tc_free}" >> "$LIB/ttc.log" 2>/dev/null
+                  "$id" "$rel" "${_tc_free}" >> "$LOGDIR/ttc.log" 2>/dev/null
                 rm -f "$cand_tmp" 2>/dev/null
                 cand_tmp=""
               fi
@@ -1521,9 +2375,9 @@ ${_oldr}
               # tmp+mv 原子落位：预热和 apply 并发合成同一产物也不会写坏
               if mv -f "$cand_tmp" "$cand" 2>/dev/null; then
                 printf '%s %s faces=%s replace=%s via=ttc-synth(已入永久缓存)\n' \
-                  "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" >> "$LIB/ttc.log" 2>/dev/null
+                  "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" >> "$LOGDIR/ttc.log" 2>/dev/null
                 if [ "${CFS_PREWARM:-0}" = 1 ]; then
-                  printf 'stage=ttcdone id=%s rel=%s\n' "$sel" "${rel##*/}" > "$LIB/.pw.$sel.state" 2>/dev/null
+                  printf 'stage=ttcdone id=%s rel=%s\n' "$sel" "${rel##*/}" > "$STATEDIR/pw.$sel.state" 2>/dev/null
                 fi
               else
                 rm -f "$cand_tmp" 2>/dev/null
@@ -1532,19 +2386,16 @@ ${_oldr}
             else
               cand=""
             fi
-            # 保留最近 12 份（3 字体 × 2 合集槽 = 6 份全装得下，不会被挤掉；
-            # 多年换字体也不会无限膨胀。60MB 一份约 700MB 上限，
-            # 且上面已有"剩余不足 300MB 不落盘"保护）
-            ls -1t "$TTC_CACHE"/*.ttc 2>/dev/null | tail -n +13 | while IFS= read -r _old; do
-              rm -f "$_old" 2>/dev/null
-            done
+            # 不在计划生成中间清理缓存：刚合成、还没写入 slots.map 的合集
+            # 会被当成“无人引用”删掉，导致紧接着物化 cp 时源不存在。
+            # 统一由开机 service / 用户手动清理，保留空间上限由其它保护兜底。
             if [ -n "$cand" ]; then
               _csz=$(stat -c %s "$cand" 2>/dev/null)
               if ! isnum "$_csz" || [ "$_csz" -lt 1024 ] 2>/dev/null; then
                 printf '%s %s faces=%s replace=%s via=toosmall detail=产物只有%s字节，已删除并跳过\n' \
                   "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "${_csz:-?}" \
-                  >> "$LIB/ttc.log" 2>/dev/null
-                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 合集产物异常（只有 ${_csz:-?} 字节，已删除）：$cand" >> "$LIB/mount.log" 2>/dev/null
+                  >> "$LOGDIR/ttc.log" 2>/dev/null
+                echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 合集产物异常（只有 ${_csz:-?} 字节，已删除）：$cand" >> "$LOGDIR/mount.log" 2>/dev/null
                 rm -f "$cand" 2>/dev/null
                 cand=""
               fi
@@ -1570,7 +2421,7 @@ ${_oldr}
           data/*) ;;
           *)
         _dw_dest="$MODDIR/$(mgr_path "$rel")"
-        _ACC_LN="${_ACC_LN}ln -f '${src}' '${_dw_dest}' || echo '${_dw_dest}' >> '${_LF_ERR}'
+        _ACC_LN="${_ACC_LN}rm -f '${_dw_dest}'; ln -f '${src}' '${_dw_dest}' || { cp -f '${src}' '${_dw_dest}.tmp' && mv -f '${_dw_dest}.tmp' '${_dw_dest}'; } || echo '${_dw_dest}' >> '${_LF_ERR}'; chmod 644 '${_dw_dest}' 2>/dev/null
 "
         _LN_N=$((_LN_N + 1))
         # 每 10 条插一个 wait（个位数是 0 就攒一批），控制并行进程数
@@ -1598,8 +2449,31 @@ ${_oldr}
       _ln_batch_run "$_LF_ERR"
       if [ "${_LN_FAILN:-0}" -gt 0 ]; then
         echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 批量物化失败 ${_LN_FAILN} 个，首个：$(head -n1 "$_LF_ERR" 2>/dev/null)（/data 剩余 $(df -k /data 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4) KB）" \
-          >> "$LIB/ttc.log" 2>/dev/null
-        fail=1
+          >> "$LOGDIR/ttc.log" 2>/dev/null
+        # 第一次批量失败：逐个删旧目标再复制，绕开文件被挂载/跨设备导致的 ln/cp 失败
+        _rt_bad=0
+        while read -r _rt_id _rt_rel _rt_src; do
+          [ -n "$_rt_rel" ] || continue
+          case "$_rt_rel" in data/*) continue ;; esac
+          _rt_dest="$MODDIR/$(mgr_path "$_rt_rel")"
+          [ -n "${_rt_src:-}" ] || _rt_src="$LIB/$_rt_id.ttf"
+          mkdir -p "${_rt_dest%/*}" 2>/dev/null
+          rm -f "$_rt_dest" 2>/dev/null
+          rm -f "$_rt_dest.tmp" 2>/dev/null
+          if cp -f "$_rt_src" "$_rt_dest.tmp" 2>>"$LOGDIR/ttc.log" && mv -f "$_rt_dest.tmp" "$_rt_dest" 2>>"$LOGDIR/ttc.log"; then
+            chmod 644 "$_rt_dest" 2>/dev/null
+          else
+            rm -f "$_rt_dest.tmp" 2>/dev/null
+            _rt_bad=$((_rt_bad + 1))
+          fi
+        done < "$stage.map"
+        if [ "$_rt_bad" = 0 ]; then
+          fail=0
+          echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 物化重试成功：逐个复制完成" >> "$LOGDIR/ttc.log" 2>/dev/null
+        else
+          echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 物化重试仍失败 $_rt_bad 个" >> "$LOGDIR/ttc.log" 2>/dev/null
+          fail=1
+        fi
       fi
       rm -f "$_LF_ERR" 2>/dev/null
       unset _ACC_LN _LN_N _dw_dest
@@ -1639,7 +2513,7 @@ ${_oldr}
     if [ "$fail" = 1 ] || [ "$COUNT" = 0 ]; then
       _dfree=$(df -k /data 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4)
       echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 生成失败：fail=$fail 槽位=$COUNT · /data 剩余 ${_dfree:-?} KB（失败的那一对路径见上方"物化失败"行）" \
-        >> "$LIB/ttc.log" 2>/dev/null
+        >> "$LOGDIR/ttc.log" 2>/dev/null
       rm -rf "$stage" "$stage.list" "$stage.map"
       if [ "${_DIRWRITE:-0}" = 1 ]; then
         echo "ERROR:生成字体文件失败（/data 剩余 ${_dfree:-?} KB——接近 0 就是真的没空间了，请先清理）。这次是就地更新，个别槽位可能已换成新字体——重新应用一次即可恢复一致"
@@ -1651,25 +2525,47 @@ ${_oldr}
     # ★ 2026-10-31：**预热模式到此为止** —— 计划已生成（或命中）并写入缓存，
     #   但**不提交**：不写 slots.map / pending_font / last_selection，当前选择分毫不动。
     if [ "${CFS_PREWARM:-0}" = 1 ]; then
-      printf 'stage=done id=%s count=%s\n' "$sel" "$COUNT" > "$LIB/.pw.$sel.state" 2>/dev/null
+      printf 'stage=done id=%s count=%s\n' "$sel" "$COUNT" > "$STATEDIR/pw.$sel.state" 2>/dev/null
       rm -rf "$stage" "$stage.list" "$stage.map" 2>/dev/null
       echo "OK:prewarm:$COUNT:$([ "${PC_HIT:-0}" = 1 ] && echo hit || echo miss)"
       exit 0
     fi
   else
     # 没选字体（none）：也留一行，报告里能看出"这次是什么都没选"，而不是"记录没写"
-    echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=none（未选择字体，不需要替换）" > "$LIB/ttc.log" 2>/dev/null
+    echo "time=$(date '+%m-%d %H:%M:%S' 2>/dev/null) rom=$(_rom_cached) ttc=$(ttc_effective) mode=$mode sel=none（未选择字体，不需要替换）" > "$LOGDIR/ttc.log" 2>/dev/null
   fi
 
   # 3. 提交
+  # 最后一道保护：计划数突然远小于开机计划时，不允许删旧 payload。
+  _bn=$(grep -c . "$MODDIR/slots.boot.map" 2>/dev/null)
+  case "${_bn:-}" in ''|*[!0-9]*) _bn=0 ;; esac
+  if [ "$_bn" -gt 20 ] && [ "$COUNT" -lt $((_bn / 2)) ]; then
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 提交保护：计划仅 $COUNT 个，开机计划 $_bn 个，拒绝覆盖" >> "$LOGDIR/ttc.log" 2>/dev/null
+    rm -rf "$stage" "$stage.list" "$stage.map" 2>/dev/null
+    echo "ERROR:这次计划只有 $COUNT 个槽位，明显少于开机时的 $_bn 个，已拒绝覆盖模块文件。请重试一次；如果还这样，发诊断报告"
+    exit 1
+  fi
+  apply_msg "写入模块字体文件：$COUNT 个槽位…"
   commit_payload "$stage" "$mode"
+  repair_payload_from_map
   prune_wrapped_ttc
   echo "$sel" > "$MODDIR/pending_font"
-  echo "$sel" > "$LIB/last_selection"
+  echo "$sel" > "$STATEDIR/last_selection"
+  # 本次是用户真正切换，允许后续后台预热重新补 TTC
+  [ "${CFS_PREWARM:-0}" = "1" ] || rm -f "$STATEDIR/ttc.manual_hold" 2>/dev/null
+  clock_touch_used
+  # clock_cache_prune 只在开机后跑：切换后新配套先作为临时，重启生效后才按策略清旧
+  ttc_touch_used
+  if [ "${CFS_PREWARM:-0}" != "1" ]; then
+    # slots.map 已提交、pending_font 已写入：
+    # 切换回旧字体时，刚才那套临时 TTC/时钟不再被引用，按预设回收。
+    ttc_cache_mode_clean >/dev/null 2>&1
+    clock_cache_prune >/dev/null 2>&1
+  fi
   # ★ 2026-10-20：记下"这次应用字体时的系统构建指纹"。
   #   系统 OTA 后 /system/fonts 会被换成新版本，我们的挂载可能对不上新文件，
   #   表现就是"显示生效但字体不对"。指纹一变就在界面/报告里提示重新应用。
-  getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n' > "$LIB/.fp.apply" 2>/dev/null
+  getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n' > "$STATEDIR/fp.apply" 2>/dev/null
   [ -f "$MODDIR/active_font" ] || echo none > "$MODDIR/active_font"
   # ★ 2026-10-16（B1）：再记一份"最近一次真正生效过的字体"，放在**不会被 none 覆盖**的地方。
   #   为什么需要：升级时 customize.sh 的恢复链（last_selection → active_font → pending_font）
@@ -1679,18 +2575,20 @@ ${_oldr}
   #     · 选的是真字体 → 写 .last_good（下次恢复时可以用它）
   #     · 选的是 none   → 删掉 .last_good（这是用户意图，不该在下次升级被"恢复"回来）
   if [ "$sel" = none ]; then
-    rm -f "$LIB/.last_good" 2>/dev/null
+    rm -f "$STATEDIR/last_good" 2>/dev/null
     # ★ 2026-10-23（ColorOS 真机反馈"恢复不了原字体，得卸载才恢复"）：
-    #   主题字体（/data 下那几份）是**物理替换**上去的，原件备份在 $LIB/.orig。
+    #   主题字体（/data 下那几份）是**物理替换**上去的，原件备份在 $BACKUPDIR/orig。
     #   原来只有开机时（pending=none）才还原；用户选「无字体」当场不还原，
     #   看起来就像"没恢复"。这里立刻把原件盖回去 —— 不用等重启。
     if command -v datafont_restore >/dev/null 2>&1; then
       datafont_restore >/dev/null 2>&1
     fi
   else
-    printf '%s\n' "$sel" > "$LIB/.last_good" 2>/dev/null
+    printf '%s\n' "$sel" > "$STATEDIR/last_good" 2>/dev/null
   fi
   refresh_prop
+  # apply 后计划已变，旧的逐槽位核对缓存必须作废（否则“实际生效”还停在上一份计划）
+  rm -f "$STATEDIR/verify.cache" 2>/dev/null
   # ★ 2026-10-31：计时收尾 —— 耗时写进 ttc.log（诊断报告会打印），
   #   并追加到 OK 返回行（界面解析 t= 字段显示给用户）
   _cfs_t1=$(cut -d' ' -f1 /proc/uptime 2>/dev/null | tr -d ' ')
@@ -1699,10 +2597,88 @@ ${_oldr}
   case "${_cfs_el:-}" in ''|*[!0-9.]*) _cfs_el="?" ;; esac
   {
     echo "apply耗时=${_cfs_el}s 缓存=$([ "${PC_HIT:-0}" = 1 ] && echo 命中 || echo 生成) 槽位=$COUNT"
-  } >> "$LIB/ttc.log" 2>/dev/null
+  } >> "$LOGDIR/ttc.log" 2>/dev/null
   # ★ 2026-10-17：返回值后面带上"这次实际用的 keep_lockscreen"。
   #   用户反馈"切了开关没反应"时，这一项能直接分辨是"设置没写进去"还是"过滤没生效"。
   echo "OK:$(label_of "$sel"):$COUNT:$scope:$KLLAST,t=${_cfs_el}s"
+  apply_msg "完成，刷新状态…"
+  # 只删“上一次切了但没重启、这次又切走”的新生成 TTC；
+  # 旧缓存不在 apply 时删，等重启后由 service 按策略清。
+  _prev_t="$STATEDIR/ttc.pending"
+  if [ -s "$_prev_t" ]; then
+    for _pid in $(cat "$_prev_t" 2>/dev/null); do
+      case "$_pid" in ""|*[!A-Za-z0-9_]*) continue ;; esac
+      grep -q "/$_pid\." "$MODDIR/slots.map" 2>/dev/null && continue
+      grep -q "/$_pid\." "$MODDIR/slots.boot.map" 2>/dev/null && continue
+      rm -f "$CACHEDIR/ttc/$_pid".* "$LIB/$_pid".ttc[0-9]* 2>/dev/null
+    done
+    rm -f "$_prev_t" 2>/dev/null
+  fi
+  # 只把“本次新生成、还没经过一次开机”的 TTC 记为临时；
+  # 已经在本次开机计划里的旧 3 套永远不算临时，反复切字体只替换临时那套。
+  _bootids=$( { cat "$STATEDIR/ttc.committed" 2>/dev/null; awk 'NF >= 3 && $3 ~ /\/cache\/ttc\// { print $1 }' "$MODDIR/slots.boot.map" 2>/dev/null; } | sort -u )
+  _newids=$(awk 'NF >= 3 && $3 ~ /\/cache\/ttc\// { print $1 }' "$MODDIR/slots.map" 2>/dev/null | sort -u | while read -r _nid; do
+    [ -n "$_nid" ] || continue
+    printf '%s\n' "$_bootids" | grep -qx "$_nid" || printf '%s\n' "$_nid"
+  done)
+  if [ -n "$_newids" ]; then
+    # 不足 3 套时，新生成的直接转永久；够 3 套之后才作为临时。
+    _tmode=$(cfg_get ttc_cache_mode recent 2>/dev/null)
+    _tcnt=$(sort -u "$STATEDIR/ttc.committed" 2>/dev/null | grep -c .)
+    _promote=""
+    if [ "$_tmode" = "font" ]; then
+      _promote="$_newids"; _newids=""
+    elif [ "$_tmode" = "recent" ] && [ "${_tcnt:-0}" -lt 3 ]; then
+      _room=$((3 - _tcnt))
+      _promote=$(printf '%s\n' "$_newids" | head -n "$_room")
+      _newids=$(printf '%s\n' "$_newids" | sort -u | while read -r _x; do
+        [ -n "$_x" ] || continue
+        if printf '%s\n' "$_promote" | grep -qx "$_x"; then :; else printf '%s\n' "$_x"; fi
+      done)
+    fi
+    if [ -n "$_promote" ]; then
+      { cat "$STATEDIR/ttc.committed" 2>/dev/null; printf '%s\n' "$_promote"; } | sort -u > "$STATEDIR/ttc.committed.tmp" 2>/dev/null \
+        && mv -f "$STATEDIR/ttc.committed.tmp" "$STATEDIR/ttc.committed" 2>/dev/null
+    fi
+    [ -n "$_newids" ] && printf '%s\n' "$_newids" > "$_prev_t" 2>/dev/null
+  fi
+  # 时钟配套同一套临时语义：新字体切出来的配套先算临时，
+  # 反复切只替换临时；切回旧字体删临时；重启后由 service 按策略清旧。
+  _prev_c="$STATEDIR/clock.pending"
+  if [ -s "$_prev_c" ]; then
+    for _cid in $(cat "$_prev_c" 2>/dev/null); do
+      case "$_cid" in ""|*[!A-Za-z0-9_]*) continue ;; esac
+      grep -q "/$_cid\.clock\." "$MODDIR/slots.map" 2>/dev/null && continue
+      grep -q "/$_cid\.clock\." "$MODDIR/slots.boot.map" 2>/dev/null && continue
+      rm -f "$CLOCKDIR/$_cid".clock.*.ttf "$CLOCKDIR/$_cid.clock.src" 2>/dev/null
+    done
+    rm -f "$_prev_c" 2>/dev/null
+  fi
+  _cbootc=$( { cat "$STATEDIR/clock.committed" 2>/dev/null; awk 'NF >= 3 && $3 ~ /\/clock\// { p=$3; sub(/^.*\//,"",p); sub(/\.clock\..*/,"",p); print p }' "$MODDIR/slots.boot.map" 2>/dev/null; } | sort -u )
+  _cnew=$(awk 'NF >= 3 && $3 ~ /\/clock\// { p=$3; sub(/^.*\//,"",p); sub(/\.clock\..*/,"",p); print p }' "$MODDIR/slots.map" 2>/dev/null | sort -u | while read -r _nid; do
+    [ -n "$_nid" ] || continue
+    printf '%s\n' "$_cbootc" | grep -qx "$_nid" || printf '%s\n' "$_nid"
+  done)
+  if [ -n "$_cnew" ]; then
+    _cmode=$(cfg_get clock_cache_mode recent 2>/dev/null)
+    _ccnt=$(sort -u "$STATEDIR/clock.committed" 2>/dev/null | grep -c .)
+    _cpromote=""
+    if [ "$_cmode" = "all" ]; then
+      _cpromote="$_cnew"; _cnew=""
+    elif [ "$_cmode" = "recent" ] && [ "${_ccnt:-0}" -lt 3 ]; then
+      _croom=$((3 - _ccnt))
+      _cpromote=$(printf '%s\n' "$_cnew" | head -n "$_croom")
+      _cnew=$(printf '%s\n' "$_cnew" | sort -u | while read -r _x; do
+        [ -n "$_x" ] || continue
+        if printf '%s\n' "$_cpromote" | grep -qx "$_x"; then :; else printf '%s\n' "$_x"; fi
+      done)
+    fi
+    if [ -n "$_cpromote" ]; then
+      { cat "$STATEDIR/clock.committed" 2>/dev/null; printf '%s\n' "$_cpromote"; } | sort -u > "$STATEDIR/clock.committed.tmp" 2>/dev/null \
+        && mv -f "$STATEDIR/clock.committed.tmp" "$STATEDIR/clock.committed" 2>/dev/null
+    fi
+    [ -n "$_cnew" ] && printf '%s\n' "$_cnew" > "$_prev_c" 2>/dev/null
+  fi
 }
 
 do_report() {
@@ -1855,9 +2831,52 @@ case "${1:-}" in
     echo "P=$P"
     echo "R=$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')"
     echo "RO=$(cfg_get rom_override auto 2>/dev/null)"
-    echo "RP=$(tr -d '[:space:]' 2>/dev/null < "$LIB/.rom_pending")"
+    echo "RP=$(tr -d '[:space:]' 2>/dev/null < "$STATEDIR/rom_pending")"
     if [ -f "$MODDIR/rescued" ]; then echo "X=1"; else echo "X=0"; fi
     echo "N=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')"
+    _ck=0
+    [ -s "$MODDIR/slots.map" ] && _ck=$(awk 'NF >= 3 && $NF ~ /(^|\/)clock\// { n++ } END { print n+0 }' "$MODDIR/slots.map" 2>/dev/null)
+    echo "CK=${_ck:-0}"
+    _cb=0
+    [ -s "$MODDIR/slots.boot.map" ] && _cb=$(awk 'NF >= 3 && $NF ~ /(^|\/)clock\// { n++ } END { print n+0 }' "$MODDIR/slots.boot.map" 2>/dev/null)
+    echo "CB=${_cb:-0}"
+    # 锁屏时钟状态：开启值、扫描 target 数、当前字体已生成数、实际挂载数
+    _csel=$(cur_pending 2>/dev/null)
+    [ -n "$_csel" ] && [ "$_csel" != none ] || _csel=$(cur_active 2>/dev/null)
+    _csel=$(clock_font_of "$_csel")
+    _cbase=${_csel%%_*}
+    [ "$_cbase" = "$_csel" ] && _cbase=""
+    echo "CE=$(cfg_get replace_lockscreen 0 2>/dev/null)"
+    # 插件被卸载时按“未开启”显示，避免状态行还挂着“已开启”
+    if ! engine_ready 2>/dev/null; then
+      echo "CE=0"
+      echo "PLUGIN=0"
+    else
+      echo "PLUGIN=1"
+    fi
+    _ctn=$(clock_targets 2>/dev/null | grep -c .)
+    case "${_ctn:-}" in ''|*[!0-9]*) _ctn=0 ;; esac
+    echo "CT=$_ctn"
+    _cgn=0
+    for _sid in "$_csel" "$_cbase"; do
+      [ -n "$_sid" ] || continue
+      for _cf in "$CLOCKDIR/$_sid".clock.*.ttf; do
+        [ -s "$_cf" ] && _cgn=$((_cgn + 1))
+      done
+    done
+    echo "CG=$_cgn"
+    _cmn=0
+    clock_targets 2>/dev/null | while IFS= read -r _ct; do
+      [ -f "$_ct" ] || continue
+      _cs=$(printf '%s' "${_ct##*/}" | sed 's/[^A-Za-z0-9]/_/g')
+      for _sid in "$_csel" "$_cbase"; do
+        _cc="$CLOCKDIR/$_sid.clock.$_cs.ttf"
+        [ -s "$_cc" ] || continue
+        _ia=$(md5sum "$_ct" 2>/dev/null | awk '{print $1}')
+        _ib=$(md5sum "$_cc" 2>/dev/null | awk '{print $1}')
+        [ -n "$_ia" ] && [ "$_ia" = "$_ib" ] && { echo 1; break; }
+      done
+    done | grep -c . | sed 's/^/CM=/'
     # ★ 2026-10-16：槽位来源拆分（界面显示「系统配置里引用的 / 本模块补充的」）
     #   由 slots.sh 的 slot_plan 在生成计划时写到 slots.sources —— 事后重建不可靠，
     #   因为"来源"只在合并候选那一刻知道。
@@ -1871,7 +2890,7 @@ case "${1:-}" in
     #   口径不变：
     #     x = 机型清单（targets）里、本机真实存在的名字数 = targets=
     #     s = 本机扫描补的 = extra=
-    _mt="${LIB:-/data/adb/custom_font_lib}/scanned/slots.meta"
+    _mt="${STATEDIR}/scan/slots.meta"
     _tjn=0; _tjt=0; _jbn=0
     if [ -s "$_mt" ]; then
       while IFS='=' read -r _mk _mv; do
@@ -1919,17 +2938,17 @@ case "${1:-}" in
     _hy19=0
     if [ "$(mount_mode 2>/dev/null)" = manager ] && grep -qE '^[^ ]+ (/?data/)' "$MODDIR/slots.map" 2>/dev/null; then
       # 挂到的可能是符号链接的真实路径（/system/fonts/…），所以只看 .mounted 是否有记录
-      [ -s "${LIB:-/data/adb/custom_font_lib}/.mounted" ] && _hy19=1
+      [ -s "${STATEDIR}/mounted" ] && _hy19=1
     fi
     echo "HY=$_hy19"
 
     # ★ 2026-11-01：PD=1 = 计划比本次开机新（改了开关/换了字体还没重启）
-    #   ★ 2026-11-01（作者反馈"A切B再切A应该变回正常"）：mtime 新还不够 ——
+    #   ★ 2026-11-01（实测"A切B再切A应该变回正常"）：mtime 新还不够 ——
     #     再比一次**内容**：与开机快照逐字节一致（A→B→A、开关开→关→开）= 实际
     #     没有变化，不算待生效，横幅不出。cmp 只在 mtime 更新时才跑（一次 fork）。
     _pd=0
-    if [ -s "$MODDIR/slots.map" ] && [ -f "$LIB/.boot.mark" ]; then
-      if [ "$MODDIR/slots.map" -nt "$LIB/.boot.mark" ] 2>/dev/null; then
+    if [ -s "$MODDIR/slots.map" ] && [ -f "$STATEDIR/boot.mark" ]; then
+      if [ "$MODDIR/slots.map" -nt "$STATEDIR/boot.mark" ] 2>/dev/null; then
         if [ ! -s "$MODDIR/slots.boot.map" ] || \
            ! cmp -s "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null; then
           _pd=1
@@ -1937,7 +2956,7 @@ case "${1:-}" in
       fi
     fi
     echo "PD=$_pd"
-    # ★ 2026-11-01（作者要求）：「当前实际生效」的数字来源 = **开机快照**。
+    # ★ 2026-11-01（设计）：「当前实际生效」的数字来源 = **开机快照**。
     #   service.sh 开机时把当时的 slots.map 存成 slots.boot.map —— 那是这次
     #   开机真正挂载的计划；之后的 apply 只改 slots.map 不动快照，
     #   所以"已生效"在重启前纹丝不动，不会跟着新计划一起变。
@@ -1949,12 +2968,12 @@ case "${1:-}" in
     echo "VF=$(payload_verify "$MODDIR" | tr ' ' ',')"
     if [ -f "$MODDIR/mount_missed" ]; then echo "MM=1"; else echo "MM=0"; fi
     # RS=1：模块因为"连续开机失败"被自动停用过（这次是用户重新启用后进来的）
-    if [ -s "$LIB/rescue_stopped" ]; then echo "RS=1"; else echo "RS=0"; fi
+    if [ -s "$STATEDIR/rescue_stopped" ]; then echo "RS=1"; else echo "RS=0"; fi
     echo "CF=$(list_conflicts 2>/dev/null | cut -d'|' -f2 | tr '\n' ' ')"
     # FP：1 = 系统构建指纹与"上次应用字体时"不同（很可能 OTA 过）；0 = 一致；空 = 没记录
     _fpn=""
-    if [ -s "$LIB/.fp.apply" ]; then
-      _fpold=$(tr -d '[:space:]' 2>/dev/null < "$LIB/.fp.apply")
+    if [ -s "$STATEDIR/fp.apply" ]; then
+      _fpold=$(tr -d '[:space:]' 2>/dev/null < "$STATEDIR/fp.apply")
       _fpnow=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '[:space:]')
       if [ -n "$_fpold" ] && [ -n "$_fpnow" ] && [ "$_fpold" != "$_fpnow" ]; then
         _fpn=1
@@ -1969,9 +2988,79 @@ case "${1:-}" in
     echo "OK"
     ;;
   ack-stopped)
-    rm -f "$LIB/rescue_stopped" 2>/dev/null
+    rm -f "$STATEDIR/rescue_stopped" 2>/dev/null
     echo "OK"
     ;;
+  lsf)
+    # 字体导入模式：列出 ttf/otf/woff/woff2/zip
+    d=$(printf '%s' "$2" | base64 -d 2>/dev/null)
+    bad_path "$d" && { echo "ERROR:路径不允许"; exit 1; }
+    r=$(to_real "$d")
+    case "$r" in "$STORAGE"|"$STORAGE"/*) ;; *) echo "ERROR:路径不允许"; exit 1 ;; esac
+    [ -d "$r" ] || { echo "ERROR:不是文件夹"; exit 1; }
+    echo "P|$d"
+    ls -1p "$r" 2>/dev/null | head -n 2000 | while IFS= read -r n; do
+      case "$n" in ""|*'|'*) continue ;; esac
+      case "$n" in
+        */) echo "D|${n%/}" ;;
+        *.[tT][tT][fF]|*.[oO][tT][fF]|*.[wW][oO][fF][fF]|*.[wW][oO][fF][fF]2|*.[zZ][iI][pP])
+          echo "F|$n|$(stat -c %s "$r/$n" 2>/dev/null)" ;;
+      esac
+    done
+    ;;
+
+  import-any)
+    # 任意字体格式导入：ttf/otf 直接存，woff/woff2 先转，zip 解包后递归
+    mark_dirty
+    _src=$(printf '%s' "$2" | base64 -d 2>/dev/null)
+    _nm=$(printf '%s' "$3" | base64 -d 2>/dev/null)
+    [ -f "$_src" ] || { echo "ERROR:找不到文件"; exit 1; }
+    case "$_src" in
+      *.zip|*.ZIP)
+        _td="$STATEDIR/impzip.$$"; rm -rf "$_td"; mkdir -p "$_td"
+        unzip -q -o "$_src" -d "$_td" 2>/dev/null || { rm -rf "$_td"; echo "ERROR:zip 解压失败"; exit 1; }
+        _ok=0
+        find "$_td" -type f 2>/dev/null | while IFS= read -r _f; do
+          case "$_f" in
+            *.ttf|*.TTF|*.otf|*.OTF|*.woff|*.WOFF|*.woff2|*.WOFF2)
+              out=$(sh "$MODDIR/fontctl.sh" import-any "$(printf '%s' "$_f" | base64 -w0)" "$(printf '%s' "$(basename "$_f" | sed 's/\.[^.]*$//')" | base64 -w0)")
+              echo "$out"; _ok=$((_ok+1)) ;;
+          esac
+        done
+        rm -rf "$_td"; exit 0 ;;
+      *.woff|*.WOFF|*.woff2|*.WOFF2)
+        engine_ready || { echo "ERROR:导入 WOFF/WOFF2 需要先安装字体工具箱插件（高级设置 → 字体工具箱）"; exit 1; }
+        _td="$STATEDIR/impwoff.$$"; mkdir -p "$_td"
+        _out="$_td/font.ttf"
+        _r=$(sh "$MODDIR/engine.sh" run convert --font "$_src" --to ttf --out "$_out" 2>/dev/null | tail -n1)
+        case "$_r" in *'"ok": true'*) : ;; *) rm -rf "$_td"; echo "ERROR:转换失败（需要先安装字体工具箱）：$_r"; exit 1 ;; esac
+        [ -s "$_out" ] || { rm -rf "$_td"; echo "ERROR:转换没有产物"; exit 1; }
+        out=$(store_font "$_out" "$_nm" mv); rc=$?
+        rm -rf "$_td"
+        echo "$out"; exit $rc ;;
+      *)
+        out=$(store_font "$_src" "$_nm" cp); rc=$?
+        echo "$out"; exit $rc ;;
+    esac
+    ;;
+
+  lsz)
+    # 文件浏览器「插件 zip」模式：列出所有文件（不只是字体）
+    d=$(printf '%s' "$2" | base64 -d 2>/dev/null)
+    bad_path "$d" && { echo "ERROR:路径不允许"; exit 1; }
+    r=$(to_real "$d")
+    case "$r" in "$STORAGE"|"$STORAGE"/*) ;; *) echo "ERROR:路径不允许"; exit 1 ;; esac
+    [ -d "$r" ] || { echo "ERROR:不是文件夹"; exit 1; }
+    echo "P|$d"
+    ls -1p "$r" 2>/dev/null | head -n 2000 | while IFS= read -r n; do
+      case "$n" in ""|*'|'*) continue ;; esac
+      case "$n" in
+        */) echo "D|${n%/}" ;;
+        *) echo "F|$n|$(stat -c %s "$r/$n" 2>/dev/null)" ;;
+      esac
+    done
+    ;;
+
   ls)
     d=$(printf '%s' "$2" | base64 -d 2>/dev/null)
     bad_path "$d" && { echo "ERROR:路径不允许"; exit 1; }
@@ -2052,7 +3141,7 @@ case "${1:-}" in
     echo "P=$P"
     echo "R=$(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')"
     echo "RO=$(cfg_get rom_override auto 2>/dev/null)"
-    echo "RP=$(tr -d '[:space:]' 2>/dev/null < "$LIB/.rom_pending")"
+    echo "RP=$(tr -d '[:space:]' 2>/dev/null < "$STATEDIR/rom_pending")"
     if [ -f "$MODDIR/rescued" ]; then echo "X=1"; else echo "X=0"; fi
     echo "N=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')"
     echo "S=$(effective_scope "$P" 2>/dev/null)"
@@ -2067,8 +3156,8 @@ case "${1:-}" in
     # ★ 2026-11-01：PD=1 = 计划比本次开机新（改了开关/换了字体还没重启）
     #   ★ 内容与开机快照一致（A→B→A）→ 不算待生效（同 status 分支）
     _pd=0
-    if [ -s "$MODDIR/slots.map" ] && [ -f "$LIB/.boot.mark" ]; then
-      if [ "$MODDIR/slots.map" -nt "$LIB/.boot.mark" ] 2>/dev/null; then
+    if [ -s "$MODDIR/slots.map" ] && [ -f "$STATEDIR/boot.mark" ]; then
+      if [ "$MODDIR/slots.map" -nt "$STATEDIR/boot.mark" ] 2>/dev/null; then
         if [ ! -s "$MODDIR/slots.boot.map" ] || \
            ! cmp -s "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null; then
           _pd=1
@@ -2076,7 +3165,7 @@ case "${1:-}" in
       fi
     fi
     echo "PD=$_pd"
-    # ★ 2026-11-01（作者要求）：「当前实际生效」= 开机快照（见 status 分支同注释）
+    # ★ 2026-11-01（设计）：「当前实际生效」= 开机快照（见 status 分支同注释）
     _bn=$(wc -l 2>/dev/null < "$MODDIR/slots.boot.map" | tr -d ' ')
     case "${_bn:-}" in ''|*[!0-9]*) _bn="" ;; esac
     [ -n "$_bn" ] || _bn=$(wc -l 2>/dev/null < "$APPLIED" | tr -d ' ')
@@ -2184,6 +3273,13 @@ case "${1:-}" in
         SKIP=$((SKIP+1)); continue
       fi
       rm -f "$LIB/$id.ttf" "$LIB/$id.name" "$LIB/$id.meta"
+      for _cf in "$CACHEDIR/ttc/$id".*; do
+        [ -e "$_cf" ] && rm -f "$_cf" 2>/dev/null
+      done
+      for _cf in "$CLOCKDIR/$id".clock.*.ttf; do
+        [ -e "$_cf" ] && rm -f "$_cf" 2>/dev/null
+      done
+      rm -f "$LIB/$id".flyme.ttf 2>/dev/null
       DEL=$((DEL+1))
     done
     echo "OK:$DEL:$SKIP"
@@ -2199,9 +3295,13 @@ case "${1:-}" in
     [ "$sel" = none ] && { echo "OK:none"; exit 0; }
     # ★ 2026-10-31：manager 挂载也预热（计划缓存与挂载方式无关）
     CFS_PREWARM=1
-    export CFS_PREWARM
+    # 导入/安装预热只做计划，不合成 TTC。TTC 只在用户真正切换字体时生成；
+    # 已有缓存会在正常 apply 里直接复用。
+    [ "${CFS_PREWARM_TTC:-0}" = "1" ] || CFS_NO_TTC=1
+    CFS_SKIP_CLOCK=1
+    export CFS_PREWARM CFS_SKIP_CLOCK
     # ★ 状态文件：给 UI 轮询显示进度（stage=plan → ttc → done）
-    printf 'stage=plan id=%s\n' "$sel" > "$LIB/.pw.$sel.state" 2>/dev/null
+    printf 'stage=plan id=%s\n' "$sel" > "$STATEDIR/pw.$sel.state" 2>/dev/null
     do_apply "$sel"
     ;;
   prewarm-bg)
@@ -2209,12 +3309,42 @@ case "${1:-}" in
     # ★ 2026-10-31：**后台预热（立即返回）** —— 给 UI 的导入流程用：
     #   导入 + 档案探测完成后调用。本命令把状态文件标成 queued 后立即返回
     #   （不阻塞 ksuExec），真正的预热在后台跑；
-    #   UI 轮询 $LIB/.pw.<id>.state 显示「现在在干嘛」。
+    #   UI 轮询 $STATEDIR/pw.<id>.state 显示「现在在干嘛」。
     # -------------------------------------------------------------------
     sel=$(check_sel "$2") || { echo "$sel"; exit 1; }
     [ "$sel" = none ] && { echo "OK:none"; exit 0; }
-    printf 'stage=queued id=%s\n' "$sel" > "$LIB/.pw.$sel.state" 2>/dev/null
-    ( sh "$MODDIR/fontctl.sh" prewarm "$sel" ) >/dev/null 2>&1 &
+    # 只保留当前：非当前字体不做导入预热，等真正切换时再生成
+    if [ "$(cfg_get ttc_cache_mode recent 2>/dev/null)" = "none" ]; then
+      _cur=$(cur_pending 2>/dev/null); [ -n "$_cur" ] && [ "$_cur" != none ] || _cur=$(cur_active 2>/dev/null)
+      if [ "$sel" != "$_cur" ]; then
+        printf 'stage=skip id=%s\n' "$sel" > "$STATEDIR/pw.$sel.state" 2>/dev/null
+        echo "OK:prewarm-bg:$sel:skip"
+        exit 0
+      fi
+    fi
+    _pq="$STATEDIR/prewarm.queue"
+    _pl="$STATEDIR/prewarm.lock"
+    printf 'stage=queued id=%s\n' "$sel" > "$STATEDIR/pw.$sel.state" 2>/dev/null
+    printf '%s\n' "$sel" >> "$_pq" 2>/dev/null
+    # 多字体同时导入：只允许一个 prewarm 队列 worker，按加入顺序串行处理
+    if mkdir "$_pl" 2>/dev/null; then
+      (
+        while :; do
+          [ -s "$_pq" ] || break
+          _pt="$_pq.$$"; mv -f "$_pq" "$_pt" 2>/dev/null; : > "$_pq"
+          while IFS= read -r _pid2; do
+            [ -n "$_pid2" ] || continue
+            [ -f "$LIB/$_pid2.ttf" ] || continue
+            printf 'stage=running id=%s\n' "$_pid2" > "$STATEDIR/pw.$_pid2.state" 2>/dev/null
+            sh "$MODDIR/fontctl.sh" prewarm "$_pid2" >/dev/null 2>&1
+            # 不在这里清 TTC：紧跟着用户切字体时会把刚生成、还没写入 slots.map
+            # 的合集删掉，下一次 apply 就 cp 不到源文件。保留到开机 service 清理。
+          done < "$_pt"
+          rm -f "$_pt" 2>/dev/null
+        done
+        rmdir "$_pl" 2>/dev/null
+      ) >/dev/null 2>&1 &
+    fi
     echo "OK:prewarm-bg:$sel"
     ;;
   prewarm-all)
@@ -2225,7 +3355,8 @@ case "${1:-}" in
     # -------------------------------------------------------------------
     # 顺手清掉 v3 过渡期的哈希名缓存产物（现行命名可读且永久）
     rm -f "$LIB"/.ttc.cache/*_g1.ttc 2>/dev/null
-    # ★ 2026-10-31：manager 挂载也预热（不再跳过）
+    # 预热只做普通计划；不在每个字体上生成锁屏时钟配套
+    CFS_SKIP_CLOCK=1; export CFS_SKIP_CLOCK
     _pwn=0; _pwh=0
     for _pwf in "$LIB"/f*.ttf "$LIB"/builtin_*.ttf; do
       [ -f "$_pwf" ] || continue
@@ -2262,26 +3393,37 @@ case "${1:-}" in
   rescanall)
     # ★ 2026-11-07：重扫 + 重算合并（高级设置入口）
     mark_dirty
-    date '+%s' > "$LIB/.romset.start" 2>/dev/null
-    rm -f "$LIB/.romset.done" 2>/dev/null
-    : > "$LIB/.romset.running"
-    rm -rf "$LIB/.plancache" "$LIB/.scan" 2>/dev/null
-    rm -f "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" \
-          "$LIB/scanned/slots.kl1.list" "$LIB/scanned/slots.th1.list" \
-          "$LIB/scanned/slots.kl1th1.list" 2>/dev/null
-    rm -f "$LIB/.cand.cache" "$LIB/.marks.cache" "$LIB/.skipscan.cache" \
-          "$LIB/.extra.cache" "$LIB/.xmlnames.cache" "$LIB/.dirnames.cache" \
-          "$LIB/.oemnames.cache" "$LIB/.verify.cache" "$MODDIR/slots.marks" 2>/dev/null
+    date '+%s' > "$STATEDIR/romset.start" 2>/dev/null
+    rm -f "$STATEDIR/romset.done" 2>/dev/null
+    : > "$STATEDIR/romset.running"
+    rm -rf "$CACHEDIR/plan" "$STATEDIR/scan/.scan" 2>/dev/null
+    rm -f "$STATEDIR/scan/slots.list" "$STATEDIR/scan/slots.meta" \
+          "$STATEDIR/scan/slots.kl1.list" "$STATEDIR/scan/slots.th1.list" \
+          "$STATEDIR/scan/slots.kl1th1.list" 2>/dev/null
+    rm -f "$STATEDIR/cand.cache" "$STATEDIR/marks.cache" "$STATEDIR/skipscan.cache" \
+          "$STATEDIR/extra.cache" "$STATEDIR/xmlnames.cache" "$STATEDIR/dirnames.cache" \
+          "$STATEDIR/oemnames.cache" "$STATEDIR/verify.cache" "$MODDIR/slots.marks" 2>/dev/null
     (
       CFS_FORCE_DIRS=1; export CFS_FORCE_DIRS
       sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
       _asel=$(cur_pending 2>/dev/null)
       case "$_asel" in ""|none) _asel=$(cur_active 2>/dev/null) ;; esac
       case "$_asel" in ""|none) ;; *) sh "$MODDIR/fontctl.sh" apply "$_asel" >/dev/null 2>&1 ;; esac
-      rm -f "$LIB/.romset.running" 2>/dev/null
-      date '+%s' > "$LIB/.romset.done" 2>/dev/null
+      rm -f "$STATEDIR/romset.running" 2>/dev/null
+      date '+%s' > "$STATEDIR/romset.done" 2>/dev/null
     ) >/dev/null 2>&1 &
     echo "STARTED"
+    ;;
+
+  replan)
+    rm -rf "$CACHEDIR/plan" 2>/dev/null
+    _rs=$(cat "$STATEDIR/last_selection" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_rs" ] || _rs=$(cat "$MODDIR/active_font" 2>/dev/null | tr -d '\r\n')
+    if [ -z "$_rs" ] || [ "$_rs" = none ]; then echo "ERROR:没有当前字体"; exit 1; fi
+    do_apply "$_rs"
+    ;;
+  clock-detect)
+    clock_targets
     ;;
 
   rescan)
@@ -2291,11 +3433,11 @@ case "${1:-}" in
     #   这里先强制丢掉扫描缓存与设备清单，保证真的重新扫目录。
     CFS_FORCE_DIRS=1; export CFS_FORCE_DIRS
     slot_scan_cache_drop >/dev/null 2>&1
-    rm -rf "$LIB/.scan" 2>/dev/null
-    rm -f "$LIB/scanned/device.list" "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" \
-          "$LIB/scanned/slots.kl1.list" "$LIB/scanned/slots.th1.list" \
-          "$LIB/scanned/slots.kl1th1.list" 2>/dev/null
-    rm -f "$LIB/.dirnames.cache" "$LIB/.xmlnames.cache" 2>/dev/null
+    rm -rf "$STATEDIR/scan/.scan" 2>/dev/null
+    rm -f "$STATEDIR/scan/device.list" "$STATEDIR/scan/slots.list" "$STATEDIR/scan/slots.meta" \
+          "$STATEDIR/scan/slots.kl1.list" "$STATEDIR/scan/slots.th1.list" \
+          "$STATEDIR/scan/slots.kl1th1.list" 2>/dev/null
+    rm -f "$STATEDIR/dirnames.cache" "$STATEDIR/xmlnames.cache" 2>/dev/null
     # ★ 2026-10-17：重新扫描本机字体并覆盖设备清单。
     #   什么时候用：换了系统大版本、装了新字体但界面没显示、或诊断建议你重扫。
     #   平时**不需要**跑 —— apply/reapply 只读清单，不扫描。
@@ -2304,14 +3446,14 @@ case "${1:-}" in
     #   以前会误报「扫描失败」，用户以为不能用了。
     slot_build_slots "$MODDIR" 2>/dev/null
     _rc=$?
-    _rn=$(sed -n 's/^total=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
-    _tn=$(sed -n 's/^targets=//p' "$LIB/scanned/slots.meta" 2>/dev/null)
-    _ln=$(grep -c . "$LIB/scanned/slots.list" 2>/dev/null | tr -dc '0-9')
+    _rn=$(sed -n 's/^total=//p' "$STATEDIR/scan/slots.meta" 2>/dev/null)
+    _tn=$(sed -n 's/^targets=//p' "$STATEDIR/scan/slots.meta" 2>/dev/null)
+    _ln=$(grep -c . "$STATEDIR/scan/slots.list" 2>/dev/null | tr -dc '0-9')
     case "${_rn:-}" in ''|*[!0-9]*) _rn=0 ;; esac
     case "${_ln:-}" in ''|*[!0-9]*) _ln=0 ;; esac
     if [ "$_ln" -gt 0 ] || [ "$_rn" -gt 0 ]; then
       # 退出码不为 0 只记进日志，不再当失败
-      [ "$_rc" != 0 ] && echo "[rescan] slot_build_slots rc=$_rc，但清单已生成（total=$_rn lines=$_ln）" >> "$LIB/ttc.log" 2>/dev/null
+      [ "$_rc" != 0 ] && echo "[rescan] slot_build_slots rc=$_rc，但清单已生成（total=$_rn lines=$_ln）" >> "$LOGDIR/ttc.log" 2>/dev/null
       [ "$_rn" -gt 0 ] || _rn=$_ln
       echo "OK:已重新扫描，${_rn} 个字体槽位（机组清单 ${_tn:-0} + 本机补）"
     else
@@ -2330,12 +3472,13 @@ case "${1:-}" in
     #   全过程里 JS 线程整个被冻住 —— 提示条挂着、点卡片没反应，"像被冻结"。
     #   改成后台跑：
     #     sh fontctl.sh apply-bg [字体id]   → 立刻回 OK:bg
-    #     界面每 0.5 秒读 $LIB/.reapply.state，读到 OK:/ERROR: 开头即收工。
+    #     界面每 0.5 秒读 $STATEDIR/reapply.state，读到 OK:/ERROR: 开头即收工。
     #   $2 缺省 = 重应用当前待生效（等价 reapply）。
     # -------------------------------------------------------------------
-    _rb="$LIB/.reapply.state"
+    _rb="$STATEDIR/reapply.state"
     rm -f "$_rb" "$_rb.tmp" 2>/dev/null
     printf 'stage=running\n' > "$_rb" 2>/dev/null
+    [ -n "${CFS_ALLOW_TTC:-}" ] && export CFS_ALLOW_TTC
     if [ -n "${2:-}" ]; then
       ( sh "$MODDIR/fontctl.sh" apply "$2" > "$_rb.tmp" 2>&1; mv -f "$_rb.tmp" "$_rb" ) >/dev/null 2>&1 &
     else
@@ -2347,7 +3490,7 @@ case "${1:-}" in
     sel=$(check_sel "${2:-none}") || { echo "$sel"; exit 1; }
     # 同 do_apply：机型不会在运行中变化，只在缺失时补算（省十几次 getprop）
     [ -s "$MODDIR/current_rom" ] || refresh_rom
-    p="$LIB/.plan.$$"
+    p="$STATEDIR/plan.$$"
     if [ "$sel" = none ]; then : > "$p"; sc=none; else sc=$(make_plan "$sel" "$p"); fi
     echo "PLAN:$sc:$(wc -l < "$p" | tr -d ' ')"
     rm -f "$p"
@@ -2359,54 +3502,54 @@ case "${1:-}" in
       *) echo "ERROR:取值不合法"; exit 1 ;;
     esac
     # 本次开机实际用的系统（首次更新模块后可能还没写过）先补一份，后面比较才有基准
-    if [ ! -s "$LIB/.rom_active" ]; then
-      tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom" > "$LIB/.rom_active" 2>/dev/null
+    if [ ! -s "$STATEDIR/rom_active" ]; then
+      tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom" > "$STATEDIR/rom_active" 2>/dev/null
     fi
     cfg_set rom_override "$2"
     refresh_rom >/dev/null 2>&1
-    rm -rf "$LIB/.plancache" "$LIB/.scan" 2>/dev/null
-    rm -f "$LIB/scanned/slots.list" "$LIB/scanned/slots.meta" "$LIB/scanned/slots.kl1.list" \
-          "$LIB/scanned/slots.th1.list" "$LIB/scanned/slots.kl1th1.list" 2>/dev/null
-    rm -f "$LIB/.cand.cache" "$LIB/.marks.cache" "$LIB/.skipscan.cache" \
-          "$LIB/.extra.cache" "$LIB/.xmlnames.cache" "$LIB/.dirnames.cache" \
-          "$LIB/.oemnames.cache" "$LIB/.verify.cache" "$MODDIR/slots.marks" 2>/dev/null
+    rm -rf "$CACHEDIR/plan" "$STATEDIR/scan/.scan" 2>/dev/null
+    rm -f "$STATEDIR/scan/slots.list" "$STATEDIR/scan/slots.meta" "$STATEDIR/scan/slots.kl1.list" \
+          "$STATEDIR/scan/slots.th1.list" "$STATEDIR/scan/slots.kl1th1.list" 2>/dev/null
+    rm -f "$STATEDIR/cand.cache" "$STATEDIR/marks.cache" "$STATEDIR/skipscan.cache" \
+          "$STATEDIR/extra.cache" "$STATEDIR/xmlnames.cache" "$STATEDIR/dirnames.cache" \
+          "$STATEDIR/oemnames.cache" "$STATEDIR/verify.cache" "$MODDIR/slots.marks" 2>/dev/null
     mark_dirty
-    date '+%s' > "$LIB/.romset.start" 2>/dev/null
-    rm -f "$LIB/.romset.done" 2>/dev/null
+    date '+%s' > "$STATEDIR/romset.start" 2>/dev/null
+    rm -f "$STATEDIR/romset.done" 2>/dev/null
     # ★ 2026-11-07：严格 A/B 语义 —— 切到与“本次开机实际用的系统”不同 → 记 1；
     #   切回同一个（或重启后）→ 清 0。
     # ★ 直接用 detect_rom 算当前生效值（auto 时就是自动识别结果），并写回
     _newrom=$(detect_rom 2>/dev/null)
     [ -n "$_newrom" ] || _newrom=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom")
     printf '%s' "$_newrom" > "$MODDIR/current_rom" 2>/dev/null
-    _av=$(tr -d '[:space:]' 2>/dev/null < "$LIB/.rom_active")
+    _av=$(tr -d '[:space:]' 2>/dev/null < "$STATEDIR/rom_active")
     if [ -n "$_av" ] && [ "$_newrom" = "$_av" ]; then
-      rm -f "$LIB/.rom_pending" 2>/dev/null
+      rm -f "$STATEDIR/rom_pending" 2>/dev/null
     else
-      printf '%s' "$_newrom" > "$LIB/.rom_pending" 2>/dev/null
+      printf '%s' "$_newrom" > "$STATEDIR/rom_pending" 2>/dev/null
     fi
-    : > "$LIB/.romset.running"
-    rm -f "$LIB/.romset.done" 2>/dev/null
+    : > "$STATEDIR/romset.running"
+    rm -f "$STATEDIR/romset.done" 2>/dev/null
     (
       # 备份旧清单：新扫结果明显变少时回滚，避免 159 掉成 81
-      mkdir -p "$LIB/.romset.bak" 2>/dev/null
-      cp -f "$LIB/scanned/slots.list" "$LIB/.romset.bak/slots.list" 2>/dev/null
-      cp -f "$LIB/scanned/slots.meta" "$LIB/.romset.bak/slots.meta" 2>/dev/null
-      cp -f "$MODDIR/slots.map" "$LIB/.romset.bak/slots.map" 2>/dev/null
-      _old_sl=$(grep -c . "$LIB/.romset.bak/slots.list" 2>/dev/null | tr -dc '0-9')
+      mkdir -p "$STATEDIR/romset.bak" 2>/dev/null
+      cp -f "$STATEDIR/scan/slots.list" "$STATEDIR/romset.bak/slots.list" 2>/dev/null
+      cp -f "$STATEDIR/scan/slots.meta" "$STATEDIR/romset.bak/slots.meta" 2>/dev/null
+      cp -f "$MODDIR/slots.map" "$STATEDIR/romset.bak/slots.map" 2>/dev/null
+      _old_sl=$(grep -c . "$STATEDIR/romset.bak/slots.list" 2>/dev/null | tr -dc '0-9')
       case "$_old_sl" in ''|*[!0-9]*) _old_sl=0 ;; esac
       sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
-      _dl=$(grep -c . "$LIB/scanned/device.list" 2>/dev/null | tr -dc '0-9')
-      _sl=$(grep -c . "$LIB/scanned/slots.list" 2>/dev/null | tr -dc '0-9')
+      _dl=$(grep -c . "$STATEDIR/scan/device.list" 2>/dev/null | tr -dc '0-9')
+      _sl=$(grep -c . "$STATEDIR/scan/slots.list" 2>/dev/null | tr -dc '0-9')
       case "$_dl" in ''|*[!0-9]*) _dl=0 ;; esac
       case "$_sl" in ''|*[!0-9]*) _sl=0 ;; esac
       # 扫描没产出（device.list 太小）→ 丢掉扫描缓存，再强扫一次
       if [ "$_dl" -lt 10 ]; then
-        rm -rf "$LIB/.scan" 2>/dev/null
-        rm -f "$LIB/scanned/device.list" 2>/dev/null
+        rm -rf "$STATEDIR/scan/.scan" 2>/dev/null
+        rm -f "$STATEDIR/scan/device.list" 2>/dev/null
         sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
-        _dl=$(grep -c . "$LIB/scanned/device.list" 2>/dev/null | tr -dc '0-9')
-        _sl=$(grep -c . "$LIB/scanned/slots.list" 2>/dev/null | tr -dc '0-9')
+        _dl=$(grep -c . "$STATEDIR/scan/device.list" 2>/dev/null | tr -dc '0-9')
+        _sl=$(grep -c . "$STATEDIR/scan/slots.list" 2>/dev/null | tr -dc '0-9')
         case "$_dl" in ''|*[!0-9]*) _dl=0 ;; esac
         case "$_sl" in ''|*[!0-9]*) _sl=0 ;; esac
       fi
@@ -2416,17 +3559,17 @@ case "${1:-}" in
         echo "device_list=$_dl"
         echo "slots_list=$_sl"
         echo "targets_only=$(cfg_get targets_only 0 2>/dev/null)"
-        echo "slots_meta: $(tr '\n' ' ' < "$LIB/scanned/slots.meta" 2>/dev/null)"
+        echo "slots_meta: $(tr '\n' ' ' < "$STATEDIR/scan/slots.meta" 2>/dev/null)"
         echo "restored=$_restored"
         echo "old_slots=$_old_sl"
-        sed 's/^/scan_/' "$LIB/.scan.stat" 2>/dev/null
-      } > "$LIB/.romset.debug" 2>/dev/null
+        sed 's/^/scan_/' "$STATEDIR/scan/.scan.stat" 2>/dev/null
+      } > "$STATEDIR/romset.debug" 2>/dev/null
       _restored=0
       if [ "$_old_sl" -ge 50 ] && [ "$_sl" -gt 0 ] && [ "$_sl" -lt $((_old_sl / 2)) ]; then
         # 新结果比原来少一半以上 → 判定扫描失败，回滚旧清单
-        cp -f "$LIB/.romset.bak/slots.list" "$LIB/scanned/slots.list" 2>/dev/null
-        cp -f "$LIB/.romset.bak/slots.meta" "$LIB/scanned/slots.meta" 2>/dev/null
-        cp -f "$LIB/.romset.bak/slots.map" "$MODDIR/slots.map" 2>/dev/null
+        cp -f "$STATEDIR/romset.bak/slots.list" "$STATEDIR/scan/slots.list" 2>/dev/null
+        cp -f "$STATEDIR/romset.bak/slots.meta" "$STATEDIR/scan/slots.meta" 2>/dev/null
+        cp -f "$STATEDIR/romset.bak/slots.map" "$MODDIR/slots.map" 2>/dev/null
         _sl=$_old_sl
         _restored=1
       fi
@@ -2435,14 +3578,14 @@ case "${1:-}" in
       if [ "$_sl" -gt 0 ] && [ "$_restored" = 0 ]; then
         case "$_rsel" in ""|none) ;; *) sh "$MODDIR/fontctl.sh" apply "$_rsel" >/dev/null 2>&1 ;; esac
       fi
-      date '+%s' > "$LIB/.romset.done" 2>/dev/null
+      date '+%s' > "$STATEDIR/romset.done" 2>/dev/null
     ) >/dev/null 2>&1 &
     echo "STARTED"
     ;;
 
   romstate)
-    _rs=$(stat -c %Y "$LIB/.romset.start" 2>/dev/null)
-    _rd=$(stat -c %Y "$LIB/.romset.done" 2>/dev/null)
+    _rs=$(stat -c %Y "$STATEDIR/romset.start" 2>/dev/null)
+    _rd=$(stat -c %Y "$STATEDIR/romset.done" 2>/dev/null)
     _rn=$(date +%s 2>/dev/null)
     case "$_rs" in ''|*[!0-9]*) _rs=0 ;; esac
     case "$_rd" in ''|*[!0-9]*) _rd=0 ;; esac
@@ -2453,8 +3596,8 @@ case "${1:-}" in
       echo "RUNNING"
       exit 0
     fi
-    _rsl=$(sed -n 's/^slots_list=//p' "$LIB/.romset.debug" 2>/dev/null | head -n1)
-    _rdl=$(sed -n 's/^device_list=//p' "$LIB/.romset.debug" 2>/dev/null | head -n1)
+    _rsl=$(sed -n 's/^slots_list=//p' "$STATEDIR/romset.debug" 2>/dev/null | head -n1)
+    _rdl=$(sed -n 's/^device_list=//p' "$STATEDIR/romset.debug" 2>/dev/null | head -n1)
     echo "DONE ${_rsl:-0} ${_rdl:-0}"
     ;;
 
@@ -2488,6 +3631,115 @@ case "${1:-}" in
     done
     echo "OK:$_n"
     ;;
+  ttc-orphan-clean)
+    ttc_orphan_clean
+    ;;
+  cache-residue-clean)
+    ttc_orphan_clean
+    ;;
+  ttc-mode-clean)
+    ttc_cache_mode_clean
+    ;;
+  clock-list)
+    clock_cache_list
+    ;;
+  clock-audit)
+    # 只读体检：对比每个生成配套与目标字体的数字包围盒/度量
+    _ca=$(check_sel "${2:-}") || { echo "$_ca"; exit 1; }
+    _ca=$(clock_font_of "$_ca")
+    _cat="$STATEDIR/clock.audit.targets.$$"
+    clock_targets > "$_cat" 2>/dev/null
+    sh "$MODDIR/engine.sh" run clockaudit --font "$LIB/$_ca.ttf" \
+      --clock-dir "$CLOCKDIR" --font-id "$_ca" --targets-file "$_cat"
+    _car=$?
+    rm -f "$_cat" 2>/dev/null
+    exit $_car
+    ;;
+  clock-check)    # 切换前检查：这个字体有没有完整的时钟配套
+    _cs=$(check_sel "${2:-}") || { echo "$_cs"; exit 1; }
+    _cs=$(clock_font_of "$_cs")
+    _cb="${_cs%%_*}"
+    [ "$_cb" = "$_cs" ] && _cb=""
+    _ct=$(clock_targets 2>/dev/null | grep -c .)
+    _cg=0
+    for _sid in "$_cs" "$_cb"; do
+      [ -n "$_sid" ] || continue
+      for _cf in "$CLOCKDIR/$_sid".clock.*.ttf; do
+        [ -s "$_cf" ] && _cg=$((_cg + 1))
+      done
+    done
+    case "${_ct:-}" in ''|*[!0-9]*) _ct=0 ;; esac
+    case "${_cg:-}" in ''|*[!0-9]*) _cg=0 ;; esac
+    echo "CT=$_ct"
+    echo "CG=$_cg"
+    echo "CE=$(cfg_get replace_lockscreen 0 2>/dev/null)"
+    _pend=$(cur_pending 2>/dev/null); [ -n "$_pend" ] && [ "$_pend" != none ] || _pend=$(cur_active 2>/dev/null)
+    echo "PEND=$_pend"
+    if engine_ready 2>/dev/null; then
+      echo "PLUGIN=1"
+      _est=$(sh "$MODDIR/engine.sh" status 2>/dev/null)
+      _ev=$(printf '%s\n' "$_est" | sed -n 's/^VERSION=//p' | head -n1 | tr -d '[:space:]')
+      _ec=$(printf '%s\n' "$_est" | sed -n 's/^CODE=//p' | head -n1 | tr -d '[:space:]')
+      echo "PLUGIN_VER=${_ev:-0}"
+      echo "PLUGIN_CODE=${_ec:-0}"
+    else
+      echo "PLUGIN=0"
+      echo "PLUGIN_VER=0"
+    fi
+    if [ "$_ct" -gt 0 ] && [ "$_cg" -ge "$_ct" ]; then echo "READY=1"; else echo "READY=0"; fi
+    ;;
+  clock-gen)
+    # 给指定字体补全所有时钟配套（不改变 pending_font）
+    _cs=$(check_sel "${2:-}") || { echo "$_cs"; exit 1; }
+    _cs=$(clock_font_of "$_cs")
+    CFS_SKIP_CLOCK=0
+    SEL_FONT="$_cs"
+    ensure_clock_companion "$_cs"
+    echo "OK:clock-gen:$_cs"
+    ;;
+  clock-gen-bg)
+    # 后台生成：立即返回，状态写 state/clockgen.<id>.state
+    _cs=$(check_sel "${2:-}") || { echo "$_cs"; exit 1; }
+    _cs=$(clock_font_of "$_cs")
+    _st="$STATEDIR/clockgen.$_cs.state"
+    printf 'stage=queued 0/0\n' > "$_st" 2>/dev/null
+    ( CLOCKGEN_STATE="$_st" sh "$MODDIR/fontctl.sh" clock-gen "$_cs" >/dev/null 2>&1 ) &
+    echo "OK:clock-gen-bg:$_cs"
+    ;;
+  clock-gen-state)
+    _cs=$(check_sel "${2:-}") || { echo "$_cs"; exit 1; }
+    _cs=$(clock_font_of "$_cs")
+    cat "$STATEDIR/clockgen.$_cs.state" 2>/dev/null || echo "stage=idle"
+    ;;
+  clock-del)
+    shift
+    clock_cache_del "$@"
+    ;;
+  clock-prune)
+    clock_cache_prune
+    ;;
+  clock-touch)
+    clock_touch_used
+    ;;
+  ttc-touch)
+    ttc_touch_used
+    ;;
+  ttc-list)
+    ttc_cache_list
+    ;;
+  ttc-del)
+    shift
+    ttc_cache_del "$1"
+    # 手动删除后抑制后台 prewarm 自动补 TTC；下次真正切字体时正常 apply 会清掉
+    printf 'manual\n' > "$STATEDIR/ttc.manual_hold" 2>/dev/null
+    ;;
+  prune-cache)
+    prune_unused_ttc
+    echo "OK:cache-pruned"
+    ;;
+  clean-cache)
+    clean_ttc_cache
+    ;;
   settings)
     case "$2" in
       set)
@@ -2497,19 +3749,28 @@ case "${1:-}" in
         #   状态下被误认，过滤就会用错的输入 → 表现就是"这次切了没反应"。
         #   这里在**改开关时**把这些缓存全部清掉，强制下一次 reapply 干净重算。
         case "$3" in
-          keep_lang|keep_special|keep_lockscreen)
+          ttc_cache_mode)
+            case "$4" in none|font|recent) ;; *) echo "ERROR:取值只能是 none/font/recent"; exit 1 ;; esac
+            cfg_set ttc_cache_mode "$4"
+            echo "OK"
+            exit 0
+            ;;
+          clock_cache_mode)
+            case "$4" in none|recent|all) ;; *) echo "ERROR:取值只能是 none/recent/all"; exit 1 ;; esac
+            ;;
+          keep_lang|keep_special|keep_lockscreen|replace_lockscreen)
             # ★ 2026-10-17 修（用户实测：开关"交替成功"——开生效、关生效、再开不生效）：
             #   开关只影响"过滤"，而过滤的输入来自一堆缓存（候选、锁屏名单、
             #   跳过扫描判断、来源标记、extra 统计）。其中任一个停留在上次开关的
             #   状态下被误认，过滤就会用错输入 → 表现成"这次切了没反应"。
             #   改开关时把这些缓存全清，强制下一次 reapply 干净重算。
-            rm -f "$LIB/.cand.cache" "$LIB/.marks.cache" "$LIB/.skipscan.cache" \
-                  "$LIB/.extra.cache" "$LIB/.xmlnames.cache" "$LIB/.dirnames.cache" \
-                  "$LIB/.oemnames.cache" "$LIB/.verify.cache" 2>/dev/null
+            rm -f "$STATEDIR/cand.cache" "$STATEDIR/marks.cache" "$STATEDIR/skipscan.cache" \
+                  "$STATEDIR/extra.cache" "$STATEDIR/xmlnames.cache" "$STATEDIR/dirnames.cache" \
+                  "$STATEDIR/oemnames.cache" "$STATEDIR/verify.cache" 2>/dev/null
             # ★ 2026-10-30：计划缓存也一并清掉（其实指纹变化会自动失效，这里顺手清干净）
-            rm -rf "$LIB/.plancache" 2>/dev/null
-            rm -f "$LIB/.scan/lockscreen.txt" "$LIB/.scan/lockscreen.key" \
-                  "$LIB/.scan/scan.cache" "$LIB/.scan/scan.key" 2>/dev/null
+            rm -rf "$CACHEDIR/plan" 2>/dev/null
+            rm -f "$STATEDIR/scan/.scan/lockscreen.txt" "$STATEDIR/scan/.scan/lockscreen.key" \
+                  "$STATEDIR/scan/.scan/scan.cache" "$STATEDIR/scan/.scan/scan.key" 2>/dev/null
             rm -f "$MODDIR/slots.marks" 2>/dev/null
             # keep_lockscreen（v1.1.1 新增）：小米/红米/POCO 的锁屏时钟有专用字体，
             #   开了就保留它们（用户还能换锁屏时钟样式），其余槽位照旧全替换。
@@ -2563,10 +3824,10 @@ case "${1:-}" in
           rom_override)
             # 换了系统识别 → 重算 current_rom，清掉计划/扫描缓存，后台重扫
             refresh_rom >/dev/null 2>&1
-            rm -rf "$LIB/.plancache" "$LIB/.scan" 2>/dev/null
-            rm -f "$LIB/.cand.cache" "$LIB/.marks.cache" "$LIB/.skipscan.cache" \
-                  "$LIB/.extra.cache" "$LIB/.xmlnames.cache" "$LIB/.dirnames.cache" \
-                  "$LIB/.oemnames.cache" "$LIB/.verify.cache" "$MODDIR/slots.marks" 2>/dev/null
+            rm -rf "$CACHEDIR/plan" "$STATEDIR/scan/.scan" 2>/dev/null
+            rm -f "$STATEDIR/cand.cache" "$STATEDIR/marks.cache" "$STATEDIR/skipscan.cache" \
+                  "$STATEDIR/extra.cache" "$STATEDIR/xmlnames.cache" "$STATEDIR/dirnames.cache" \
+                  "$STATEDIR/oemnames.cache" "$STATEDIR/verify.cache" "$MODDIR/slots.marks" 2>/dev/null
             ( sh "$MODDIR/fontctl.sh" rescan ) >/dev/null 2>&1
             ;;
         esac
@@ -2618,17 +3879,17 @@ case "${1:-}" in
     #   只做三件事：卸掉本模块挂载 / 置回「无字体」/ 记账。不做切换那套重活。
     # ---------------------------------------------------------------------
     _n=0
-    if [ -s "$LIB/.mounted" ]; then
+    if [ -s "$STATEDIR/mounted" ]; then
       while IFS= read -r _d; do
         [ -n "$_d" ] || continue
         umount -l "$_d" 2>/dev/null || umount "$_d" 2>/dev/null
         _n=$(( _n + 1 ))
-      done < "$LIB/.mounted"
+      done < "$STATEDIR/mounted"
     fi
-    : > "$LIB/.mounted" 2>/dev/null
-    printf 'none\n' > "$LIB/active_font" 2>/dev/null
+    : > "$STATEDIR/mounted" 2>/dev/null
+    printf 'none\n' > "$MODDIR/active_font" 2>/dev/null
     printf 'time=%s umount=%s via=panic\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "$_n" \
-      >> "$LIB/.panic.log" 2>/dev/null
+      >> "$STATEDIR/panic.log" 2>/dev/null
     echo "OK:$_n"
     ;;
   group)
@@ -2790,7 +4051,7 @@ case "${1:-}" in
   sync)
     mark_dirty
     [ -f "$MODDIR/pending_font" ] && cp -f "$MODDIR/pending_font" "$MODDIR/active_font"
-    cp -f "$MODDIR/active_font" "$LIB/last_selection" 2>/dev/null
+    cp -f "$MODDIR/active_font" "$STATEDIR/last_selection" 2>/dev/null
     refresh_prop
     ;;
   prop)

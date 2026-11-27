@@ -16,9 +16,12 @@
 #   sh nameclone.sh clone <我们的字体> <目标字体> <输出文件>
 #   sh nameclone.sh families <字体>
 #   sh nameclone.sh verify <克隆体> <目标字体>
-LIB=${LIB:-/data/adb/custom_font_lib}
-LOG="$LIB/.nameclone.log"
-mkdir -p "$LIB" 2>/dev/null
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+STATEDIR="$LIBROOT/state"
+LOGDIR="$STATEDIR/logs"
+LOG="$LOGDIR/nameclone.log"
+mkdir -p "$LIB" "$LOGDIR" 2>/dev/null
 tmo() {
   # 给可能卡住的系统命令加超时。三层，从最可靠到最保守：
   #   ① CFS_TMO_BIN（外部指定）

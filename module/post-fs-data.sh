@@ -13,15 +13,35 @@
 MODDIR=${0%/*}
 
 # ★ 2026-11-07：开机清掉「重启生效」标记（放在最前面，避免提前 exit 跳过）
-LIB=${LIB:-/data/adb/custom_font_lib}
-( tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom" > "$LIB/.rom_active" ) 2>/dev/null
-rm -f "$LIB/.rom_pending" 2>/dev/null
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+# 这里还没 source common.sh，必须先自己算状态目录；否则会写到只读的 /rom_active
+STATEDIR="$LIBROOT/state"
+mkdir -p "$STATEDIR" 2>/dev/null
+# 插件目录给 WebUI 读权限（ksu.exec 可能以 shell 身份运行）
+[ -d "$STATEDIR/engine" ] && chmod -R a+rX "$STATEDIR/engine" 2>/dev/null
+if [ -x "$STATEDIR/engine/bin/run" ]; then
+  {
+    echo "INSTALLED=1"
+    grep -E '^(version|build|code|author)=' "$STATEDIR/engine/plugin.prop" 2>/dev/null | sed 's/^version=/VERSION=/; s/^build=/BUILD=/; s/^code=/CODE=/; s/^author=/AUTHOR=/'
+    echo "DIR=$STATEDIR/engine"
+  } > /data/local/tmp/cfs-porsche.engine 2>/dev/null
+  chmod 644 /data/local/tmp/cfs-porsche.engine 2>/dev/null
+fi
+( tr -d '[:space:]' 2>/dev/null < "$MODDIR/current_rom" > "$STATEDIR/rom_active" ) 2>/dev/null
+rm -f "$STATEDIR/rom_pending" 2>/dev/null
 # 商店缓存桥接：必须在 zygote 起来之前挂，应用（含商店）才看得到
 # ★ 2026-10-21：桥接功能已摘除（对 Play 商店无效，且会让部分 Google 应用异常）
 #   这行不再执行，只留注释说明历史原因。
 
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
 [ -f "$MODDIR/mount.sh" ] && . "$MODDIR/mount.sh"
+
+# 开机意味着上一轮更新已经结束，残留 update/state 会让 UI 一直显示“待重启”
+if [ -d "$STATEDIR/update" ]; then
+  echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 开机清理更新状态目录" >> "$LOGDIR/mount.log" 2>/dev/null
+  rm -rf "$STATEDIR/update" 2>/dev/null
+fi
 
 rm -f "$MODDIR/mount_missed"
 
@@ -45,8 +65,8 @@ if [ -f "$MODDIR/.booting" ] && [ "$_NO_RESCUE" != 1 ]; then
   # 上次开机留下的保护标记：先确认上次到底有没有开机成功
   _BID=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/.booting")
   _OKBOOT=0
-  if [ -n "$_BID" ] && [ -f "$LIB/boot_events.log" ]; then
-    grep -q "boot=$_BID stage=service info=finish" "$LIB/boot_events.log" 2>/dev/null && _OKBOOT=1
+  if [ -n "$_BID" ] && [ -f "$LOGDIR/boot_events.log" ]; then
+    grep -q "boot=$_BID stage=service info=finish" "$LOGDIR/boot_events.log" 2>/dev/null && _OKBOOT=1
   fi
   if [ "$_OKBOOT" = 1 ]; then
     # 上次开机其实成功了，只是标记没来得及删：不是卡开机，别动用户的字体
@@ -72,8 +92,8 @@ if [ -f "$MODDIR/.booting" ] && [ "$_NO_RESCUE" != 1 ]; then
     : > "$MODDIR/slots.map"
     echo none > "$MODDIR/pending_font"
     echo none > "$MODDIR/active_font"
-    echo none > "$LIB/last_selection" 2>/dev/null
-    # ⚠ 刻意**不动** $LIB/.last_good —— 那是"用户原来在用哪套"的唯一保险。
+    echo none > "$STATEDIR/last_selection" 2>/dev/null
+    # ⚠ 刻意**不动** $STATEDIR/last_good —— 那是"用户原来在用哪套"的唯一保险。
     #   救援路径清的是"当前生效"（确实没字体重了，该清）；
     #   而 .last_good 是历史，留着下次升级才能把用户的选择恢复回来（B1）。
     touch "$MODDIR/rescued"
@@ -84,10 +104,10 @@ if [ -f "$MODDIR/.booting" ] && [ "$_NO_RESCUE" != 1 ]; then
     # 管理器下次开机就不会执行本模块（字体自然恢复系统默认）。
     # 只在"第二次"才停用，是为了不误伤偶发一次的开机异常（比如用户自己中途断电）。
     # -------------------------------------------------------------------------
-    _rn=$(tr -d '[:space:]' 2>/dev/null < "$LIB/rescue_count")
+    _rn=$(tr -d '[:space:]' 2>/dev/null < "$STATEDIR/rescue_count")
     case "$_rn" in ''|*[!0-9]*) _rn=0 ;; esac
     _rn=$((_rn + 1))
-    printf '%s' "$_rn" > "$LIB/rescue_count" 2>/dev/null
+    printf '%s' "$_rn" > "$STATEDIR/rescue_count" 2>/dev/null
     if [ "$_rn" -ge 2 ] 2>/dev/null; then
       # ★ 2026-10-24 B6：高级设置里可以禁止自动停用
       if [ "${_NO_DISABLE:-0}" != 1 ]; then
@@ -97,7 +117,7 @@ if [ -f "$MODDIR/.booting" ] && [ "$_NO_RESCUE" != 1 ]; then
         echo "连续 ${_rn} 次开机没有正常完成，已自动停用本模块。"
         echo "手机现在可以正常开机了（字体回到系统默认）。"
         echo "请到 Root 管理器里重新启用本模块，并**先换一个字体**或把「替换范围」调小再试。"
-      } > "$LIB/rescue_stopped" 2>/dev/null
+      } > "$STATEDIR/rescue_stopped" 2>/dev/null
       # 模块被停用后脚本不会再跑，提示只能靠 module.prop 的描述带出去
       if command -v refresh_prop >/dev/null 2>&1; then
         refresh_prop 2>/dev/null

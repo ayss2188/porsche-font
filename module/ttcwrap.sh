@@ -310,6 +310,44 @@ ttc_wrap_mix() {
 }
 
 # 直接运行 = 命令行模式（被 source 时不能 exit）
+
+_ttc_hex() {   # _ttc_hex <file> <offset> → 8 位十六进制
+  od -An -tu1 -j "$2" -N 4 "$1" 2>/dev/null | tr -s ' \n' ' ' | sed 's/^ //;s/ $//' |
+  awk '{ if (NF >= 4) printf "%02x%02x%02x%02x", $1, $2, $3, $4; else print "" }'
+}
+
+_ttc_u32() {   # _ttc_u32 <file> <offset> → 十进制
+  od -An -tu1 -j "$2" -N 4 "$1" 2>/dev/null | tr -s ' \n' ' ' | sed 's/^ //;s/ $//' |
+  awk '{ if (NF >= 4) printf "%.0f", (($1*256+$2)*256+$3)*256+$4; else print "" }'
+}
+
+ttc_verify() {   # ttc_verify <file> <expected_faces>
+  local f="$1" want="$2" magic cnt sz i off ver bad=0
+  [ -s "$f" ] || return 1
+  sz=$(stat -c %s "$f" 2>/dev/null)
+  [ -n "$sz" ] || return 1
+  magic=$(_ttc_hex "$f" 0)
+  [ "$magic" = "74746366" ] || return 1
+  cnt=$(_ttc_u32 "$f" 8)
+  case "$cnt" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$cnt" -ge 1 ] || return 1
+  if [ -n "$want" ] && [ "$want" -gt 0 ] 2>/dev/null && [ "$cnt" -ne "$want" ]; then
+    echo "faces=$cnt≠原厂$want"
+    return 1
+  fi
+  i=0
+  while [ "$i" -lt "$cnt" ]; do
+    off=$(_ttc_u32 "$f" $(( 12 + i * 4 )))
+    case "$off" in ''|*[!0-9]*) bad=1; break ;; esac
+    if [ "$off" -lt 12 ] || [ $(( off + 12 )) -gt "$sz" ]; then bad=1; break; fi
+    ver=$(_ttc_hex "$f" "$off")
+    case "$ver" in 00010000|4f54544f|74727565) ;; *) bad=1; break ;; esac
+    i=$(( i + 1 ))
+  done
+  [ "$bad" = 1 ] && { echo "face$i 偏移或版本非法"; return 1; }
+  return 0
+}
+
 case "${0##*/}" in
   ttcwrap.sh)
     if [ -n "${1:-}" ]; then

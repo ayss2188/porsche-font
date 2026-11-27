@@ -73,6 +73,21 @@ if [ -n "$_MOUNT_BIN" ] && [ ! -x "$_MOUNT_BIN" ]; then
   _MOUNT_BIN=""
 fi
 _CFS_CHCON=""
+
+# ★ 荣耀/Android 17 等：开机脚本可能跑在独立 mount namespace，
+#   直接 mount 只有当前 shell 看得见，zygote/框架读不到 → 字体不生效。
+#   这里检测 PID 1 与当前进程是否同一命名空间，不同就用 nsenter 挂进去。
+_CFS_NS=""
+if [ -r /proc/1/ns/mnt ] && [ -r /proc/self/ns/mnt ]; then
+  _cfs_ns1=$(readlink /proc/1/ns/mnt 2>/dev/null)
+  _cfs_ns2=$(readlink /proc/self/ns/mnt 2>/dev/null)
+  if [ -n "$_cfs_ns1" ] && [ -n "$_cfs_ns2" ] && [ "$_cfs_ns1" != "$_cfs_ns2" ]; then
+    if command -v nsenter >/dev/null 2>&1; then
+      _CFS_NS="nsenter -t 1 -m --"
+    fi
+  fi
+fi
+
 _mount() {
   # ★ 2026-10-25：**默认不做 chcon** —— 恢复到 4.4.2 的行为。
   #   背景：4.4.2 及更早从不给挂载源补标签，真机（魅族 Flyme 12.6 / Android 16）
@@ -90,14 +105,14 @@ _mount() {
     chcon u:object_r:system_file:s0 "$1" 2>/dev/null
   fi
   if [ -n "$_MOUNT_BIN" ]; then
-    if _to "$_MOUNT_BIN" -o bind,ro "$1" "$2" 2>/dev/null; then return 0; fi
-    _to "$_MOUNT_BIN" -o bind "$1" "$2" || return 1
-    _to "$_MOUNT_BIN" -o remount,bind,ro "$2" 2>/dev/null
+    if _to $_CFS_NS "$_MOUNT_BIN" -o bind,ro "$1" "$2" 2>/dev/null; then return 0; fi
+    _to $_CFS_NS "$_MOUNT_BIN" -o bind "$1" "$2" || return 1
+    _to $_CFS_NS "$_MOUNT_BIN" -o remount,bind,ro "$2" 2>/dev/null
     return 0
   fi
-  if _to mount -o bind,ro "$1" "$2" 2>/dev/null; then return 0; fi
-  _to mount -o bind "$1" "$2" || return 1
-  _to mount -o remount,bind,ro "$2" 2>/dev/null
+  if _to $_CFS_NS mount -o bind,ro "$1" "$2" 2>/dev/null; then return 0; fi
+  _to $_CFS_NS mount -o bind "$1" "$2" || return 1
+  _to $_CFS_NS mount -o remount,bind,ro "$2" 2>/dev/null
   return 0
 }
 
@@ -110,9 +125,9 @@ _mount() {
 #   bind 挂载只换"内容"，**inode 和 mtime 都不变**。
 #   魅族主题服务（/data/customizecenter/font/flymeFont.ttf）靠"文件变了没有"
 #   决定要不要重读 —— 内容变了但它看不出来，于是继续用缓存里的旧字形。
-#   作者实测：手动"改名替换"能生效、"删掉再添加"不生效 —— 差别就在 inode 变没变。
+#   开发者实测：手动"改名替换"能生效、"删掉再添加"不生效 —— 差别就在 inode 变没变。
 #
-# 所以这里不挂了，直接做作者手动做的那个动作：同分区 rename 覆盖。
+# 所以这里不挂了，直接做开发者手动做的那个动作：同分区 rename 覆盖。
 #   · 换 inode、刷新 mtime → 系统认为"文件变了" → 重读 → 生效
 #   · **必须备份原件**，否则用户切回「无字体」时他原来那份主题字体就没了
 # ---------------------------------------------------------------------------
@@ -149,7 +164,7 @@ datafont_swap() {
   #   做法：成功替换后记下 (目标大小 : 源大小 : 源 mtime)，下次开机对得上就**只补挂载**。
   #   用户真换了字体（源文件大小/mtime 变了）→ 对不上 → 正常重写一次。
   # -------------------------------------------------------------------------
-  _df_st="$LIB/.datafont.state"
+  _df_st="$STATEDIR/datafont.state"
   _df_k=$(printf '%s' "$dst" | tr '/' '_' | tr -d ' ')
   _df_cur="$(_df_sz "$dst"):$(_df_sz "$src"):$(stat -c %Y "$src" 2>/dev/null)"
   _df_old=$(sed -n "s|^$_df_k=\(.*\)|\1|p" "$_df_st" 2>/dev/null | tail -n1)
@@ -158,7 +173,7 @@ datafont_swap() {
     return 0
   fi
 
-  bakdir="$LIB/.orig"
+  bakdir="$BACKUPDIR/orig"
   mkdir -p "$bakdir" 2>/dev/null || return 1
 
   # 用原路径编码成文件名，保留目录层级可读性
@@ -170,7 +185,7 @@ datafont_swap() {
     cp -f "$dst" "$bak" 2>/dev/null || return 1
     [ -s "$bak" ] || return 1
     printf '%s\n' "$dst" >> "$bakdir/manifest.txt" 2>/dev/null
-    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 主题字体已备份原件：$dst -> $bak" >> "$LIB/mount.log" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 主题字体已备份原件：$dst -> $bak" >> "$LOGDIR/mount.log" 2>/dev/null
   fi
 
   # 空间检查：替换要放得下一份（同分区）
@@ -180,7 +195,7 @@ datafont_swap() {
     need=$(( $(stat -c %s "$src" 2>/dev/null | tr -d ' ') / 1024 + 4096 ))
     free=$(free_kb "$dir")
     if [ -n "$free" ] && [ "$free" -lt "$need" ] 2>/dev/null; then
-      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 空间不足，主题字体改用挂载：$dst（需要 $((need/1024))MB，剩 $((free/1024))MB）" >> "$LIB/mount.log" 2>/dev/null
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 空间不足，主题字体改用挂载：$dst（需要 $((need/1024))MB，剩 $((free/1024))MB）" >> "$LOGDIR/mount.log" 2>/dev/null
       return 1
     fi
   fi
@@ -199,7 +214,7 @@ datafont_swap() {
   if mv -f "$tmp" "$dst" 2>/dev/null; then
     chmod 644 "$dst" 2>/dev/null
     chcon u:object_r:system_file:s0 "$dst" 2>/dev/null
-    # ★ 作者的意思：**两种都做**（双保险）。
+    # ★ 开发者的意思：**两种都做**（双保险）。
     #   物理替换已经换了 inode/mtime（让主题服务刷新）；
     #   再 bind 一次，是为了防"系统读的时候把文件钉住了"——
     #   即使它忽略了时间戳，路径上的内容也始终是我们的。
@@ -210,7 +225,7 @@ datafont_swap() {
       sed -i "/^$_df_k=/d" "$_df_st" 2>/dev/null
       printf '%s=%s\n' "$_df_k" "$(_df_sz "$dst"):$(_df_sz "$src"):$(stat -c %Y "$src" 2>/dev/null)"
     } >> "$_df_st" 2>/dev/null
-    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 主题字体已物理替换 + 挂载（双保险）：$dst" >> "$LIB/mount.log" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 主题字体已物理替换 + 挂载（双保险）：$dst" >> "$LOGDIR/mount.log" 2>/dev/null
     return 0
   fi
   rm -f "$tmp" 2>/dev/null
@@ -229,7 +244,7 @@ datafont_swap() {
 #   万一以后还要用；体积不大，且用户删模块时会一起被 uninstall 清掉）。
 # ---------------------------------------------------------------------------
 datafont_restore() {
-  local bakdir="$LIB/.orig" mani="$LIB/.orig/manifest.txt" dst bak tmp dir n=0
+  local bakdir="$BACKUPDIR/orig" mani="$BACKUPDIR/orig/manifest.txt" dst bak tmp dir n=0
   [ -s "$mani" ] || return 0
   tmp="$mani.$$"
   : > "$tmp" 2>/dev/null
@@ -252,14 +267,14 @@ datafont_restore() {
     chcon u:object_r:system_file:s0 "$dir/.cfs_rs_$$" 2>/dev/null
     if mv -f "$dir/.cfs_rs_$$" "$dst" 2>/dev/null; then
       n=$((n+1))
-      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 已还原主题字体原件：$dst" >> "$LIB/mount.log" 2>/dev/null
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 已还原主题字体原件：$dst" >> "$LOGDIR/mount.log" 2>/dev/null
     else
       rm -f "$dir/.cfs_rs_$$" 2>/dev/null
       printf '%s\n' "$dst" >> "$tmp"
     fi
   done < "$mani"
   mv -f "$tmp" "$mani" 2>/dev/null
-  [ "$n" -gt 0 ] && echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 还原完成：$n 个主题字体" >> "$LIB/mount.log" 2>/dev/null
+  [ "$n" -gt 0 ] && echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 还原完成：$n 个主题字体" >> "$LOGDIR/mount.log" 2>/dev/null
   return 0
 }
 
@@ -299,7 +314,7 @@ payload_mount() {
     _pm=$(tr -d '[:space:]' 2>/dev/null < "$moddir/payload.mode")
     [ "$_pm" = manager ] && return 0
     [ -f "$moddir/fontctl.sh" ] || return 0
-    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 没有挂载计划（slots.map 为空），尝试重新生成（只补轻量部分，跳过合集合成）" >> "$LIB/mount.log" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 没有挂载计划（slots.map 为空），尝试重新生成（只补轻量部分，跳过合集合成）" >> "$LOGDIR/mount.log" 2>/dev/null
     _ttc_prev=${CFS_NO_TTC-__unset__}
     export CFS_NO_TTC=1
     # ★ 上限 20 → 40 秒（2026-10-14）。
@@ -317,7 +332,7 @@ payload_mount() {
     # 还原：不用 `CFS_NO_TTC=1 函数名` 那种写法 —— POSIX 对"赋值前缀 + 函数"的作用域
     # 措辞是 **unspecified**（busybox ash 实测是临时的，但真机跑的是 mksh，不赌这个）。
     # 万一它留在当前 shell，这次开机后面所有 ttc_enabled 都会判成"跳过合集"。
-    # （2026-10-11 姊妹项目同步时提出，我这边改成不依赖未定义行为）
+    # （2026-10-11 旧版实现同步时提出，我这边改成不依赖未定义行为）
     if [ "$_ttc_prev" = __unset__ ]; then
       unset CFS_NO_TTC
     else
@@ -327,7 +342,7 @@ payload_mount() {
     if [ ! -s "$map" ]; then
       # 把这次 apply 的最后几行写进 mount.log（下次报告就能看到真正的原因）
       _tail=$(tail -n 3 "$_apl" 2>/dev/null | tr '\n' ' ')
-      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 补计划失败输出：${_tail:-（无输出）}" >> "$LIB/mount.log" 2>/dev/null
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 补计划失败输出：${_tail:-（无输出）}" >> "$LOGDIR/mount.log" 2>/dev/null
       # ★ 再补一次「完整」重算（这次允许合成合集）：轻量模式被跳过的东西不再跳过。
       #   之所以值得再花时间：这一次开机本来一个槽位都没挂上，重算成功至少能让合集也进去。
       CFS_NO_TTC= sh "$moddir/fontctl.sh" apply "$_p" >> "$_apl" 2>&1
@@ -336,10 +351,10 @@ payload_mount() {
     rm -f "$_apl" 2>/dev/null
     if [ ! -s "$map" ]; then
       # 退出码 124 = 被上面那个 20 秒上限掐断了
-      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 重新生成后仍然没有挂载计划（退出码 $_rc），本次不挂载（请把诊断报告发给作者）" >> "$LIB/mount.log" 2>/dev/null
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 重新生成后仍然没有挂载计划（退出码 $_rc），本次不挂载（请把诊断报告发给开发者）" >> "$LOGDIR/mount.log" 2>/dev/null
       return 0
     fi
-    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 已补上挂载计划（$(grep -c . "$map" 2>/dev/null) 个槽位），继续挂载" >> "$LIB/mount.log" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 已补上挂载计划（$(grep -c . "$map" 2>/dev/null) 个槽位），继续挂载" >> "$LOGDIR/mount.log" 2>/dev/null
   fi
   # ★ 2026-10-17 提速（开机挂载的主开销就在这个循环里）：
   #   原来**每个槽位**都要两次 `printf | tr -d '\r'` 去行尾 CR ——
@@ -360,7 +375,7 @@ payload_mount() {
   _delay=$(cfg_get mount_delay 0 2>/dev/null)
   case "$_delay" in ''|*[!0-9]*) _delay=0 ;; esac
   if [ "$_delay" -gt 0 ] 2>/dev/null; then
-    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 延迟 ${_delay}s 后再挂载（B5）" >> "$LIB/mount.log" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 延迟 ${_delay}s 后再挂载（B5）" >> "$LOGDIR/mount.log" 2>/dev/null
     sleep "$_delay"
   fi
   # ★ 2026-10-30（性能）：批量预取"源 inode 表 + 目标当前 inode 表"
@@ -399,7 +414,7 @@ payload_mount() {
     fi
     # B5：演练模式 —— 只记一行，不真挂
     if [ "${_dry:-0}" = 1 ]; then
-      echo "[DRY] $src -> $dst" >> "$LIB/mount.log" 2>/dev/null
+      echo "[DRY] $src -> $dst" >> "$LOGDIR/mount.log" 2>/dev/null
       skip=$((skip+1)); continue
     fi
     if [ ! -f "$src" ] || [ ! -f "$dst" ]; then
@@ -438,7 +453,7 @@ payload_mount() {
         if datafont_swap "$src" "$dst"; then
           ok=$((ok+1))
       # ★ 记下挂载目标：热重启看门狗要靠这份清单卸掉自己的挂载
-      printf '%s\n' "$dst" >> "$LIB/.mounted" 2>/dev/null; continue
+      printf '%s\n' "$dst" >> "$STATEDIR/mounted" 2>/dev/null; continue
         fi
         ;;
     esac
@@ -482,13 +497,13 @@ payload_mount() {
       ok=$((ok+1))
     else
       fail=$((fail+1))
-      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 绑定失败 $src -> $dst : ${err:-未知错误}" >> "$LIB/mount.log" 2>/dev/null
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 绑定失败 $src -> $dst : ${err:-未知错误}" >> "$LOGDIR/mount.log" 2>/dev/null
     fi
   done < "$_usemap"
   rm -f "${_mapc:-}" 2>/dev/null
-  echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 成功=$ok 失败=$fail 跳过=$skip 已就位=$same" >> "$LIB/mount.log" 2>/dev/null
-  if [ -f "$LIB/mount.log" ]; then
-    tail -n 100 "$LIB/mount.log" > "$LIB/mount.log.tmp.$$" 2>/dev/null && mv -f "$LIB/mount.log.tmp.$$" "$LIB/mount.log" 2>/dev/null
+  echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 阶段=${2:-unknown} 成功=$ok 失败=$fail 跳过=$skip 已就位=$same" >> "$LOGDIR/mount.log" 2>/dev/null
+  if [ -f "$LOGDIR/mount.log" ]; then
+    tail -n 100 "$LOGDIR/mount.log" > "$LOGDIR/mount.log.tmp.$$" 2>/dev/null && mv -f "$LOGDIR/mount.log.tmp.$$" "$LOGDIR/mount.log" 2>/dev/null
   fi
   if command -v beat >/dev/null 2>&1; then
     beat mount "phase=${2:-unknown} ok=$ok fail=$fail skip=$skip same=$same"
@@ -544,14 +559,14 @@ datafont_apply() {
     fi
     # B5：演练模式（第二处循环）
     if [ "$(cfg_get dry_run 0 2>/dev/null)" = 1 ]; then
-      echo "[DRY] $src -> $dst" >> "$LIB/mount.log" 2>/dev/null
+      echo "[DRY] $src -> $dst" >> "$LOGDIR/mount.log" 2>/dev/null
       skip=$((skip+1)); continue
     fi
     if [ ! -f "$src" ] || [ ! -f "$dst" ]; then skip=$((skip+1)); continue; fi
     if datafont_swap "$src" "$dst"; then ok=$((ok+1)); else skip=$((skip+1)); fi
   done < "$_da_map"
   rm -f "$_da_clean" 2>/dev/null
-  [ "$ok" -gt 0 ] && echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 元模块模式：已物理替换 $ok 个主题字体（跳过 $skip）" >> "$LIB/mount.log" 2>/dev/null
+  [ "$ok" -gt 0 ] && echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 元模块模式：已物理替换 $ok 个主题字体（跳过 $skip）" >> "$LOGDIR/mount.log" 2>/dev/null
   return 0
 }
 
@@ -569,15 +584,15 @@ pid1_visible() {   # $1=moddir
   local moddir="${1:-${MODDIR:-}}" plan mi
   mi="${CFS_MOUNTINFO:-/proc/1/mountinfo}"
   plan="$moddir/slots.map"
-  [ -s "$plan" ] || plan="${LIB:-/data/adb/custom_font_lib}/slots.map"
+  [ -s "$plan" ] || plan="${MODDIR}/slots.map"
   [ -s "$plan" ] || return 1
   [ -r "$mi" ] || return 1
   # ★ 2026-11-04：计划里的槽位可能是**符号链接**（DroidSans.ttf -> Roboto-Regular.ttf、
   #   MiSansVF_Overlay.ttf -> theme_webview/xxx 这类），挂载时是跟随链接挂到真实路径的，
   #   mountinfo 里只会出现真实路径。这里先把每个槽位解析成真实路径再比对，
   #   否则会把已经挂上的槽位误报成"PID 1 看不到"。
-  _pv_want=$(mktemp 2>/dev/null || echo "$LIB/.pv.want.$$")
-  _pv_seen=$(mktemp 2>/dev/null || echo "$LIB/.pv.seen.$$")
+  _pv_want=$(mktemp 2>/dev/null || echo "$STATEDIR/pv.want.$$")
+  _pv_seen=$(mktemp 2>/dev/null || echo "$STATEDIR/pv.seen.$$")
   : > "$_pv_want"
   _pv_theme_phys=$(cfg_get theme_phys 0 2>/dev/null)
   while read -r _r _p _n; do
@@ -633,23 +648,23 @@ mount_data_slots_only() {
     [ -n "$_rdst" ] || _rdst="$dst"
     if mount --bind "$src" "$_rdst" 2>/dev/null; then
       ok=$((ok + 1))
-      printf '%s\n' "$_rdst" >> "${LIB:-/data/adb/custom_font_lib}/.mounted" 2>/dev/null
+      printf '%s\n' "$_rdst" >> "${STATEDIR}/mounted" 2>/dev/null
     elif [ "$(stat -L -c '%d:%i' "$src" 2>/dev/null)" = "$(stat -L -c '%d:%i' "$_rdst" 2>/dev/null)" ]; then
       # 目标已经指向我们的字体（可能被管理器挂了，或指向同一个已替换的文件）
       ok=$((ok + 1))
-      printf '%s\n' "$_rdst" >> "${LIB:-/data/adb/custom_font_lib}/.mounted" 2>/dev/null
+      printf '%s\n' "$_rdst" >> "${STATEDIR}/mounted" 2>/dev/null
     else
-      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 混合挂载失败：$_rdst" >> "${LIB:-/data/adb/custom_font_lib}/mount.log" 2>/dev/null
+      echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 混合挂载失败：$_rdst" >> "${LOGDIR}/mount.log" 2>/dev/null
     fi
   done < "$map"
-  echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 混合挂载：/data 主题字体 $ok/$n" >> "${LIB:-/data/adb/custom_font_lib}/mount.log" 2>/dev/null
+  echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 混合挂载：/data 主题字体 $ok/$n" >> "${LOGDIR}/mount.log" 2>/dev/null
   return 0
 }
 
 payload_verify() {
   # 逐个核对 slots.map 里的槽位到底生效了没有，输出 "命中数 总数"。
   #
-  # ★ 2026-10-19（作者要求：**两条路线，互不干扰**）
+  # ★ 2026-10-19（设计：**两条路线，互不干扰**）
   #     自带挂载（self）    → 下面"路线 B"：按目录批量拿 inode 一次比完（快）。
   #     元模块挂载（manager）→ 下面"路线 A"：v1.3.0 的老实现，逐槽位比文件大小。
   #   为什么必须分开：
@@ -662,10 +677,10 @@ payload_verify() {
   local map="$moddir/slots.map"
   local key ck mode
   key="$(boot_id 2>/dev/null)_$(stat -c '%Y-%s' "$map" 2>/dev/null)"
-  if [ -s "$LIB/.verify.cache" ]; then
-    ck=$(sed -n '1p' "$LIB/.verify.cache" 2>/dev/null)
+  if [ -s "$STATEDIR/verify.cache" ]; then
+    ck=$(sed -n '1p' "$STATEDIR/verify.cache" 2>/dev/null)
     if [ -n "$key" ] && [ "$ck" = "$key" ]; then
-      sed -n '2p' "$LIB/.verify.cache" 2>/dev/null
+      sed -n '2p' "$STATEDIR/verify.cache" 2>/dev/null
       return 0
     fi
   fi
@@ -675,8 +690,8 @@ payload_verify() {
 
   _pv_finish() {   # $1 = 结果
     if [ -n "$key" ]; then
-      { printf '%s\n' "$key"; printf '%s\n' "$1"; } > "$LIB/.verify.cache.tmp.$$" 2>/dev/null \
-        && mv -f "$LIB/.verify.cache.tmp.$$" "$LIB/.verify.cache" 2>/dev/null
+      { printf '%s\n' "$key"; printf '%s\n' "$1"; } > "$STATEDIR/verify.cache.tmp.$$" 2>/dev/null \
+        && mv -f "$STATEDIR/verify.cache.tmp.$$" "$STATEDIR/verify.cache" 2>/dev/null
     fi
     printf '%s\n' "$1"
   }

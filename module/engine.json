@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "code": 10000,
+  "arch": "arm64",
+  "file": "fontlab-engine-porsche-arm64-v1.0.zip",
+  "url": "",
+  "sha256": "0e1a094d6250b5fd7da4a553baf7d1a2b61553b627fa3d18c4d3910eccd74b8d",
+  "size": 27182791
+}

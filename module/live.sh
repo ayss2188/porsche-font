@@ -47,10 +47,13 @@ command -v boot_id >/dev/null 2>&1 || boot_id() { cat /proc/sys/kernel/random/bo
 
 [ -n "$MODDIR" ] || MODDIR=/data/adb/modules/custom_font_switcher
 case "$MODDIR" in .|"") MODDIR=$(pwd 2>/dev/null || echo /data/adb/modules/custom_font_switcher) ;; esac
-LIB=/data/adb/custom_font_lib
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+STATEDIR="${STATEDIR:-$LIBROOT/state}"
+mkdir -p "$STATEDIR" 2>/dev/null
 
 # 现场挂载的清单（unmount 靠它撤干净）
-MNT_LIST="$LIB/.live.mounted"
+MNT_LIST="$STATEDIR/live.mounted"
 
 # ★ 默认**不做事**，只打印用法。
 #   别把默认设成 status —— 那样打错子命令（比如 `live.sh moun`）会静默显示状态，
@@ -71,7 +74,21 @@ setup_ns() {
   a=$(readlink /proc/self/ns/mnt 2>/dev/null)
   b=$(readlink /proc/1/ns/mnt 2>/dev/null)
   NS=""
-  [ -n "$a" ] && [ -n "$b" ] || return 0
+  SUM=""
+  # 荣耀临时 root：nsenter 的 mount 被 SELinux 拦，但 su -M 能进全局命名空间。
+  # 优先用它；不行再退回 nsenter。
+  if command -v su >/dev/null 2>&1 && su -M -c true >/dev/null 2>&1; then
+    SUM="su -M -c"
+    return 0
+  fi
+  # ★ 2026-11-12（荣耀临时 root）：读不到 /proc/1/ns/mnt 时不能直接放弃。
+  #   之前 a/b 任一为空就 return，NS 保持空 → 挂载留在 su 自己的命名空间，
+  #   报告里就是「PID 1 视角 0/126、live 显示 126」。
+  #   读不到时只要有 nsenter，就仍然尝试进 init 命名空间。
+  if [ -z "$a" ] || [ -z "$b" ]; then
+    if command -v nsenter >/dev/null 2>&1; then NS="nsenter -t 1 -m --"; fi
+    return 0
+  fi
   [ "$a" = "$b" ] && return 0
   # 已经挂过了？那说明之前挂成功过，沿用同样的方式
   if command -v nsenter >/dev/null 2>&1; then
@@ -94,6 +111,13 @@ _to() {
   if command -v timeout >/dev/null 2>&1; then timeout 8 "$@"; else "$@"; fi
 }
 _mount()  {
+  if [ -n "${SUM:-}" ]; then
+    $SUM "mount -o bind,ro '$1' '$2'" 2>/dev/null && return 0
+    $SUM "mount -o bind '$1' '$2'" 2>/dev/null || return 1
+    $SUM "mount -o remount,bind,ro '$2'" 2>/dev/null
+    return 0
+  fi
+
   # ★ 2026-10-19 提速：一次调用完成「bind + 只读」。
   #   原来是 mount -o bind 之后再单独跑一次 mount -o remount,bind,ro，
   #   每个槽位多一次进程调用（一份计划 100+ 槽位就是 100+ 次）。
@@ -105,7 +129,13 @@ _mount()  {
   $NS _to "$_MOUNT_BIN" -o remount,bind,ro "$2" 2>/dev/null
   return 0
 }
-_umount() { $NS _to "$_UMOUNT_BIN" "$1" 2>/dev/null || $NS _to "$_UMOUNT_BIN" -l "$1" 2>/dev/null; }
+_umount() {
+  if [ -n "${SUM:-}" ]; then
+    $SUM "umount '$1'" 2>/dev/null || $SUM "umount -l '$1'" 2>/dev/null
+    return 0
+  fi
+  $NS _to "$_UMOUNT_BIN" "$1" 2>/dev/null || $NS _to "$_UMOUNT_BIN" -l "$1" 2>/dev/null
+}
 
 # ---------------------------------------------------------------------------
 # 从 slots.map 读挂载计划
@@ -183,6 +213,7 @@ do_mount() {
   [ -s "$MAP" ] || { echo "ERROR:还没有挂载计划 —— 先在界面里选好字体（或点一次应用）"; exit 1; }
   setup_ns
   [ -n "$NS" ] && echo "   su 会话与 init 命名空间不同 → 用 nsenter 挂进 init"
+[ -n "${SUM:-}" ] && echo "   检测到 su -M → 用它在全局命名空间挂载"
 
   # ★ 先把"指向已删除文件"的旧挂载清掉 —— 否则新文件会被它挡住，
   #   而且报错是误导性的 "No such file or directory"（见上面那段说明）
@@ -196,7 +227,7 @@ do_mount() {
   #   （/data/adb/custom_font_lib/f1792102696.ttc5_2-3），
   #   于是每次开机白挂、报告里"生效 170/172"永远差这两个。
   #   摘掉之后数字才是真的。
-  MAP_CLEAN="$LIB/.slots.map.clean.$$"
+  MAP_CLEAN="$STATEDIR/slots.map.clean.$$"
   : > "$MAP_CLEAN"
 
   # ★ 2026-10-17 提速（点「免重启应用」的主开销）：
@@ -394,7 +425,7 @@ $real"
   #   而"本来就在位 / 全部跳过"这两种情况也同样该把状态对齐 ——
   #   它们说明"挂载早已生效，只是状态没同步"。
   do_sync_state
-  # ★ 2026-11-01（v24 快照机制的配套，作者提醒"软重启想到没"）：
+  # ★ 2026-11-01（v24 快照机制的配套，开发者提醒"软重启想到没"）：
   #   免重启挂载成功 = 当前计划**已经是实际生效**——必须立刻把两样东西追平：
   #     · cp slots.map → slots.boot.map：BN（已生效）= 刚挂上去的这份计划
   #     · touch .boot.mark：PD 基准更新到此刻 → 「重启后生效」横幅消失
@@ -405,7 +436,7 @@ $real"
   #   此时 BN 仍是"上次生效的那份计划"，口径依旧正确。
   if [ "$fail" = 0 ]; then
     cp -f "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null
-    touch "$LIB/.boot.mark" 2>/dev/null
+    touch "$STATEDIR/boot.mark" 2>/dev/null
   fi
   [ "$fail" = 0 ] || return 1
   return 0
@@ -521,8 +552,8 @@ do_recount_mount_state() {
   {
     printf '%s\n' "$(boot_id 2>/dev/null)_$(stat -c '%Y-%s' "$map" 2>/dev/null)_$(stat -c '%Y' "$MODDIR/mount.state" 2>/dev/null)"
     printf '%s %s\n' "$hit" "$total"
-  } > "$LIB/.verify.cache.tmp.$$" 2>/dev/null && \
-    mv -f "$LIB/.verify.cache.tmp.$$" "$LIB/.verify.cache" 2>/dev/null
+  } > "$STATEDIR/verify.cache.tmp.$$" 2>/dev/null && \
+    mv -f "$STATEDIR/verify.cache.tmp.$$" "$STATEDIR/verify.cache" 2>/dev/null
   echo "   现在真实生效：$hit 个（跳过 $skip 个）"
 }
 
@@ -539,7 +570,7 @@ do_sync_state() {
     # 退路：fontctl.sh 不在就自己动手（跟它 sync 分支做的事一致）
     if [ -f "$MODDIR/pending_font" ]; then
       cp -f "$MODDIR/pending_font" "$MODDIR/active_font" 2>/dev/null
-      cp -f "$MODDIR/active_font" "$LIB/last_selection" 2>/dev/null
+      cp -f "$MODDIR/active_font" "$STATEDIR/last_selection" 2>/dev/null
       echo "   状态已更新（当前生效 = 待生效）"
     fi
   fi
@@ -550,6 +581,64 @@ do_sync_state() {
 # 软重启框架：让 system_server 重新读字体
 #   注意：这不是"重启"，内核没动、进程都还在，几秒到几十秒就回来
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# check：判断当前 root 能不能把挂载送进 init 命名空间
+#   输出：self/init 命名空间、nsenter 可用性、PID1 实测、su -M 可用性、结论
+# ---------------------------------------------------------------------------
+do_check() {
+  local a b ne ok=0 mnt_ok=0
+  a=$(readlink /proc/self/ns/mnt 2>/dev/null)
+  b=$(readlink /proc/1/ns/mnt 2>/dev/null)
+  echo "self 命名空间: ${a:-读不到}"
+  echo "init 命名空间: ${b:-读不到}"
+  if [ -n "$a" ] && [ -n "$b" ] && [ "$a" = "$b" ]; then
+    echo "→ 当前 root 与 init 同一命名空间，可以直接挂载"
+    ok=1
+  fi
+
+  ne=""
+  if command -v nsenter >/dev/null 2>&1; then ne="nsenter -t 1 -m --"
+  elif [ -x /system/bin/nsenter ]; then ne="/system/bin/nsenter -t 1 -m --"
+  elif command -v toybox >/dev/null 2>&1 && toybox nsenter --help >/dev/null 2>&1; then ne="toybox nsenter -t 1 -m --"
+  fi
+  if [ -n "$ne" ]; then echo "nsenter: 有（$ne）"; else echo "nsenter: 没有"; fi
+
+  if [ -n "$ne" ]; then
+    echo test > /data/local/tmp/.cfs_ns_test 2>/dev/null
+    mkdir -p /data/local/tmp/.cfs_ns_mnt 2>/dev/null
+    if $ne mount -o bind /data/local/tmp/.cfs_ns_test /data/local/tmp/.cfs_ns_mnt 2>/dev/null; then
+      if grep -q '.cfs_ns_mnt' /proc/1/mountinfo 2>/dev/null; then
+        echo "PID 1 实测: 可见（nsenter 挂载成功）"
+        mnt_ok=1
+      else
+        echo "PID 1 实测: 挂载命令成功，但 PID 1 看不到"
+      fi
+      $ne umount /data/local/tmp/.cfs_ns_mnt 2>/dev/null
+    else
+      echo "PID 1 实测: nsenter 挂载失败（被 SELinux 拦或权限不足）"
+    fi
+    rm -f /data/local/tmp/.cfs_ns_test 2>/dev/null
+    rmdir /data/local/tmp/.cfs_ns_mnt 2>/dev/null
+  fi
+
+  if su -M -c id >/dev/null 2>&1; then
+    echo "su -M: 可用"
+  elif su --mount-master -c id >/dev/null 2>&1; then
+    echo "su --mount-master: 可用"
+  else
+    echo "su -M / --mount-master: 不可用或不存在"
+  fi
+
+  echo "----------------------------------------"
+  if [ "$ok" = 1 ] || [ "$mnt_ok" = 1 ]; then
+    echo "结论：可以挂进框架，免重启应用有希望"
+  else
+    echo "结论：进不了 init 命名空间，临时 root 不可用"
+    echo "      换永久 root / 元模块，或重启后走开机挂载"
+  fi
+}
+
 do_softreboot() {
   # 两条路，按"温和程度"排：
   #   ① setprop ctl.restart zygote —— 让 init 重启 zygote（绝大多数机器够用）
@@ -622,12 +711,12 @@ _relive() {
         if (p == "" || (p in keep)) next
         if (p !~ /^\//) p = "/" p
         print p
-      }' "$_cur" "$_prev" 2>/dev/null > "$LIB/.relive.$$"
+      }' "$_cur" "$_prev" 2>/dev/null > "$STATEDIR/relive.$$"
     while IFS= read -r _dst || [ -n "$_dst" ]; do
       [ -n "$_dst" ] || continue
       if _umount "$_dst" 2>/dev/null; then _pn=$((_pn + 1)); fi
-    done < "$LIB/.relive.$$"
-    rm -f "$LIB/.relive.$$" 2>/dev/null
+    done < "$STATEDIR/relive.$$"
+    rm -f "$STATEDIR/relive.$$" 2>/dev/null
   fi
   rm -f "$_prev" 2>/dev/null
   [ "$_pn" -gt 0 ] && echo "   已清理旧挂载（$_pn 个）"
@@ -641,6 +730,7 @@ case "$CMD" in
   mount)     do_mount ;;
   unmount)   do_unmount ;;
   reboot)     _relive && do_softreboot ;;
+  check)      do_check ;;
   softreboot) do_softreboot ;;
   relive)     _relive ;;
   free)

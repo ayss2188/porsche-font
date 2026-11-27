@@ -11,23 +11,26 @@
 # 所以：把上面那些 Google Sans 文件用我们当前生效的字体 bind 顶替掉，商店就该跟着变。
 #
 #   · 认目标**靠字体自己的 name 表**（nameID 1/16 的 family 名），**不看文件名**。
-#   · 挂载记在账本里（$LIB/.gms_bridge.list），关闭/卸载时按账本 umount 还原。
+#   · 挂载记在账本里（$STATEDIR/gms_bridge.list），关闭/卸载时按账本 umount 还原。
 #   · 只挂 .ttf/.otf，**不碰 .ttc 合集**（合集要按 face 处理，这里不做）。
 #   · ★ **必须在 zygote 起来之前挂**（post-fs-data 阶段）：应用的挂载命名空间是从 zygote
 #     复制出来的快照，后挂的挂载**已经在跑的应用看不到**。想在开机后立刻生效，
 #     得 nsenter 进 zygote 的命名空间再挂（见 bridge_into_zygote）。
 #
 # 用法：sh gms_cache.sh on | off | status | diag | families <文件>
-LIB=${LIB:-/data/adb/custom_font_lib}
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+STATEDIR="$LIBROOT/state"
+mkdir -p "$STATEDIR" 2>/dev/null
 MODDIR=${MODDIR:-${0%/*}}
 # 目标目录（可覆盖）：GMS 私有下载字体目录 + 公共下载字体目录
 CACHE_DIRS=${GMS_CACHE_DIRS:-"/data/data/com.google.android.gms/files/fonts /data/user/0/com.google.android.gms/files/fonts /data/user_de/0/com.google.android.gms/files/fonts /data/fonts/files"}
 [ -n "$GMS_CACHE_DIR" ] && CACHE_DIRS="$GMS_CACHE_DIR"
 MOUNTS_FILE=${CFS_MOUNTS_FILE:-/proc/mounts}
-JOURNAL="$LIB/.gms_bridge.list"
+JOURNAL="$STATEDIR/gms_bridge.list"
 # ★ 「用户启用过缓存桥接」的明确标志（跟账本分开：账本是台账，这个才是开关）
-CACHE_ON_FLAG="$LIB/.gms_cache_on"
-LOG="$LIB/.gms_bridge.log"
+CACHE_ON_FLAG="$STATEDIR/gms_cache_on"
+LOG="$STATEDIR/gms_bridge.log"
 FAM_LIST=${FAM_LIST:-"googlesans googlesanstext googlesansdisplay googlesansflex productsans"}
 
 MNT=${MNT:-/system/bin/mount}; [ -x "$MNT" ] || MNT="$(command -v mount 2>/dev/null)"
@@ -159,7 +162,7 @@ is_google_family() {
 # 我们当前生效的字体文件（优先用户选的那个，其次模块里已生成的）
 source_font() {
   local id f
-  id=$(tr -d '[:space:]' < "$LIB/last_selection" 2>/dev/null)
+  id=$(tr -d '[:space:]' < "$STATEDIR/last_selection" 2>/dev/null)
   if [ -n "$id" ] && [ -f "$LIB/$id.ttf" ]; then printf '%s' "$LIB/$id.ttf"; return 0; fi
   for f in "$MODDIR"/system/fonts/*.ttf; do
     [ -f "$f" ] || continue
@@ -194,7 +197,7 @@ do_on() {
   #     · 用户点「关闭兼容」时 do_off 会把它删掉
   #   所以自动调用（开机脚本）时：**账本不在就别挂**；
   #   用户显式点「开启兼容」时会传 force，那条路照挂。
-  #   判据用**明确的启用标志**（$LIB/.gms_cache_on），不用账本 ——
+  #   判据用**明确的启用标志**（$STATEDIR/gms_cache_on），不用账本 ——
   #   账本是"挂了哪些、好还原"的台账，可能是老早留下的：
   #   用户以前开过、后来组件被别的工具停用，账本不会自动消失，
   #   拿它当开关会导致"用户没开、却每次开机都被挂"。真机反馈过。
@@ -206,7 +209,7 @@ do_on() {
   [ -n "$MNT" ] || { echo "ERROR:找不到 mount 命令"; return 1; }
   for d in $CACHE_DIRS; do [ -d "$d" ] && any=1; done
   [ "$any" = 1 ] || { echo "这台机器没有下载字体目录（商店没下载过字体），跳过"; return 0; }
-  list="$LIB/.gms_bridge.scan.$$"
+  list="$STATEDIR/gms_bridge.scan.$$"
   scan_targets > "$list" 2>/dev/null
   while IFS= read -r t; do
     [ -n "$t" ] || continue
@@ -219,7 +222,7 @@ do_on() {
     #   克隆 = 我们的字形 + 目标的 name 表（"自称 Google Sans"），按家族缓存复用。
     fam=$(font_families "$t" 2>/dev/null | head -n1)
     case "$fam" in ''|*[!a-z0-9]*) fam=unknown ;; esac
-    cl="$LIB/.clone.$fam.ttf"
+    cl="$STATEDIR/clone.$fam.ttf"
     if [ ! -s "$cl" ] && [ -f "$MODDIR/nameclone.sh" ]; then
       tmo 120 sh "$MODDIR/nameclone.sh" clone "$src" "$t" "$cl" >/dev/null 2>&1
     fi
@@ -273,7 +276,7 @@ do_on() {
 }
 
 do_off() {
-  local n=0 t s rev="$LIB/.gms_bridge.rev.$$" keep="$LIB/.gms_bridge.keep.$$"
+  local n=0 t s rev="$STATEDIR/gms_bridge.rev.$$" keep="$STATEDIR/gms_bridge.keep.$$"
   # ★ 2026-10-16 改：账本不在时**也要**清理克隆与日志（原来直接 return 0，
   #   于是"只剩残留文件、账本已没了"的机器点关闭之后什么都不清）。
   if [ -f "$JOURNAL" ]; then
@@ -298,8 +301,8 @@ do_off() {
   fi
 
   # ★ 2026-10-16 加：**把克隆文件与桥接日志也清掉**。
-  #   为什么必须做（作者问"关闭之后还检测得到吗"）：
-  #     gms_cache.sh 桥接时会造 $LIB/.clone.<家族名>.ttf
+  #   为什么必须做（注意"关闭之后还检测得到吗"）：
+  #     gms_cache.sh 桥接时会造 $STATEDIR/clone.<家族名>.ttf
   #     （我们的字形 + Google Sans 的 name 表）；
   #     挂载卸掉之后这些文件就没用了，但原来**留着** ——
   #     是"这个模块做过谷歌字体桥接"的直接物证，
@@ -315,7 +318,7 @@ do_off() {
       tmo 10 am force-stop "$_p" >/dev/null 2>&1 || true
     done
     sleep 1 2>/dev/null || true
-    _rev2="$LIB/.gms_bridge.rev2.$$"
+    _rev2="$STATEDIR/gms_bridge.rev2.$$"
     cp -f "$JOURNAL" "$_rev2" 2>/dev/null
     : > "$JOURNAL.keep2.$$" 2>/dev/null
     while IFS='|' read -r t s2; do
@@ -334,9 +337,9 @@ do_off() {
   fi
 
   # ★ 兜底：账本可能不准（历史遗留/被覆盖），直接按挂载表再扫一遍
-  #   我们的挂载源一定是 $LIB/.clone.*.ttf，按这个特征找目标路径
+  #   我们的挂载源一定是 $STATEDIR/clone.*.ttf，按这个特征找目标路径
   if [ -r "$MOUNTS_FILE" ]; then
-    for _m in $(grep -F "$LIB/.clone." "$MOUNTS_FILE" 2>/dev/null | awk '{print $2}' | sort -u); do
+    for _m in $(grep -F "$STATEDIR/clone." "$MOUNTS_FILE" 2>/dev/null | awk '{print $2}' | sort -u); do
       [ -n "$_m" ] || continue
       if tmo 10 "$UMNT" -l "$_m" 2>/dev/null || tmo 10 "$UMNT" "$_m" 2>/dev/null; then
         n=$((n + 1)); blog "兜底还原：$_m"
@@ -348,10 +351,10 @@ do_off() {
   rm -f "$LIB"/.clone.*.ttf 2>/dev/null
   # 顺带把"启用标志"也删掉（正常路径是 google_font.sh restore 删的，
   # 但直接 `sh gms_cache.sh off` 时也得删 —— 否则开机脚本还会照挂）
-  rm -f "$LIB/.gms_cache_on" 2>/dev/null
+  rm -f "$STATEDIR/gms_cache_on" 2>/dev/null
   rm -f "$LIB"/.gms_bridge.rev.* "$LIB"/.gms_bridge.keep.* 2>/dev/null
   # 桥接日志：留着等于留了个"我做过什么"的日记（关掉就一起清）
-  rm -f "$LIB/.gms_bridge.log" 2>/dev/null
+  rm -f "$STATEDIR/gms_bridge.log" 2>/dev/null
 
   if [ "${nleft:-0}" -gt 0 ]; then
     printf 'OK：已还原 %s 个；还有 %s 个被 Google 应用占用，\n  已解除启用标志 —— 重启后不会再挂，占用也会消失\n' \
@@ -394,7 +397,7 @@ do_status() {
     # ★ 2026-10-21：**按实际挂载核对**，不信账本。
     #   重启后挂载已经没了，但账本还留着旧行 —— 以前只数行数，
     #   于是状态永远显示"还有 N 个残留挂载"（真机上就是这样）。
-    alive="$LIB/.gms_status.alive.$$"
+    alive="$STATEDIR/gms_status.alive.$$"
     : > "$alive" 2>/dev/null
     while IFS='|' read -r t s; do
       [ -n "$t" ] || continue
@@ -431,7 +434,7 @@ do_diag() {
     [ -d "$d" ] && n=$(find "$d" -maxdepth 3 -type f \( -name '*.ttf' -o -name '*.otf' \) 2>/dev/null | grep -c .)
     echo "缓存目录=$d（$([ -d "$d" ] && echo 在 || echo 不存在)，字体文件 ${n:-0} 个）"
   done
-  src=$(source_font) && echo "用的字体=$src" || echo "用的字体=没有（还没导入字体？）"
+  src=$(source_font) && echo "用的字体=$src" || echo "用的字体=没有（还没选择字体？）"
   total=0
   [ -f "$JOURNAL" ] && { total=$(grep -c . "$JOURNAL" 2>/dev/null); total=${total:-0}; }
   # 行首保持 "账本="：回归测试断言用的是 grep -c '^账本='，

@@ -15,6 +15,15 @@
 #
 # FSROOT 仅供测试：把真实路径前缀到一个模拟根目录下。
 
+# ★ 2026-11-03：旧版把三星写成 samsung，现在内部 id 改为 oneui（targets/oneui.list）
+_rom_norm_oneui() {
+  case "${1:-}" in
+    samsung|Samsung|SAMSUNG) echo "oneui" ;;
+    *) echo "${1:-}" ;;
+  esac
+}
+
+
 FSROOT=${FSROOT:-}
 
 _lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -23,10 +32,10 @@ _lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # 真实存在的字体目录（输出绝对路径，不含 FSROOT）
 # ---------------------------------------------------------------------------
 slot_dirs() {
-  # ★ 2026-10-17（作者原则）：**先读安装时存下的环境情报**。
+  # ★ 2026-10-17（开发者原则）：**先读安装时存下的环境情报**。
   #   `"$FSROOT"/*/fonts "$FSROOT"/*/*/fonts` 要展开根目录下所有子目录/二级子目录，
   #   而这个函数在一次 apply 里被调用 5~10 次 —— 每次重新 glob 就是几十秒。
-  local _el="${LIB:-/data/adb/custom_font_lib}/scanned/env.list"
+  local _el="${STATEDIR}/scan/env.list"
   # ★ 2026-11-07：重扫时强制重新发现目录（旧 env.list 可能只记了 1~2 个目录）
   [ "${CFS_FORCE_DIRS:-0}" = 1 ] && _el=""
   if [ -s "$_el" ]; then
@@ -98,7 +107,7 @@ slot_dirs() {
 # 永不替换名单的缓存文件（小写、一行一个名字）
 #   由扫描阶段生成，也允许 _role_set 在缺失时兜底生成。
 slot_skip_file() {
-  printf '%s/scanned/skip.list\n' "${LIB:-/data/adb/custom_font_lib}"
+  printf '%s/scan/skip.list\n' "$STATEDIR"
 }
 
 # ---------------------------------------------------------------------------
@@ -185,10 +194,10 @@ slot_skip_list() {   # $1=moddir
 }
 
 slot_xml_files() {
-  # ★ 2026-10-17（作者原则）：**先读安装时存下的环境情报**，不再 glob。
+  # ★ 2026-10-17（开发者原则）：**先读安装时存下的环境情报**，不再 glob。
   #   `"$FSROOT"/*/etc/*font*.xml` 这种写法要展开根目录下所有子目录 ——
   #   而这个函数在一次 apply 里会被 key 计算反复调用（5~10 次）。
-  local _el="${LIB:-/data/adb/custom_font_lib}/scanned/env.list"
+  local _el="${STATEDIR}/scan/env.list"
   if [ -s "$_el" ]; then
     local _hit
     _hit=$(sed -n 's/^xml=//p' "$_el" 2>/dev/null)
@@ -227,13 +236,13 @@ slot_xml_files() {
 # ---------------------------------------------------------------------------
 ttc_cn_pairs() {
   local x fam hdr body rest attrs name l idx
-  # ★ 2026-10-17（作者原则：扫描只在安装时一次）：**先读安装时存下的 TTC 清单**。
+  # ★ 2026-10-17（开发者原则：扫描只在安装时一次）：**先读安装时存下的 TTC 清单**。
   #   原来这里要把每个 XML 全文读进来（tr + sed + while 逐 family 解析），
   #   用户的 fonts.xml 有几 MB、8~15 个文件 → 一次就要几十秒。
   #   而 ttc_enabled 在一次 apply 里会被调用好几次（每次都是新进程，缓存留不住）。
   #   安装时已经算过一次，存成 scanned/ttc.list，之后直接读它。
   if [ -z "${TTC_PAIRS_CACHE+x}" ]; then
-    local _tl="${LIB:-/data/adb/custom_font_lib}/scanned/ttc.list"
+    local _tl="${STATEDIR}/scan/ttc.list"
     if [ -s "$_tl" ]; then
       # ★ 2026-10-19 修 Bug 2：读到清单后**必须在这里输出**。
       #   原来这里只赋值 + return 0、没有 printf —— 用 `$(ttc_cn_pairs | awk ...)`
@@ -405,8 +414,8 @@ _lang_is() {   # $1=语言标签串  $2=要找的码（如 ko / ja）
 # ---------------------------------------------------------------------------
 # 【1.0.9 新增】自适应扫描：从**设备自己的字体配置**挖出"哪种语言用哪个字体文件"
 #
-# 为什么需要（作者要求）：
-#   作者手上只有小米机器，适配别的机型全靠别人的真机报告。诊断报告**最核心的价值**
+# 为什么需要（设计）：
+#   开发者手上只有小米机器，适配别的机型全靠别人的真机报告。诊断报告**最核心的价值**
 #   就是回答"他这台系统的字体到底靠什么生效"。以前这条信息散在第 5/6 节的原始 XML 里，
 #   得人肉去读；这一版直接把它整理成"语言 → 字体文件"的清单。
 #
@@ -484,7 +493,7 @@ slot_scan_names() {
   if [ -z "${SCAN_NAMES_CACHE+x}" ] || [ -z "$SCAN_NAMES_CACHE" ]; then
     # ★ 2026-11-06（真机报告 Y2 占 96 秒）：XML 解析结果落盘缓存，
     #   键 = 所有 XML 文件的「路径:大小:修改时间」；没变就直接 cat。
-    _sn_cf="${LIB:-/data/adb/custom_font_lib}/.scan_names.cache"
+    _sn_cf="${STATEDIR}/scan_names.cache"
     _sn_key=$(stat -c '%n:%s:%Y' $(slot_xml_files 2>/dev/null) 2>/dev/null | tr '\n' '|')
     if [ -s "$_sn_cf" ] && [ -n "$_sn_key" ] && [ "$(head -n 1 "$_sn_cf" 2>/dev/null)" = "$_sn_key" ]; then
       SCAN_NAMES_CACHE=$(tail -n +2 "$_sn_cf" 2>/dev/null)
@@ -569,7 +578,7 @@ slot_xml_names() {
   #   于是装新包后槽位从 78 变成 46（少了 [clock] 那批）。
   _ver="$(stat -c '%Y' "${MODDIR:-}/slots.sh" 2>/dev/null)"
   _kc="$_ver|$(stat -c '%n:%Y-%s' $(slot_xml_files 2>/dev/null) 2>/dev/null | tr '\n' '|')"
-  _kd="${LIB}/.xmlnames.cache"
+  _kd="${STATEDIR}/xmlnames.cache"
   if [ -n "$_kc" ] && [ -s "$_kd" ]; then
     if [ "$(sed -n '1p' "$_kd" 2>/dev/null)" = "$_kc" ]; then
       sed -n '2,$p' "$_kd" 2>/dev/null
@@ -625,7 +634,7 @@ slot_static_names() {
   #
   # ★ 2026-10-17：targets 改成**分区**格式后，用 awk 一次过完。
   #   为什么不用 shell 循环：while + case + continue 嵌套在真机/toybox 上
-  #   容易出"卡住"这种难查的问题（作者真机上真出现过），awk 没有这些坑。
+  #   容易出"卡住"这种难查的问题（开发者真机上真出现过），awk 没有这些坑。
   #
   # 分区 → 开关：
   #   main/base            永远读
@@ -668,7 +677,7 @@ slot_static_names() {
 }
 
 # ---------------------------------------------------------------------------
-# ★ 2026-10-17（作者要求）：能不能**跳过目录扫描**
+# ★ 2026-10-17（设计）：能不能**跳过目录扫描**
 #
 # 背景：slot_dir_names 要遍历所有字体目录、逐个 stat 判断大小，
 #       在真机上是整条链路里最慢的一步。而适配过的机型有 targets 清单，
@@ -687,7 +696,7 @@ slot_static_names() {
 #   · 有 [clock] 分区 → 名单已经在 targets 里了，**不用再遍历 XML**（快）
 #   · 没有          → 退回原来的 XML 扫描（兜底，1.2.0 的做法）
 #
-# 为什么这么设计（作者 2026-10-17 定）：
+# 为什么这么设计（开发者 2026-10-17 定）：
 #   1.2.0 是靠遍历 8 个字体配置 XML 找 clock family 得到名单的，慢；
 #   现在把那份名单（34 个）预先写进 targets 的 [clock] 分区，
 #   开关打开时直接读分区就行 —— 行为跟 1.2.0 一致，但快得多。
@@ -707,16 +716,16 @@ slot_has_clock_zone() {   # $1=moddir
 
 
 # ---------------------------------------------------------------------------
-# ★ 2026-10-17（作者定的架构）：分三个文件，各管各的
+# ★ 2026-10-17（开发者定的架构）：分三个文件，各管各的
 #
 #   targets/<机型>.list    人工验证的清单（含 [main][clock][theme] 分区）
 #                          —— 跟着模块走，升级会更新，是"可信"的那份
 #
-#   $LIB/scanned/device.list  安装时扫本机得到的（兜底）
+#   $STATEDIR/scan/device.list  安装时扫本机得到的（兜底）
 #                          —— 本机数据：设备特有的字体、厂商目录里的那些
 #                             targets 没覆盖到的，都靠它补
 #
-#   $LIB/scanned/slots.list   最终槽位 = 上面两份合并去重
+#   $STATEDIR/scan/slots.list   最终槽位 = 上面两份合并去重
 #                          —— **apply / reapply 只读这一个文件**
 #
 # 为什么分开：targets 是"我们验证过这台机型该替换哪些"，
@@ -725,7 +734,7 @@ slot_has_clock_zone() {   # $1=moddir
 # ---------------------------------------------------------------------------
 #   （下面这几个变量只是兜底；三个函数内部也各自算了一遍，
 #     因为它们可能被单独 source 或调用，不能依赖顶层求值顺序）
-SLOT_SCAN_DIR="${LIB:-/data/adb/custom_font_lib}/scanned"
+SLOT_SCAN_DIR="${STATEDIR}/scan"
 SLOT_DEV_LIST="$SLOT_SCAN_DIR/device.list"
 SLOT_USE_LIST="$SLOT_SCAN_DIR/slots.list"
 SLOT_META="$SLOT_SCAN_DIR/slots.meta"
@@ -753,7 +762,7 @@ SLOT_SCAN_SCHEMA=1
 
 slot_scan_cache_valid() {
 local moddir="${1:-${MODDIR:-}}"
-  local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _sd="${STATEDIR}/scan"
   local mark="$_sd/.schema" sch rom fp
   [ -s "$_sd/device.list" ] || return 1
   [ -s "$mark" ] || return 1                    # 老版本没写过 .schema → 视为失效
@@ -769,7 +778,7 @@ local moddir="${1:-${MODDIR:-}}"
 }
 
 slot_scan_cache_drop() {
-  local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _sd="${STATEDIR}/scan"
   rm -f "$_sd/device.list" "$_sd/slots.list" "$_sd/slots.meta" \
         "$_sd/skip.list" "$_sd/ttc.list" "$_sd/env.list" "$_sd/.schema" 2>/dev/null
   # ★ 2026-10-31（修正）：**绝不清空 .plancache** ——
@@ -783,7 +792,7 @@ slot_scan_cache_drop() {
 
 slot_scan_cache_stamp() {   # $1=moddir → 扫描完成后写指纹
   local moddir="${1:-${MODDIR:-}}"
-  local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _sd="${STATEDIR}/scan"
   {
     echo "schema=$SLOT_SCAN_SCHEMA"
     echo "rom=$(tr -d '[:space:]' 2>/dev/null < "$moddir/current_rom")"
@@ -806,14 +815,14 @@ slot_device_scan() {   # $1=moddir → 生成 device.list
     # ★ 2026-10-25：光 return 不够 —— 上一版扫出来的 device.list / slots.list
     #   还会被沿用（slot_build_slots 直接读它们），96 个槽位照样在。
     #   这里把扫描缓存清掉，让计划回到「只用机型清单」的状态（= 4.4.2 时代的范围）。
-    _sd_clr="${LIB:-/data/adb/custom_font_lib}/scanned"
+    _sd_clr="${STATEDIR}/scan"
     rm -f "$_sd_clr/device.list" "$_sd_clr/slots.list" "$_sd_clr/slots.meta" \
           "$_sd_clr/skip.list" "$_sd_clr/ttc.list" "$_sd_clr/env.list" \
           "$_sd_clr/.schema" 2>/dev/null
     return 1
   fi
 
-  local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _sd="${STATEDIR}/scan"
   local _dev="$_sd/device.list"
   local tmp n
   [ -n "$moddir" ] || return 1
@@ -839,7 +848,7 @@ slot_device_scan() {   # $1=moddir → 生成 device.list
     echo "names=$(grep -c . "$tmp.names" 2>/dev/null | tr -dc '0-9')"
     echo "dirs=$(printf '%s\n' "$(slot_dirs 2>/dev/null)" | grep -c . | tr -dc '0-9')"
     echo "xmlfiles=$(slot_xml_files 2>/dev/null | grep -c . | tr -dc '0-9')"
-  } > "${LIB:-/data/adb/custom_font_lib}/.scan.stat" 2>/dev/null
+  } > "${STATEDIR}/scan.stat" 2>/dev/null
   rm -f "$tmp.raw" 2>/dev/null
   : > "$tmp"
   local dirs d role l name
@@ -908,7 +917,7 @@ slot_device_scan() {   # $1=moddir → 生成 device.list
 
 # ② 生成 4 种开关组合的槽位清单（刷入时一次做完，切换时直接选文件）
 #
-#   作者的原则：「前提准备，后续完全无脑」
+#   开发者的原则：「前提准备，后续完全无脑」
 #   影响槽位的开关只有 keep_lockscreen / theme_fonts 两个 → 4 种组合，
 #   每种生成一份文本清单（几百行、几十 KB，不占空间）。
 #   切换时按开关直接选文件，**不做任何过滤**。
@@ -930,11 +939,34 @@ _sb_pub() {   # $1=临时文件  $2=目标文件
   return 0
 }
 
+slot_dedupe_symlinks() {
+  local f="$1" tmp role dir name rest full t ino seen=""
+  [ -s "$f" ] || return 0
+  tmp="$f.dedup.$$"
+  : > "$tmp"
+  while read -r role dir name rest; do
+    [ -n "$name" ] || continue
+    full="$FSROOT$dir/$name"
+    ino=""
+    if [ -L "$full" ]; then
+      t=$(readlink -f "$full" 2>/dev/null)
+      [ -n "$t" ] && ino=$(stat -Lc '%d:%i' "$full" 2>/dev/null)
+      [ -n "$ino" ] || ino="path:$t"
+      case " $seen " in
+        *" $ino "*) continue ;;
+      esac
+      seen="$seen $ino"
+    fi
+    printf '%s %s %s%s\n' "$role" "$dir" "$name" "${rest:+ $rest}" >> "$tmp"
+  done < "$f"
+  mv -f "$tmp" "$f" 2>/dev/null
+}
+
 slot_build_slots() {   # $1=moddir
   local moddir="${1:-${MODDIR:-}}" rom tlist tmp tgt_n dev_n
   # ★ 这三个路径必须在这里自己算 —— 不能依赖顶层变量
   #   （这个函数会被单独 source 进测试，也可能在没有顶层求值的环境里被调）
-  local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _sd="${STATEDIR}/scan"
   local _use="$_sd/slots.list"
   local _meta="$_sd/slots.meta"
   [ -n "$moddir" ] || return 1
@@ -944,6 +976,7 @@ slot_build_slots() {   # $1=moddir
     slot_device_scan "$moddir" >/dev/null 2>&1
   fi
   [ -s "$_sd/device.list" ] || return 1
+  slot_dedupe_symlinks "$_sd/device.list"
   rom=$(tr -d '[:space:]' 2>/dev/null < "$moddir/current_rom")
   tlist="$moddir/targets/${rom:-aosp}.list"
   [ -s "$tlist" ] || tlist="$moddir/targets/aosp.list"
@@ -1008,7 +1041,7 @@ slot_build_slots() {   # $1=moddir
     #   原来算的是"targets 独有、扫描没覆盖的" —— 而 targets 里的名字本来就会
     #   出现在扫描结果里，所以永远是 0，界面显示"机型清单里的 0 个"看着像没生效。
     #   现在算的是"targets 里、这台设备上真实存在的名字有几个"。
-    # ★ 2026-10-18（作者澄清口径）：
+    # ★ 2026-10-18（说明口径）：
     #   机型清单里的 = targets 清单里、这台设备上**真实存在**的名字数
     #   本机扫描补的 = 扫描发现、但 targets 清单里**没有**的（兜底那一部分）
     #   两者相加 = 总槽位
@@ -1052,6 +1085,8 @@ slot_build_slots() {   # $1=moddir
   # 永不替换名单也在这里算好（扫描时一次），后面 _role_set 只读小文件
   slot_skip_list "$moddir" >/dev/null 2>&1
   _lk=" $(tr '\n' ' ' < "$_sd/lockscreen.list" 2>/dev/null | tr -s ' ') "
+
+  slot_dedupe_symlinks "$tmp"
 
   # ── 四份清单 ──
   #   th=0：直接过滤
@@ -1120,7 +1155,7 @@ slot_build_slots() {   # $1=moddir
   {
     printf 'built=%s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
     printf 'rom=%s\n' "${rom:-aosp}"
-    # 口径（作者澄清）：
+    # 口径（说明）：
     #   targets = targets 清单里、这台设备上真实存在的名字数
     #   extra   = 扫描发现、但 targets 清单里没有的（兜底那一部分）
     #   total   = targets + extra
@@ -1148,7 +1183,7 @@ slot_build_slots() {   # $1=moddir
 # ③ 读最终槽位清单（apply / reapply 只走这里）
 slot_device_fonts() {   # $1=moddir
   # 这里也自己算路径（这个函数可能被单独调用，不能依赖顶层变量）
-  local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _sd="${STATEDIR}/scan"
   local _use="$_sd/slots.list"
   if [ ! -s "$_use" ]; then
     slot_build_slots "${1:-${MODDIR:-}}" >/dev/null 2>&1
@@ -1168,7 +1203,7 @@ slot_targets_ready() {   # $1=moddir
   [ "${n:-0}" -ge 30 ] || return 1
   return 0
 }
-# ★ 2026-10-17（作者要求）：新架构下"要不要扫目录"这个问题已经不存在了 ——
+# ★ 2026-10-17（设计）：新架构下"要不要扫目录"这个问题已经不存在了 ——
 #   候选只来自安装时生成的 scanned/slots.list。这个函数保留成恒返回 1（不跳过），
 #   是为了让老代码路径（没有清单时）照旧能兜底扫描。
 slot_can_skip_scan() {
@@ -1185,7 +1220,7 @@ slot_can_skip_scan() {
 slot_oem_names() {
   local _kc="" _kd
   for _kf in /data/adb/modules/*/system/etc/fonts.xml /data/adb/modules/*/system/etc/fonts.xml.bak; do [ -f "$_kf" ] && _kc="$_kc|$_kf:$(stat -c '%Y-%s' "$_kf" 2>/dev/null)"; done
-  _kd="${LIB}/.oemnames.cache"
+  _kd="${STATEDIR}/oemnames.cache"
   if [ -n "$_kc" ] && [ -s "$_kd" ]; then
     if [ "$(sed -n '1p' "$_kd" 2>/dev/null)" = "$_kc" ]; then
       sed -n '2,$p' "$_kd" 2>/dev/null
@@ -1275,7 +1310,7 @@ _rf_init() {
 _role_set_core() {  _rf_init
 
   local l="$1" lang="${2:-}"
-  # ★ 2026-10-25 作者要求：**强制替换名单**（用户自己填）优先级最高。
+  # ★ 2026-10-25 设计：**强制替换名单**（用户自己填）优先级最高。
   #   填进来的名字，不管它本来是"保护"还是"emoji/符号跳过"，一律替换。
   _fl="$_RF_force_list"
   if [ -n "$_fl" ]; then
@@ -1308,6 +1343,14 @@ _role_set_core() {  _rf_init
       [ -s "$_skf" ] && VADJ_SPACED=$(tr '\n' ' ' < "$_skf" 2>/dev/null)
     fi
   fi
+  # 选中字体本身是 VF 时，Honor 的 HONORSansVF* 可以替换：
+  # 原厂配置声明 supportedAxes="wght"，塞 VF 不会出现空槽。
+  if [ "${CFS_SEL_VF:-0}" = 1 ]; then
+    _ll=$(printf '%s' "$l" | tr 'A-Z' 'a-z')
+    case "$_ll" in
+      *honorsansvf*) ROLE=main; return ;;
+    esac
+  fi
   # ★ 2026-10-25 危险区：allow_vadj=1 时允许替换「粗细调节」族（默认仍然跳过）
   if [ "$(cfg_get allow_vadj 0 2>/dev/null)" != 1 ]; then
     case " ${VADJ_SPACED:-} " in
@@ -1319,7 +1362,7 @@ _role_set_core() {  _rf_init
   #   最可疑的就是把 Flyme 的 UI 可变字体（FlymeSansVF.ttf）换成了普通字体。
   case "$l" in
     *vf*)
-      # ★ 2026-10-24（作者要求）：**默认关** —— 只有用户在高级设置里手动打开才生效。
+      # ★ 2026-10-24（设计）：**默认关** —— 只有用户在高级设置里手动打开才生效。
       #   加开关不能改默认行为，否则排查问题时变量会混在一起。
       [ ""$_RF_skip_vf"" = 1 ] && { ROLE=sym; return; }
       ;;
@@ -1424,7 +1467,7 @@ _role_set_core() {  _rf_init
   #   三星的自绘图标/UI 字体常以 Samsung* 命名，换掉会出现"图标变方框"。
   case "$l" in
     *samsung*)
-      # ★ 2026-10-24（作者要求）：**默认关**，只能手动打开。
+      # ★ 2026-10-24（设计）：**默认关**，只能手动打开。
       [ ""$_RF_keep_samsung"" = 1 ] && { ROLE=sym; return; }
       ;;
   esac
@@ -1528,7 +1571,7 @@ slot_role() { _role_set "$(_lc "$1")" "${2:-}"; echo "$ROLE"; }
 # 自动让路（2026-10-12 新增）—— 1.0.8 的核心
 #
 # 背景：以前"日文/韩文/繁体"和"时钟/斜体/衬线"默认**保留系统字体**，理由是"怕用户字体缺字形"。
-#   但作者指出：**用户装了字体就是想全变**，默认保守反而让人以为"模块没生效"；
+#   但开发者指出：**用户装了字体就是想全变**，默认保守反而让人以为"模块没生效"；
 #   而"缺字形"这件事**导入时就已经测出来了**（界面用 JS 探针把 latin/cjk/hant/kana/hangul
 #   写进 $LIB/<id>.meta），根本不用等用户看到方块再回来关开关。
 #
@@ -1548,7 +1591,7 @@ _meta_have() {   # $1=latin|cjk|hant|kana|hangul  → 0=可以换（有字形，
   case "$id" in ""|none) return 0 ;; esac
   id=${id%%+*}                       # 组合字体（a+b）取主字体做判定
   # 没有元数据（老字体、导入时没测到）→ 按"有"处理、照换。
-  #   为什么不保守：保守会让用户看到"某处永远不变"，那正是作者最烦的现象；
+  #   为什么不保守：保守会让用户看到"某处永远不变"，那正是开发者最烦的现象；
   #   而"字体确实缺字形"的情况正常都会被 meta 记下来（hangul=0 这种），不会走到这里。
   [ -f "$LIB/$id.meta" ] || return 0
   v=$(sed -n "s/^$k=//p" "$LIB/$id.meta" 2>/dev/null | tail -n1 | tr -d '\r\n')
@@ -1572,9 +1615,9 @@ _slot_script() {
 
 # 该角色在当前设置下是否参与替换
 #
-# ★ 1.0.9 简化（作者定的）★
+# ★ 1.0.9 简化（开发者定的）★
 #   取消「保留日文/韩文/繁体」与「保留时钟/等宽/斜体」两个开关 —— **默认全部替换**，
-#   不给开关、也不再"按字形自动让路"。作者原话："默认就替换这些，不管他是不是方块；
+#   不给开关、也不再"按字形自动让路"。开发者原话："默认就替换这些，不管他是不是方块；
 #   如果有方块，那可能是字体没有这些东西 —— 但现在大家导入的字体一般都正常。"
 #   少一个开关 = 少一个"用户不知道该不该开"的坑，也才真正是"全局生效"。
 #   缺字形这件事**报告里会说清**（第 0 节列出"哪种语言没换、为什么"），不靠开关兜底。
@@ -1585,7 +1628,7 @@ _slot_script() {
 # ---------------------------------------------------------------------------
 # 【2026-10-14 新增】**精确识别锁屏专用字体**
 #
-# 为什么单独做这一件事（作者的分析）：
+# 为什么单独做这一件事（开发者的分析）：
 #   以前只有一个"保留特殊槽"的大开关，它把 clock/mono/italic/serif/display 一锅端地保留。
 #   于是：不开替换 20 个槽位、开了 70 个 —— 多出来的 50 个里真正跟锁屏有关的只有几个，
 #   其余（等宽、斜体、衬线、装饰）跟着一起被换 ⇒ 用户体感"替换不全"。
@@ -1612,11 +1655,11 @@ _slot_script() {
 #         整段计划从十几秒涨到几分钟。第一版就是这么写的，实测卡住好几分钟才发现）。
 
 # ---------------------------------------------------------------------------
-# ★ 2026-10-15（作者的理念）：锁屏字体名单 **扫一次存起来，以后直接读**
+# ★ 2026-10-15（开发者的理念）：锁屏字体名单 **扫一次存起来，以后直接读**
 #   名单是从字体配置 XML 里读出来的，而 XML 只在系统更新/刷机时才变 ——
-#   典型"扫一次长期有效"。存在 $LIB/.scan/（专门的缓存目录）。
+#   典型"扫一次长期有效"。存在 $STATEDIR/scan/.scan/（专门的缓存目录）。
 # ---------------------------------------------------------------------------
-_lk_dir() { printf '%s' "$LIB/.scan"; }
+_lk_dir() { printf '%s' "$STATEDIR/scan/.scan"; }
 
 _lk_key() {   # 当前状态指纹（变了就说明名单要重算）
   # ★ 2026-10-17 提速：一次 stat 拿全部 XML 的 mtime+size（原来每个文件 fork 两个进程）
@@ -1624,15 +1667,15 @@ _lk_key() {   # 当前状态指纹（变了就说明名单要重算）
 }
 
 _lk_load() {
-  # ★ 2026-10-17（作者要求）：锁屏名单优先读安装时存下的持久文件。
+  # ★ 2026-10-17（设计）：锁屏名单优先读安装时存下的持久文件。
   #   targets 的 [clock] 分区就是人工验证过的名单，安装时已经存成
   #   scanned/lockscreen.list，这里直接读，不再走"缓存 → 分区 → 扫XML"三级。
-  local _ll="${LIB:-/data/adb/custom_font_lib}/scanned/lockscreen.list"
+  local _ll="${STATEDIR}/scan/lockscreen.list"
   if [ -s "$_ll" ]; then
     _LOCK_LIST_SPACED=" $(tr '\n' ' ' < "$_ll" 2>/dev/null | tr -s ' ') "
     return 0
   fi   # 命中就 set LOCKSCREEN_CACHE 并返回 0
-  local d="$LIB/.scan" f cur
+  local d="$STATEDIR/scan/.scan" f cur
   f="$d/lockscreen.txt"
   [ -f "$f" ] || return 1
   [ -s "$d/lockscreen.key" ] || return 1
@@ -1655,14 +1698,14 @@ _lk_load() {
 }
 
 
-# ★ 2026-10-15：按**文件名**补认锁屏字体（作者真机实测出来的缺口）
+# ★ 2026-10-15：按**文件名**补认锁屏字体（开发者真机实测出来的缺口）
 #   为什么需要：`_role_set` 是按文件名判 clock 角色的（*clock*），
 #     而这份名单原来只扫 XML 的 family 名 —— 两边判据不一致，
 #     于是"只有文件、配置里没引用"的那批（真机例子：/product/fonts/MiClock.otf、
 #     MitypeClock.otf 及其 Mono 变体）进了计划却不在名单里 → 开关对它们无效。
 #   这里按文件名再扫一遍字体目录，把漏的补上。
 _lk_add_byname() {   # $1=已有名单 → 输出补全后的名单
-  # 按**文件名**补认锁屏字体（作者真机实测出来的缺口）。
+  # 按**文件名**补认锁屏字体（开发者真机实测出来的缺口）。
   #
   # 为什么需要：`_role_set` 是按**文件名**判 clock 角色的（*clock*），
   #   而这份名单原来只扫 XML 的 family 名 —— 两边判据不一致，
@@ -1696,7 +1739,7 @@ _lk_add_byname() {   # $1=已有名单 → 输出补全后的名单
 }
 
 _lk_save() {   # $1=名单内容（空 = 这台机器确实没有时钟专用字体）
-  local d="$LIB/.scan"
+  local d="$STATEDIR/scan/.scan"
   mkdir -p "$d" 2>/dev/null || return 0
   # ★ 2026-10-17：空名单也存（写 #NONE 标记）—— 见 _lk_load 里的说明。
   #   不存空的话，没时钟字体的机型每次开机都要重新遍历 XML，纯浪费。
@@ -1714,7 +1757,7 @@ _lk_save() {   # $1=名单内容（空 = 这台机器确实没有时钟专用字
 
 # ---------------------------------------------------------------------------
 _LOCK_FAM_RE='clock|lock|keyguard|watch'
-# ★ 2026-10-17 提速（作者实测 1分50秒）：
+# ★ 2026-10-17 提速（开发者实测 1分50秒）：
 #   锁屏名单**优先从 targets 的 [clock] 分区拿** —— 那是安装时就定好的，
 #   读一个文本文件即可。扫 XML（要解析十几个文件、几十 MB）降级成最后的兜底。
 slot_lockscreen_files() {
@@ -1722,7 +1765,7 @@ slot_lockscreen_files() {
     [ -n "$LOCKSCREEN_CACHE" ] && printf '%s\n' "$LOCKSCREEN_CACHE"
     return 0
   fi
-  # ★ 2026-10-15（作者的理念）：**先读磁盘缓存** —— 扫过一次就不用再遍历 XML 了。
+  # ★ 2026-10-15（开发者的理念）：**先读磁盘缓存** —— 扫过一次就不用再遍历 XML 了。
   #   命中就设好 LOCKSCREEN_CACHE / _LOCK_LIST_SPACED 并直接返回。
   if _lk_load 2>/dev/null; then
     [ -n "$LOCKSCREEN_CACHE" ] && printf '%s\n' "$LOCKSCREEN_CACHE"
@@ -1789,7 +1832,7 @@ EOF
   # ★ 再建一份"空格分隔"的副本给 _is_lockscreen 做纯 shell 匹配 —— `tr` 只跑这一次。
   #   （不给它每次现跑 `tr`：那个函数会被调用几十次，每次一个进程。）
   _LOCK_LIST_SPACED=$(printf '%s' "$LOCKSCREEN_CACHE" | tr '\n' ' ')
-    # ★ 2026-10-15（作者的理念）：**扫完就存起来** —— 以后（含重启后）直接读，不再遍历 XML。
+    # ★ 2026-10-15（开发者的理念）：**扫完就存起来** —— 以后（含重启后）直接读，不再遍历 XML。
     _lk_save "$LOCKSCREEN_CACHE" 2>/dev/null
   [ -n "$LOCKSCREEN_CACHE" ] && printf '%s\n' "$LOCKSCREEN_CACHE"
   return 0
@@ -1833,7 +1876,7 @@ _role_wanted() {
   #        （`_LOCK_LIST_SPACED`，整个名单在内存里，判定本身零进程）。
   #   为什么在意：建这份表要遍历**所有**字体配置 XML，沙箱实测 107 秒（真机几秒），
   #   而 `slot_plan` 跑在自愈路径上、有超时，不能白花这个时间。
-  # ★ 判断逻辑跟 1.2.0 **完全一致**（作者要求：跟 1.2.0 走）
+  # ★ 判断逻辑跟 1.2.0 **完全一致**（设计：跟 1.2.0 走）
   #   _is_lockscreen 内部会优先用磁盘缓存、其次 targets 的 [clock] 分区、
   #   最后才遍历 XML —— 名单来源变快了，但"哪些算锁屏字体"这个判断没变。
   if [ "$keep_lock" = 1 ] && _is_lockscreen "$name"; then
@@ -1876,10 +1919,10 @@ _role_wanted() {
 #   "设备上存在哪些字体文件"在一次运行内不会变，缓存是安全的。
 
 # ---------------------------------------------------------------------------
-# ★ 2026-10-15（作者的理念）：自适应扫描 **扫一次存起来，切换时直接读**
+# ★ 2026-10-15（开发者的理念）：自适应扫描 **扫一次存起来，切换时直接读**
 #   它扫的是"设备配置里的字体 − targets 里已知的 = 剩下没人管的"，
 #   而这三样（配置 XML / targets 清单 / 字体目录）平时都不变 ——
-#   典型"扫一次长期有效"。存 $LIB/.scan/scan.cache。
+#   典型"扫一次长期有效"。存 $STATEDIR/scan/.scan/scan.cache。
 # ---------------------------------------------------------------------------
 _sc_key() {
   # ★ 2026-10-17 提速：这个函数是"扫描缓存"的指纹，而它在 _sc_load / _sc_save
@@ -1909,7 +1952,7 @@ _sc_key() {
 }
 
 _sc_load() {   # 命中就 set SCAN_CANDS_CACHE 并返回 0
-  local d="$LIB/.scan" f="$LIB/.scan/scan.cache" cur
+  local d="$STATEDIR/scan/.scan" f="$STATEDIR/scan/.scan/scan.cache" cur
   [ -s "$f" ] || return 1
   [ -s "$d/scan.key" ] || return 1
   cur=$(_sc_key)
@@ -1919,7 +1962,7 @@ _sc_load() {   # 命中就 set SCAN_CANDS_CACHE 并返回 0
 }
 
 _sc_save() {   # $1=候选内容
-  local d="$LIB/.scan"
+  local d="$STATEDIR/scan/.scan"
   mkdir -p "$d" 2>/dev/null || return 0
   printf '%s\n' "$1" > "$d/scan.cache.tmp.$$" 2>/dev/null && \
     mv -f "$d/scan.cache.tmp.$$" "$d/scan.cache" 2>/dev/null
@@ -1936,7 +1979,7 @@ slot_scan_candidates() {
   #   而这里的旧逻辑在缓存失效时会**真的重扫四路** ——
   #   切字体/切开关都会让缓存失效，于是每次点"完整诊断"都要重扫。
   #   诊断报告是排错工具，不该为了它再扫一遍（数据早就有了）。
-  local _dl="${LIB:-/data/adb/custom_font_lib}/scanned/device.list"
+  local _dl="${STATEDIR}/scan/device.list"
   if [ -s "$_dl" ]; then
     grep -v '^[[:space:]]*$' "$_dl" 2>/dev/null
     return 0
@@ -1947,7 +1990,7 @@ slot_scan_candidates() {
     printf '%s\n' "$SCAN_CANDS_CACHE" | grep -v '^[[:space:]]*$'
     return 0
   fi
-  # ★ 2026-10-15（作者的理念）：**先读磁盘缓存** —— 扫过一次（含上次开机）就不用再扫了。
+  # ★ 2026-10-15（开发者的理念）：**先读磁盘缓存** —— 扫过一次（含上次开机）就不用再扫了。
   #   命中时 SCAN_CANDS_CACHE 已经在 _sc_load 里设好。
   if _sc_load 2>/dev/null; then
     printf '%s\n' "$SCAN_CANDS_CACHE" | grep -v '^[[:space:]]*$'
@@ -1994,7 +2037,7 @@ _scan_script_of() {
   # ★ 1.0.9.2：**先把"文件名→脚本"建成一张内存表**，之后纯内存查。
   #   原来这里是 `printf '%s\n' "$SCAN_NAMES_CACHE" | while read ...` ——
   #   每调用一次就起一个子 shell 管道、再逐行比对。而它被**每个候选各调一次**
-  #   （作者机器 75 个候选 → 75 个子 shell + 75×N 次字符串比较），
+  #   （开发者机器 75 个候选 → 75 个子 shell + 75×N 次字符串比较），
   #   在手机上这是 sec0（报告第 0 节）里最贵的一块。
   #   现在：建表只做一次（SCAN_SCRIPT_MAP，进程内缓存），查询是纯 shell 模式匹配、不起进程。
   if [ -z "${SCAN_SCRIPT_MAP+x}" ]; then
@@ -2026,7 +2069,7 @@ _role_count() {
 # ---------------------------------------------------------------------------
 # 【1.0.9 新增】解释"某个槽位为什么没进计划"（进报告第 0 节）
 #
-# 目的：让作者**只看报告**就能定位问题，不用来回问用户。
+# 目的：让开发者**只看报告**就能定位问题，不用来回问用户。
 #   以前报告只说"在/不在计划里"，看不出是"用户关了开关"还是"字体缺字形自动让路"——
 #   这两种原因的修法完全相反（一个让用户开开关，一个要让用户换字体）。
 #
@@ -2063,12 +2106,12 @@ slot_why() {   # $1=角色 $2=文件名 $3=scope $4=keep_lang $5=keep_special
   case "$script" in
     kana|hangul|hant|cjk)
       echo "自动让路：你的字体里没有「$script」这类字形，这处留给系统字体（避免方块）" ;;
-    "") echo "不在计划里（角色开关放行了，但计划里没有它 —— 请把这份报告发给作者）" ;;
+    "") echo "不在计划里（角色开关放行了，但计划里没有它 —— 请把这份报告发给开发者）" ;;
     *)  echo "不在计划里（脚本=$script）" ;;
   esac
 }
 #
-# 这是作者最需要的一段：他只有小米机器，适配别的机型全靠别人的报告。
+# 这是开发者最需要的一段：他只有小米机器，适配别的机型全靠别人的报告。
 # 以前"这台系统靠什么生效"要人肉去读第 6 节的原始 fonts.xml；现在直接列出来。
 # 输出（每行）："zh-Hans|中文简体|SysSans-Hans-Regular.ttf|在计划里/不在计划里|理由"
 # ---------------------------------------------------------------------------
@@ -2078,7 +2121,7 @@ slot_scan_report() {
   # ★★ 1.0.9.2 第三次提速（真机实测这一节 253 秒 → 目标几秒）：
   #   原因：这一节对**每个**"不替换"的字体都调一次 `slot_why`，而 slot_why 里又有
   #   `$(...)` 形式的子进程（_slot_script / _scan_script_of 各一次）。
-  #   作者机器上配置引用 279 个字体 → **500 多个进程**，每个进程在手机上要排队几十毫秒
+  #   开发者机器上配置引用 279 个字体 → **500 多个进程**，每个进程在手机上要排队几十毫秒
   #   —— 累起来就是 250 秒。
   #   现在：**整节不起任何子进程**：判定和理由全部用纯 shell 的 case 完成。
   #
@@ -2154,7 +2197,7 @@ slot_scan_report() {
         esac
         case "$_ss" in
           kana|hangul|hant|cjk) why="不在计划里（脚本=$_ss，可能是该字体没被模板覆盖到最后一步" ;;
-          "")                   why="不在计划里（角色放行了，但计划里没有它 —— 请把这份报告发给作者）" ;;
+          "")                   why="不在计划里（角色放行了，但计划里没有它 —— 请把这份报告发给开发者）" ;;
           *)                    why="不在计划里（脚本=$_ss）" ;;
         esac
       fi
@@ -2233,7 +2276,7 @@ _adaptive_role_ok() {   # $1=角色 $2=文件名
 # ---------------------------------------------------------------------------
 # 自适应补齐（只补空缺角色，绝不动模板已覆盖的）
 #
-# 设计（作者 2026-10-14 定的理念，实现必须严格照这个来）：
+# 设计（开发者 2026-10-14 定的理念，实现必须严格照这个来）：
 #   **自适应 = 扫一遍设备自己的配置 − targets 已知的 = 剩下的就是没适配的 → 模块兜住。**
 #   所以就算没主动适配过，别人也能用；报告收多了再把剩下的手工补进 targets。
 #
@@ -2321,7 +2364,7 @@ slot_dir_names() {
   #   于是装新包后槽位从 78 变成 46（少了 [clock] 那批）。
   _ver="$(stat -c '%Y' "${MODDIR:-}/slots.sh" 2>/dev/null)"
   [ -n "$_kdl" ] && _kc="$_ver|$(stat -c '%n:%Y' $_kdl 2>/dev/null | tr '\n' '|')"
-  _kd="${LIB}/.dirnames.cache"
+  _kd="${STATEDIR}/dirnames.cache"
   if [ -n "$_kc" ] && [ -s "$_kd" ]; then
     if [ "$(sed -n '1p' "$_kd" 2>/dev/null)" = "$_kc" ]; then
       sed -n '2,$p' "$_kd" 2>/dev/null
@@ -2374,13 +2417,13 @@ slot_dir_names_raw() {
   )
   printf '%s\n' "$DIR_NAMES_CACHE" | grep -v '^[[:space:]]*$'
 }
-# ★ 2026-10-17（作者要求）：**不再给 slot_candidates 套缓存层**。
+# ★ 2026-10-17（设计）：**不再给 slot_candidates 套缓存层**。
 #
 #   原来这层缓存的 key 里带 boot_id —— 重启后必然失效，等于每次开机第一次
 #   都要重算一遍，行为还难以预料（用户的原话："缓存在重启之后根本保留不住，
 #   我只相信本地存储"）。
 #
-#   而现在真正的"本地存储"是安装时扫出来的 $LIB/scanned/slots.list，
+#   而现在真正的"本地存储"是安装时扫出来的 $STATEDIR/scan/slots.list，
 #   读它本身就只有几毫秒 —— 中间再套一层缓存纯属多余。
 slot_candidates() {
   slot_candidates_raw "$@"
@@ -2390,7 +2433,7 @@ slot_candidates() {
 slot_candidates_raw() {
   # $2/$3/$4 = keep_lock / keep_lang / keep_special
   # 传给 slot_static_names —— 让 targets 的分区能按开关决定读不读，
-  # 这样"切换开关"不需要重新扫描（作者 2026-10-17 定的方向）。
+  # 这样"切换开关"不需要重新扫描（开发者 2026-10-17 定的方向）。
   local moddir="$1" _kl="${2:-0}" _klang="${3:-0}" _kspec="${4:-0}"
   local t name l d dirs
   t="${TMPDIR:-/data/local/tmp}/.cand.$$"
@@ -2399,22 +2442,22 @@ slot_candidates_raw() {
   #   加在最后，靠 sort -u 去重；角色判定仍在下游统一做
   # ★ 2026-10-16：四路**分别**落盘并打上来源标记，再合并。
   #   以前是一起管道进 sort -u —— 那一步把"这个名字是从哪来的"丢掉了，
-  #   于是界面只能显示一个总数（作者看着"170 多个槽位"不知道为什么）。
+  #   于是界面只能显示一个总数（开发者看着"170 多个槽位"不知道为什么）。
   _mj="$t.mark"
   : > "$_mj"
-  # ★ 2026-10-17（作者定的架构）：**有设备清单就直接用，什么都不扫**。
+  # ★ 2026-10-17（开发者定的架构）：**有设备清单就直接用，什么都不扫**。
   #
-  #   作者原话：「扫描是在什么时候，就是安装的时候那一次扫描，
+  #   开发者原话：「扫描是在什么时候，就是安装的时候那一次扫描，
   #             把扫描到的东西全部加进文件里永久保存，除非卸载模块」
   #
-  #   清单（$LIB/scanned/slots.list）里的格式是 `role dir name`，
+  #   清单（$STATEDIR/scan/slots.list）里的格式是 `role dir name`，
   #   跟本函数的输出格式**完全一致**，所以可以直接原样输出 ——
   #   连角色判定、目录查找都省了。
   #
   #   marks（给界面做来源统计）同时写一份：全部记成 s（机组清单）。
   #
   #   清单不存在时 slot_device_fonts 会现场扫一次并生成，之后就一直是快的。
-  local _scandir="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _scandir="${STATEDIR}/scan"
   local _uselist="$_scandir/slots.list"
   if [ ! -s "$_uselist" ]; then
     slot_build_slots "$moddir" >/dev/null 2>&1
@@ -2614,7 +2657,7 @@ theme_slots() {
   #   data/vfonts              vivo —— /system/fonts/VivoFont.ttf 就是指向这里的**符号链接**
   #   data/customizecenter/font  魅族 Flyme —— ★ 这一家是**不按名字匹配**的，见下面 datafont_any
   # ★ 2026-10-18（修「主题字体开关没反应」，真机证据）：
-  #   作者设备上 /system/fonts/MiSansVF_Overlay.ttf 是指向
+  #   开发者设备上 /system/fonts/MiSansVF_Overlay.ttf 是指向
   #     /data/system/fonts/theme_webview/Roboto-Regular.ttf
   #   的符号链接 —— 也就是说这台小米机器把"主题里选的字体"放在 theme_webview 里，
   #   而原来只扫下面三个目录，这个目录完全没扫到，
@@ -2723,7 +2766,7 @@ theme_slots() {
 
 # 生成计划到 stdout（每行 "角色 相对路径"）
 #
-# ★ 2026-10-17（作者：前提准备，后续完全无脑）：
+# ★ 2026-10-17（开发者：前提准备，后续完全无脑）：
 #   刷入时已经把 4 种开关组合的槽位清单都生成好了：
 #       slots.list            kl=0 th=0
 #       slots.kl1.list        kl=1 th=0
@@ -2734,7 +2777,7 @@ theme_slots() {
 #   跟着导入的字体变，没法预生成，用一次 awk 处理。
 slot_plan() {   # $1=moddir $2=scope $3=keep_lang $4=keep_special $5=keep_lock
   local moddir="$1" scope="${2:-all}" keep_lang="${3:-0}" keep_special="${4:-0}" keep_lock="${5:-0}"
-  local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _sd="${STATEDIR}/scan"
   local _srclist _th
 
   # theme_fonts 决定用不用"带主题字体"的那一份
@@ -2761,7 +2804,7 @@ slot_plan() {   # $1=moddir $2=scope $3=keep_lang $4=keep_special $5=keep_lock
   awk '$3 != "" { print "s " $3 }' "$_srclist" > "$moddir/.marks.$$" 2>/dev/null
 
     # ---------------------------------------------------------------------
-  # ★ 2026-10-25（作者要求）：生成计划 = 纯过滤，不再扫目录、不再 stat
+  # ★ 2026-10-25（设计）：生成计划 = 纯过滤，不再扫目录、不再 stat
   #   清单里的角色是刷入时算死的；这里只做目录过滤 + 开关过滤，全部走内存里的开关值。
   # ---------------------------------------------------------------------
   _rf_init
@@ -2771,6 +2814,11 @@ slot_plan() {   # $1=moddir $2=scope $3=keep_lang $4=keep_special $5=keep_lock
   while IFS=' ' read -r _pr _pd _pn _pl; do
     [ -n "${_pn:-}" ] || continue
     _dd="${_pd#/}"
+    # 扫描时会在 /data 槽位里看到模块自己的 payload 路径（data/adb/modules/<id>/data/...）；
+    # 还原本机 /data 目标，交给 datafont_apply 处理。
+    case "$_dd" in
+      data/adb/modules/*/data/*) _dd="data/${_dd#data/adb/modules/*/data/}" ;;
+    esac
     [ "${_RF_only_system:-0}" = 1 ] && case "$_dd" in system/fonts) ;; *) continue ;; esac
     [ "${_RF_sys_and_product:-0}" = 1 ] && case "$_dd" in system/fonts|product/fonts) ;; *) continue ;; esac
     [ "${_RF_skip_vendor_fonts:-0}" = 1 ] && case "$_dd" in vendor/*) continue ;; esac
@@ -2861,7 +2909,7 @@ slot_sources_report() {
   #     s = 本机扫描补的（targets 没覆盖、这台设备特有的）
   #     T = 总槽位
   #   targets 里的名字通常也会出现在扫描结果里，所以 x 往往是 0 —— 这是正常的。
-  local _sd="${LIB:-/data/adb/custom_font_lib}/scanned"
+  local _sd="${STATEDIR}/scan"
   local _mt="$_sd/slots.meta"
   local t=0 n=0
   [ -s "$_mt" ] && t=$(sed -n 's/^targets=//p' "$_mt" 2>/dev/null)

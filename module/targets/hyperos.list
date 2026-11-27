@@ -13,28 +13,11 @@
 # [cjk]/[kana]/[hangul] = 中文/日文/韩文
 
 [main]
-100.ttf
-200.ttf
-300.ttf
-350.ttf
-400.ttf
-500.ttf
-600.ttf
-700.ttf
-800.ttf
-900.ttf
 Coca-ColaCareFontKaiTi.TTF
 DroidSans-Bold.ttf
 DroidSans.ttf
 FZFWZhuZiAYuanJWB.TTF
-GoogleSans-Bold.ttf
 GoogleSans-Light.ttf
-GoogleSans-Medium.ttf
-GoogleSans-Regular.ttf
-GoogleSansFlex-Regular.ttf
-GoogleSansText-Bold.ttf
-GoogleSansText-Medium.ttf
-GoogleSansText-Regular.ttf
 MiSansL3.otf
 MiSansLatinVF.ttf
 MiSansOdiaVF.ttf
@@ -69,8 +52,6 @@ MiSansKannadaVF.ttf
 MiSansKhmerVF.ttf
 MiSansLaoVF.ttf
 MiSansMalayalamVF.ttf
-MiSansRCFVF.ttf
-MiHausVF.ttf
 Mitype2019-40.ttf
 [clock]
 BebasNeue-Mono.otf
@@ -135,7 +116,6 @@ SourceSansPro-Italic.ttf
 SourceSansPro-SemiBoldItalic.ttf
 
 [cjk]
-MiLanProVF.ttf
 MiSansTCVF.ttf
 
 [kana]

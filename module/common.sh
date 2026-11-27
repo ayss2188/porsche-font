@@ -3,7 +3,8 @@
 # 提供：系统识别 / 系统名称 / Root 管理器识别 / 持久化设置 / 挂载路径映射
 # 槽位发现见 slots.sh，自带挂载见 mount.sh；脚本中通过 source 引入
 
-LIB=${LIB:-/data/adb/custom_font_lib}
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
 
 # 字体库里所有"可用的字体 id"（不含扩展名）。
 # ★ 2026-10-18：抽出来是为了让 grp_load 这类"遍历字库"的地方不乱 glob ——
@@ -17,7 +18,7 @@ lib_font_ids() {
   done
 }
 
-SETTINGS="$LIB/settings.conf"
+SETTINGS="$LIBROOT/settings.conf"
 
 getp() { getprop "$1" 2>/dev/null | tr -d '\r\n'; }
 
@@ -146,7 +147,7 @@ detect_rom() {
 
   # ---- 1. 澎湃OS / HyperOS / MIUI（小米/红米/POCO）----
   #   为什么这一家要**双重证据**：类原生/移植包带着 MIUI 残留属性的情况最常见
-  #   （作者 2026-10-12 反馈的那台就是：Android 16 类原生被认成 MIUI）。
+  #   （开发者 2026-10-12 反馈的那台就是：Android 16 类原生被认成 MIUI）。
   #   强属性（ro.mi.os.version.name 等）单独不算数，必须再有"小米品牌"或"小米目录实证"。
   _prop_get ro.mi.os.version.name;          strong="$PROP_V"
   [ -n "$strong" ] || { _prop_get ro.miui.ui.version.code; strong="$PROP_V"; }
@@ -257,6 +258,8 @@ detect_rom() {
   esac
 
   # ---- 6.5 红魔 / 努比亚 / 中兴（RedMagic OS / MyOS）----
+  #   真机 REDMAGIC NX809J（Android 16，RedMagicOS11.0.22）报告：
+  #   品牌 REDMAGIC、构建号带 RedMagicOS，被旧逻辑判成 aosp（少了 40+ 个厂商槽位）。
   _prop_get ro.build.version.redmagic;      strong="$PROP_V"
   if [ -z "$strong" ]; then
     case "$vdisplay" in
@@ -269,7 +272,7 @@ detect_rom() {
   esac
   if [ -n "$strong" ] || [ -n "$weak" ]; then echo "redmagic"; return 0; fi
 
-  # ---- 7. 三星 One UI ----
+  # ---- 7. 三星 One UI（内部 id: oneui；旧版写 samsung，已兼容）----
   _prop_get ro.build.version.oneui;         strong="$PROP_V"
   [ -n "$strong" ] || { _prop_get ro.build.version.sem; strong="$PROP_V"; }
   [ -n "$strong" ] || { _prop_get ro.config.knox; strong="$PROP_V"; }
@@ -397,7 +400,7 @@ skip_count() { printf '%s' "$DIAG_SKIPS" | grep -c . 2>/dev/null; }
 # 持久化设置：保存在字体库目录，更新模块不会丢（卸载时一并删除）
 # ---------------------------------------------------------------------------
 cfg_get() {
-  # ★ 2026-10-25 提速（作者反馈：刷入/应用太慢）：
+  # ★ 2026-10-25 提速（实测：刷入/应用太慢）：
   #   原来每次调用都跑 `sed | tail | tr` 三个进程。生成计划时
   #   「每个字体 × 每个开关」会调几千次 → 光起进程就几十秒到几分钟。
   #   现在第一次把 settings.conf 整份读进内存（一次），之后纯 shell 查。
@@ -479,7 +482,7 @@ ttc_enabled() {
     # ★ 2026-10-31：slots.sh 未加载（计划缓存命中路径）时的近似判定——
     #   安装时算好的 ttc.list 非空 = 这台机器有「被中文引用的合集」，
     #   与 ttc_cn_pairs 同源同结论；只为日志/界面显示，不影响计划本身。
-    [ -s "$LIB/scanned/ttc.list" ]
+    [ -s "$STATEDIR/scan/ttc.list" ]
   fi
 }
 # 生效值（1/0），给界面和设置回显用
@@ -512,8 +515,8 @@ shutting_down() {
 # 完全没有记录 = 脚本没被执行（模块被禁用 / 安全模式 / Magisk 共存 / UAPI 不匹配…）
 # ---------------------------------------------------------------------------
 beat() {
-  local f="$LIB/boot_events.log" t tmp
-  mkdir -p "$LIB" 2>/dev/null
+  local f="$LOGDIR/boot_events.log" t tmp
+  mkdir -p "$LOGDIR" 2>/dev/null
   t=$(date +%s 2>/dev/null)
   tmp="$f.tmp.$$"
   { tail -n 40 "$f" 2>/dev/null
@@ -526,12 +529,438 @@ beat() {
 # ★ 2026-11-05（ColorOS 16 用户反馈）：把时钟数字字体换掉后，锁屏/桌面时钟排版会错位。
 #   ColorOS 的 OSans-Solid-Digits 是专门给时钟用的数字字体，宽度和间距都是按原字体调的。
 #   所以：**用户没显式改过这个开关时，ColorOS 默认保留锁屏时钟**；改过就按用户的来。
-keep_lockscreen_val() {
-  # ★ 2026-11-05（作者要求）：ColorOS 的时钟数字字体（OSans-Solid-Digits）宽度是专门调的，
-  #   换掉一定错位；所以 ColorOS 上**强制保留**，开关点了也不生效（界面会说明）。
-  #   其它系统仍按用户的开关值来。
-  case "$(tr -d '[:space:]' 2>/dev/null < "${MODDIR:-}/current_rom")" in
-    coloros) echo 1; return 0 ;;
+clock_font_of() {
+  case "${1:-}" in
+    *+*) printf '%s' "${1##*+}" ;;
+    *)   printf '%s' "${1:-}" ;;
   esac
-  cfg_get keep_lockscreen 0 2>/dev/null
+}
+
+keep_lockscreen_val() {
+  # 新语义：replace_lockscreen=1 才替换时钟；默认 0 = 保留。
+  # 只有插件存在且当前字体确实生成了时钟配套时才放行，避免插件缺失时把主字体塞进时钟槽。
+  local _sf="${SEL_FONT:-}"
+  [ "$(cfg_get replace_lockscreen 0 2>/dev/null)" = "1" ] || { echo 1; return 0; }
+  [ -x "${MODDIR:-}/engine.sh" ] || { echo 1; return 0; }
+  # status / reapply 后面不一定设置了 SEL_FONT，回退到 active/pending
+  [ -n "$_sf" ] || _sf=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font")
+  [ -n "$_sf" ] || _sf=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
+  local _ok=0 _cf _sid _base
+  _sf=$(clock_font_of "$_sf")
+  # 全新安装 / active_font 还是 none 时，实际要看 pending_font：
+  # 否则 pending 已有配套，却因为 active=none 判成 kl=1，开关被自动关掉。
+  case "$_sf" in
+    ""|none) _sf=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font") ;;
+  esac
+  _sf=$(clock_font_of "$_sf")
+  _base="${_sf%%_*}"
+  for _sid in "$_sf" "$_base"; do
+    [ -n "$_sid" ] || continue
+    for _cf in "${CLOCKDIR:-}/$_sid.clock."*.ttf; do
+      [ -s "$_cf" ] && { _ok=1; break 2; }
+    done
+  done
+  [ "$_ok" = 1 ] || { echo 1; return 0; }
+  echo 0
+}
+
+
+# ---------------------------------------------------------------------------
+# ColorOS 严格按字体内部 PostScript 名找字体：
+#   PS 名不是纯 ASCII（中文/乱码）→ 系统认不出 → 整片中文变方框
+# 这里只读 name 表 nameID=6，判断是否"纯 ASCII 可打印"。
+# 返回：0 = 合格；1 = 不合格/读不到
+# ---------------------------------------------------------------------------
+ps_name_ok() {
+  local f="$1" fo=0 nt bytes b c j tag off len cnt so tb plid nid slen soff found=0
+  [ -f "$f" ] || return 1
+  if [ "$(head -c 4 "$f" 2>/dev/null)" = ttcf ]; then
+    b=$(od -An -tu1 -j12 -N4 "$f" 2>/dev/null); set -- $b
+    [ $# -ge 4 ] || return 1
+    fo=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 ))
+    [ "$fo" -ge 12 ] 2>/dev/null || return 1
+  fi
+  b=$(od -An -tu1 -j$(( fo + 4 )) -N2 "$f" 2>/dev/null); set -- $b
+  [ $# -ge 2 ] || return 1
+  nt=$(( $1 * 256 + $2 ))
+  [ "$nt" -ge 1 ] && [ "$nt" -le 512 ] 2>/dev/null || return 1
+  bytes=$(od -An -tu1 -j"$fo" -N$(( 12 + 16 * nt )) "$f" 2>/dev/null | tr -s ' \n' ' ')
+  set -- $bytes
+  j=0; while [ "$j" -lt 12 ] && [ $# -gt 0 ]; do shift; j=$((j+1)); done
+  tag=""
+  c=0
+  while [ "$c" -lt "$nt" ] && [ $# -ge 16 ]; do
+    if [ "$1" = 110 ] && [ "$2" = 97 ] && [ "$3" = 109 ] && [ "$4" = 101 ]; then
+      shift 8
+      off=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 )); shift 4
+      len=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 ))
+      tag=name
+      break
+    fi
+    j=0; while [ "$j" -lt 16 ] && [ $# -gt 0 ]; do shift; j=$((j+1)); done
+    c=$((c+1))
+  done
+  [ "$tag" = name ] || return 1
+  b=$(od -An -tu1 -j"$off" -N6 "$f" 2>/dev/null); set -- $b
+  [ $# -ge 6 ] || return 1
+  cnt=$(( $3 * 256 + $4 ))
+  so=$(( $5 * 256 + $6 ))
+  [ "$cnt" -ge 1 ] && [ "$cnt" -le 400 ] 2>/dev/null || return 1
+  tb=$(od -An -tu1 -j$(( off + 6 )) -N$(( 12 * cnt )) "$f" 2>/dev/null | tr -s ' \n' ' ')
+  set -- $tb
+  c=0
+  while [ "$c" -lt "$cnt" ] && [ $# -ge 12 ]; do
+    plid=$(( $1 * 256 + $2 ))
+    nid=$(( $7 * 256 + $8 ))
+    slen=$(( $9 * 256 + ${10} ))
+    soff=$(( ${11} * 256 + ${12} ))
+    if [ "$nid" = 6 ] && [ "$slen" -gt 0 ] 2>/dev/null; then
+      [ "$slen" -le 256 ] 2>/dev/null || return 1
+      b=$(od -An -tu1 -j$(( off + so + soff )) -N"$slen" "$f" 2>/dev/null)
+      [ -n "$b" ] || return 1
+      case "$plid" in
+        3|0)
+          j=0
+          for v in $b; do
+            j=$((j+1))
+            if [ $(( j % 2 )) = 1 ]; then
+              [ "$v" = 0 ] || return 1
+            else
+              [ "$v" -ge 32 ] 2>/dev/null && [ "$v" -le 126 ] 2>/dev/null || return 1
+            fi
+          done
+          ;;
+        *)
+          for v in $b; do
+            [ "$v" -ge 32 ] 2>/dev/null && [ "$v" -le 126 ] 2>/dev/null || return 1
+          done
+          ;;
+      esac
+      found=1
+    fi
+    j=0; while [ "$j" -lt 12 ] && [ $# -gt 0 ]; do shift; j=$((j+1)); done
+    c=$((c+1))
+  done
+  [ "$found" = 1 ] || return 1
+  return 0
+}
+
+
+# 精确判断字体是否有 fvar 表（可变字体）
+font_has_fvar() {
+  local f="$1" b nt bytes c j
+  [ -f "$f" ] || return 1
+  b=$(od -An -tu1 -j4 -N2 "$f" 2>/dev/null); set -- $b
+  [ $# -ge 2 ] || return 1
+  nt=$(( $1 * 256 + $2 ))
+  [ "$nt" -ge 1 ] && [ "$nt" -le 512 ] 2>/dev/null || return 1
+  bytes=$(od -An -tu1 -j12 -N$(( 16 * nt )) "$f" 2>/dev/null | tr -s ' \n' ' ')
+  set -- $bytes
+  c=0
+  while [ "$c" -lt "$nt" ] && [ $# -ge 16 ]; do
+    if [ "$1" = 102 ] && [ "$2" = 118 ] && [ "$3" = 97 ] && [ "$4" = 114 ]; then
+      return 0
+    fi
+    j=0; while [ "$j" -lt 16 ] && [ $# -gt 0 ]; do shift; j=$((j+1)); done
+    c=$((c+1))
+  done
+  return 1
+}
+
+# 字体库目录布局（v2）：分类存放
+#   fonts/ builtin/ clock/ cache/ state/ backup/ work/
+#   旧布局（根目录散放）由 lib_layout_migrate 迁移；迁移期间用目录/文件链接兼容旧代码。
+# ---------------------------------------------------------------------------
+LIBROOT="${LIBROOT:-${LIB:-/data/adb/custom_font_lib}}"
+FONTDIR="${FONTDIR:-$LIBROOT/fonts}"
+BUILTINDIR="${BUILTINDIR:-$LIBROOT/builtin}"
+CLOCKDIR="${CLOCKDIR:-$LIBROOT/clock}"
+CACHEDIR="${CACHEDIR:-$LIBROOT/cache}"
+STATEDIR="${STATEDIR:-$LIBROOT/state}"
+BACKUPDIR="${BACKUPDIR:-$LIBROOT/backup}"
+WORKDIR="${WORKDIR:-$LIBROOT/work}"
+LOGDIR="${LOGDIR:-$STATEDIR/logs}"
+
+
+
+_lm_say() {
+  # 只写日志，不占安装界面；失败时再看 migrate.log
+  mkdir -p "${LOGDIR:-$LIBROOT}" 2>/dev/null
+  { echo "$(date '+%H:%M:%S' 2>/dev/null) $*"; } >> "${LOGDIR:-$LIBROOT}/migrate.log" 2>/dev/null
+}
+
+lib_layout_prepare_dirs() {
+  local d
+  for d in "$FONTDIR" "$BUILTINDIR" "$CLOCKDIR" "$CACHEDIR" "$CACHEDIR/ttc" "$CACHEDIR/plan" \
+           "$STATEDIR" "$STATEDIR/scan" "$STATEDIR/runtime" "$LOGDIR" "$BACKUPDIR" "$WORKDIR"; do
+    [ -e "$d" ] && [ ! -d "$d" ] && mv -f "$d" "$d.bak.$$" 2>/dev/null
+    mkdir -p "$d" 2>/dev/null || { _lm_say "mkdir 失败: $d"; return 1; }
+    chmod 755 "$d" 2>/dev/null
+  done
+  return 0
+}
+
+lib_layout_migrate_copy() {
+  _lm_say "开始复制迁移"
+  # 复制式迁移：旧文件原样保留，先建清单，再复制，逐个校验；全部成功才写版本号。
+  local v old new f dst _ok=0 _n=0
+  v=$(cat "$LIBROOT/.layout_version" 2>/dev/null | tr -dc '0-9')
+  [ "${v:-0}" -ge 2 ] 2>/dev/null && return 0
+  lib_layout_prepare_dirs || return 1
+  : > "$LIBROOT/.layout_manifest" 2>/dev/null
+
+  _copy_one() {   # src dst
+    local src="$1" d="$2"
+    [ -f "$src" ] || return 0
+    mkdir -p "${d%/*}" 2>/dev/null
+    if [ -f "$d" ] && cmp -s "$src" "$d" 2>/dev/null; then
+      _n=$((_n + 1))
+      printf '%s|%s|%s\n' "$d" "$src" "$(stat -c %s "$src" 2>/dev/null)" >> "$LIBROOT/.layout_manifest"
+      return 0
+    fi
+    # 同一分区优先硬链接：不额外占空间，字体库很大时不会因为剩余空间不足失败。
+    # ln 成功后 src/dst 是同一个 inode，不需要再依赖 cmp（部分机型没有 cmp）。
+    if ln -f "$src" "$d" 2>/dev/null; then
+      _n=$((_n + 1))
+      printf '%s|%s|%s\n' "$d" "$src" "$(stat -c %s "$src" 2>/dev/null)" >> "$LIBROOT/.layout_manifest"
+      return 0
+    fi
+    # 空间不足 / 不支持硬链接时，同分区直接 rename，避免 100GB 复制。
+    if mv -f "$src" "$d" 2>/dev/null; then
+      _LAYOUT_MOVED=1
+      _n=$((_n + 1))
+      printf '%s|%s|%s\n' "$d" "$src" "$(stat -c %s "$d" 2>/dev/null)" >> "$LIBROOT/.layout_manifest"
+      return 0
+    fi
+    cp -f "$src" "$d" 2>/dev/null || return 1
+    if command -v cmp >/dev/null 2>&1; then
+      cmp -s "$src" "$d" 2>/dev/null || return 1
+    else
+      [ "$(stat -c %s "$src" 2>/dev/null)" = "$(stat -c %s "$d" 2>/dev/null)" ] || return 1
+    fi
+    _n=$((_n + 1))
+    printf '%s|%s|%s\n' "$d" "$src" "$(stat -c %s "$src" 2>/dev/null)" >> "$LIBROOT/.layout_manifest"
+    return 0
+  }
+
+  _copy_tree() {  # old new
+    local src="$1" d="$2" a b
+    [ -d "$src" ] || return 0
+    mkdir -p "$d" 2>/dev/null
+    cp -al "$src/." "$d/" 2>/dev/null || cp -R "$src/." "$d/" 2>/dev/null || true
+    # 缓存/状态不是关键数据：复制失败也不阻塞布局版本，后续会重建
+    return 0
+  }
+
+  for f in "$LIBROOT"/f*.ttf "$LIBROOT"/f*.name "$LIBROOT"/f*.meta "$LIBROOT"/f*.fdata; do
+    case "${f##*/}" in *.clock.*) continue ;; esac
+    _copy_one "$f" "$FONTDIR/${f##*/}" || return 1
+  done
+  for f in "$LIBROOT"/builtin_*.ttf "$LIBROOT"/builtin_*.meta; do
+    _copy_one "$f" "$BUILTINDIR/${f##*/}" || return 1
+    _copy_one "$f" "$FONTDIR/${f##*/}" || return 1
+  done
+  for f in "$LIBROOT"/*.clock.*.ttf; do
+    _copy_one "$f" "$CLOCKDIR/${f##*/}" || return 1
+  done
+
+  for pair in ".ttc.cache:$CACHEDIR/ttc" ".plancache:$CACHEDIR/plan" \
+              "scanned:$STATEDIR/scan" ".scan:$STATEDIR/scan/.scan" \
+              ".orig:$BACKUPDIR/orig" ".work:$WORKDIR"; do
+    old=${pair%%:*}; new=${pair#*:}
+    _copy_tree "$LIBROOT/$old" "$new" || return 1
+  done
+
+  for f in ttc.log mount.log boot_events.log switch.log; do
+    _copy_one "$LIBROOT/$f" "$LOGDIR/$f" || return 1
+  done
+  # 旧版根目录 logs/ 也要并进 state/logs
+  [ -d "$LIBROOT/logs" ] && _copy_tree "$LIBROOT/logs" "$LOGDIR" >/dev/null 2>&1
+
+  _copy_tree "$LIBROOT/engine" "$STATEDIR/engine" 2>/dev/null || true
+
+  _copy_one "$LIBROOT/last_selection" "$STATEDIR/last_selection" 2>/dev/null || true
+  if [ ! -s "$STATEDIR/install_id" ]; then
+    for _iid in "$LIBROOT/.install_id" "$LIBROOT/install_id" "$LIB/.install_id" "$LIB/install_id"; do
+      [ -s "$_iid" ] || continue
+      _copy_one "$_iid" "$STATEDIR/install_id" 2>/dev/null && break
+    done
+  fi
+
+  # 根目录状态文件 -> state/（去掉前导点）；目录递归复制
+  rm -f "$LIBROOT/last_selection" 2>/dev/null
+  for f in "$LIBROOT"/.[!.]*; do
+    [ -e "$f" ] || continue
+    base=${f##*/}; base=${base#.}
+    case "$base" in
+      ttc.cache|plancache|scan|orig|work|layout_version|layout_manifest) continue ;;
+    esac
+    if [ -d "$f" ]; then
+      _copy_tree "$f" "$STATEDIR/$base" || true
+    else
+      _copy_one "$f" "$STATEDIR/$base" || true
+    fi
+  done
+
+  # 清单为空也允许（全新安装）
+  _lm_say "复制完成，写 layout_version"
+  printf '2\n' > "$LIBROOT/.layout_version" 2>/dev/null
+  return 0
+}
+
+lib_layout_rollback_new() {
+  # 已经 mv 过的字体不能再删新目录，否则会把用户字体弄丢。
+  if [ "${_LAYOUT_MOVED:-0}" = "1" ]; then
+    rm -f "$LIBROOT/.layout_version" "$LIBROOT/.layout_manifest" 2>/dev/null
+    return 0
+  fi
+  rm -rf "$FONTDIR" "$BUILTINDIR" "$CLOCKDIR" "$CACHEDIR" "$STATEDIR" "$BACKUPDIR" "$WORKDIR" 2>/dev/null
+  rm -f "$LIBROOT/.layout_version" "$LIBROOT/.layout_manifest" 2>/dev/null
+}
+
+lib_layout_verify() {
+  local n o sz cnt=0
+  [ "$(cat "$LIBROOT/.layout_version" 2>/dev/null | tr -dc '0-9')" = "2" ] || return 1
+  [ -d "$FONTDIR" ] && [ -d "$CLOCKDIR" ] && [ -d "$CACHEDIR/ttc" ] && [ -d "$STATEDIR/scan" ] || return 1
+  if [ -s "$LIBROOT/.layout_manifest" ]; then
+    while IFS='|' read -r n o sz; do
+      [ -n "$n" ] || continue
+      [ -f "$n" ] || return 1
+      if [ -n "$sz" ] && [ "$(stat -c %s "$n" 2>/dev/null)" != "$sz" ]; then return 1; fi
+      cnt=$((cnt + 1))
+    done < "$LIBROOT/.layout_manifest"
+  fi
+  [ "$cnt" -gt 0 ] || [ -d "$FONTDIR" ] || return 1
+  return 0
+}
+
+
+lib_layout_legacy_state() {
+  local f dst
+  for f in rescue_count rescue_stopped; do
+    [ -f "$LIBROOT/$f" ] || continue
+    dst="$STATEDIR/$f"
+    [ -e "$dst" ] || cp -f "$LIBROOT/$f" "$dst" 2>/dev/null
+  done
+  if [ -f "$LIBROOT/ota.log" ] && [ ! -e "$LOGDIR/ota.log" ]; then
+    cp -f "$LIBROOT/ota.log" "$LOGDIR/ota.log" 2>/dev/null
+  fi
+  return 0
+}
+
+
+lib_layout_fail_detail() {
+  local v fc bc cc mc miss=0
+  v=$(cat "$LIBROOT/.layout_version" 2>/dev/null | tr -dc '0-9')
+  fc=$(ls "$FONTDIR"/f*.ttf 2>/dev/null | wc -l | tr -d ' ')
+  bc=$(ls "$BUILTINDIR"/builtin_*.ttf 2>/dev/null | wc -l | tr -d ' ')
+  cc=$(ls "$CLOCKDIR"/*.clock.*.ttf 2>/dev/null | wc -l | tr -d ' ')
+  mc=$(grep -c . "$LIBROOT/.layout_manifest" 2>/dev/null | tr -d ' ')
+  if [ -s "$LIBROOT/.layout_manifest" ]; then
+    while IFS='|' read -r n o sz; do
+      [ -n "$n" ] && [ ! -f "$n" ] && miss=$((miss + 1))
+    done < "$LIBROOT/.layout_manifest"
+  fi
+  printf '布局版本=%s 字体=%s 内置=%s 时钟=%s 清单=%s 缺失=%s\n' \
+    "${v:-0}" "${fc:-0}" "${bc:-0}" "${cc:-0}" "${mc:-0}" "$miss"
+}
+
+
+lib_layout_prune_legacy() {
+  # 迁移前先删“可重建的大件”，避免 100GB 字体库复制时空间不足。
+  # 只删缓存/临时文件；字体、内置字体、主题原件备份不动。
+  local f id
+  rm -rf "$LIBROOT/.ttc.cache" "$LIBROOT/.plancache" "$LIBROOT/.work" 2>/dev/null
+  rm -rf "$LIBROOT"/cfs-vf-* 2>/dev/null
+  # 没有主字体的时钟配套属于孤儿
+  for f in "$LIBROOT"/*.clock.*.ttf; do
+    [ -f "$f" ] || continue
+    id=${f##*/}; id=${id%%.clock.*}
+    [ -f "$LIBROOT/$id.ttf" ] || [ -f "$LIBROOT/$id.otf" ] || rm -f "$f" 2>/dev/null
+  done
+  return 0
+}
+
+
+lib_layout_rebuild_manifest() {
+  local d f
+  : > "$LIBROOT/.layout_manifest" 2>/dev/null
+  for d in "$FONTDIR" "$BUILTINDIR" "$CLOCKDIR"; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -f "$f" ] || continue
+      printf '%s|%s|%s\n' "$f" "$f" "$(stat -c %s "$f" 2>/dev/null)" >> "$LIBROOT/.layout_manifest"
+    done
+  done
+  printf '2\n' > "$LIBROOT/.layout_version" 2>/dev/null
+  return 0
+}
+
+lib_layout_migrate() {
+  # 已经标记 layout2 但目录/清单不完整（旧测试包或上次中断）时，先撤销版本号再修复，
+  # 不能直接 abort；否则用户会卡在“检查布局…迁移失败”。
+  if [ "$(cat "$LIBROOT/.layout_version" 2>/dev/null | tr -dc '0-9')" -ge 2 ] 2>/dev/null; then
+    if lib_layout_verify; then
+      return 0
+    fi
+    rm -f "$LIBROOT/.layout_version" 2>/dev/null
+  fi
+  lib_layout_prune_legacy
+  lib_layout_migrate_copy || { lib_layout_rollback_new; return 1; }
+  if ! lib_layout_verify; then
+    # 复制完成了但清单/目录不完整：按实际新目录重建清单，再校验一次。
+    lib_layout_rebuild_manifest
+    lib_layout_verify || { lib_layout_rollback_new; return 1; }
+  fi
+  return 0
+}
+
+lib_layout_commit() {
+  if ! lib_layout_verify; then
+    # 安装过程会重建计划/TTC/日志；如果清单被这些动作带旧，按实际新目录再校验一次。
+    lib_layout_rebuild_manifest
+    if ! lib_layout_verify; then
+      _lm_say "提交校验失败，保留旧目录"
+      return 0
+    fi
+  fi
+  for f in "$LIBROOT"/f*.ttf "$LIBROOT"/f*.name "$LIBROOT"/f*.meta "$LIBROOT"/f*.fdata; do
+    [ -f "$f" ] || continue
+    case "${f##*/}" in *.clock.*) continue ;; esac
+    rm -f "$f" 2>/dev/null
+  done
+  for f in "$LIBROOT"/builtin_*.ttf "$LIBROOT"/builtin_*.meta "$LIBROOT"/*.clock.*.ttf; do
+    [ -f "$f" ] && rm -f "$f" 2>/dev/null
+  done
+  for d in .ttc.cache .plancache scanned .scan .orig .work engine logs; do
+    [ -e "$LIBROOT/$d" ] && rm -rf "$LIBROOT/$d" 2>/dev/null
+  done
+  rm -rf "$LIBROOT"/cfs-vf-* 2>/dev/null
+  for f in ttc.log mount.log boot_events.log switch.log; do
+    rm -f "$LIBROOT/$f" 2>/dev/null
+  done
+  for f in "$LIBROOT"/.[!.]*; do
+    base=${f##*/}; base=${base#.}
+    case "$base" in
+      ttc.cache|plancache|scan|orig|work|layout_version|layout_manifest|install_id) continue ;;
+    esac
+    [ -e "$STATEDIR/$base" ] && rm -rf "$f" 2>/dev/null
+  done
+  printf 'ok\n' > "$LIBROOT/.layout_committed" 2>/dev/null
+  return 0
+}
+
+lib_layout_old_version() {
+  local id old
+  id=$(sed -n 's/^id=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
+  old="/data/adb/modules/$id/module.prop"
+  [ -f "$old" ] || return 1
+  sed -n 's/^versionCode=//p' "$old" 2>/dev/null | head -n1 | tr -dc '0-9'
+}
+
+lib_layout_should_migrate() {
+  local v
+  v=$(cat "$LIBROOT/.layout_version" 2>/dev/null | tr -dc '0-9')
+  [ "${v:-0}" -ge 2 ] 2>/dev/null && return 1
+  return 0
 }

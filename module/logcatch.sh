@@ -5,15 +5,16 @@
 #   sh logcatch.sh stop      停止并导出到 Download/崩溃日志_<时间>.txt
 #   sh logcatch.sh status    看状态（on/off + 大小 + 已抓秒数）
 #   sh logcatch.sh resume    开机续抓（service.sh 调用）
-#   sh logcatch.sh upload    把最近一次导出上传给作者（走 curl，和诊断报告同一条通道）
+#   sh logcatch.sh upload    把最近一次导出上传给开发者（走 curl，和诊断报告同一条通道）
 #
 # 状态文件写在 $MODDIR/webroot/logstate.txt —— 界面用 fetch 读它（异步、不卡），
 # 不再每次轮询都调一次同步 exec。
 
 MODDIR=${0%/*}
 [ -f "$MODDIR/common.sh" ] && . "$MODDIR/common.sh"
-LIB="${LIB:-/data/adb/custom_font_lib}"
-D="$LIB/logs"
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+D="$LOGDIR"
 F="$D/catch.log"
 PIDF="$D/logcat.pid"
 ONF="$D/.on"
@@ -157,7 +158,7 @@ _do_stop() {
     tail -4000 "$F" 2>/dev/null
 
     # ---------------------------------------------------------------------
-    # ★ 2026-10-24（作者要求：要能真的定位问题）：只靠 logcat 经常定不了性，
+    # ★ 2026-10-24（设计：要能真的定位问题）：只靠 logcat 经常定不了性，
     #   这里再抓三处系统证据 —— 都是 root 可读的纯文本，直接并进同一份文件里，
     #   用户还是只要发一个 txt 就行。
     # ---------------------------------------------------------------------
@@ -212,7 +213,7 @@ _do_stop() {
       done
     fi
 
-    # ★ 2026-10-24（作者要求）：把"标签"和"tombstone 列表"也收进来，
+    # ★ 2026-10-24（设计）：把"标签"和"tombstone 列表"也收进来，
     #   这样排查只需要抓一次日志，不用再让用户敲两条命令。
     echo
     echo "---------- SELinux 标签（挂载是否继承了 system_file） ----------"
@@ -290,7 +291,7 @@ _do_stop() {
   _stamp > "$D/.laststamp.tmp" 2>/dev/null && mv -f "$D/.laststamp.tmp" "$D/.laststamp" 2>/dev/null
   echo "已生成：$OUT"
   echo "大小：${_sz:-0} 字节"
-  echo "把这个文件发出去就行（也可以在界面里点「上传给作者」）。"
+  echo "把这个文件发出去就行（也可以在界面里点「上传给开发者」）。"
 }
 
 _do_upload() {

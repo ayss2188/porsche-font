@@ -1,8 +1,21 @@
 #!/system/bin/sh
+
+MODDIR=${0%/*}
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+STATEDIR="$LIBROOT/state"
+BACKUPDIR="$LIBROOT/backup"
+CACHEDIR="$LIBROOT/cache"
+CLOCKDIR="$LIBROOT/clock"
+WORKDIR="$LIBROOT/work"
+
+# 记录本次卸载所在的 boot_id：同一开机内不允许重新安装，必须重启
+_bid_un=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+printf 'uninstall|%s\n' "${_bid_un:-unknown}" > /data/adb/cfs_uninstall_pending 2>/dev/null
 # 卸载时先把"商店缓存桥接"还原掉（否则那些缓存文件会一直显示我们的字体）
 [ -f "$MODDIR/gms_cache.sh" ] && sh "$MODDIR/gms_cache.sh" off >/dev/null 2>&1
-rm -f "$LIB/.gms_cache_on" 2>/dev/null
-rm -f "$LIB/.seen_version" 2>/dev/null   # ★ 版本标记（下次重装当首次）   # ★ 清缓存桥接启用标志
+rm -f "$STATEDIR/gms_cache_on" 2>/dev/null
+rm -f "$STATEDIR/seen_version" 2>/dev/null   # ★ 版本标记（下次重装当首次）   # ★ 清缓存桥接启用标志
 
 # 卸载模块时：恢复本模块停用过的谷歌字体组件，然后删除字体库和设置（/data/adb/custom_font_lib）。
 # 注意：更新 / 覆盖安装模块不会执行本脚本，字体库会保留；只有在管理器里点「卸载」才会清理。
@@ -23,7 +36,7 @@ rm -f "$LIB/.seen_version" 2>/dev/null   # ★ 版本标记（下次重装当首
 #
 #   模块对「设置里选的字体」那几个目录（MIUI: /data/system/theme/fonts、
 #   三星: /data/overlays/font）做的是**物理替换**（不是挂载），
-#   原件备份在 $LIB/.orig/ 里，manifest.txt 记着每个原件路径。
+#   原件备份在 $BACKUPDIR/orig/ 里，manifest.txt 记着每个原件路径。
 #
 #   而下面会
 #   而且再也自动恢复不了（真机反馈：卸载后字体改不回去、系统卡顿、只能手动救）。
@@ -31,7 +44,7 @@ rm -f "$LIB/.seen_version" 2>/dev/null   # ★ 版本标记（下次重装当首
 #   自包含实现：卸载脚本不能引用模块内其它文件（模块目录马上就没了）。
 # ---------------------------------------------------------------------------
 _restore_theme_fonts() {
-  _man="$LIB/.orig/manifest.txt"
+  _man="$BACKUPDIR/orig/manifest.txt"
   if [ ! -s "$_man" ]; then
     echo "没有主题字体备份（.orig/manifest.txt 不存在）：" > /sdcard/Download/CFS-卸载提醒.txt 2>/dev/null
     echo "如果卸载后字体还不对，请到 设置→显示→字体 选回默认，或清一次主题应用数据。" >> /sdcard/Download/CFS-卸载提醒.txt 2>/dev/null
@@ -41,46 +54,49 @@ _restore_theme_fonts() {
   while IFS= read -r _p; do
     [ -n "$_p" ] || continue
     _k=$(printf '%s' "$_p" | tr '/' '_' | tr -d ' ')
-    _bak="$LIB/.orig/$_k"
+    _bak="$BACKUPDIR/orig/$_k"
     if [ ! -f "$_p" ] || [ ! -s "$_bak" ]; then
       # 目标不存在 / 没有备份 → 记失败，别静默跳过（否则备份会被误删）
-      printf '%s\n' "$_p" >> "$LIB/.restore.failed" 2>/dev/null
+      printf '%s\n' "$_p" >> "$STATEDIR/restore.failed" 2>/dev/null
       continue
     fi
     # ★ 2026-11-06：无条件拷回（原来只比大小，同大小但内容被换过就漏了）
     if cp -f "$_bak" "$_p" 2>/dev/null; then
       _n=$((_n + 1))
     else
-      printf '%s\n' "$_p" >> "$LIB/.restore.failed" 2>/dev/null
+      printf '%s\n' "$_p" >> "$STATEDIR/restore.failed" 2>/dev/null
     fi
   done < "$_man"
-  if [ ! -s "$LIB/.restore.failed" ]; then
+  if [ ! -s "$STATEDIR/restore.failed" ]; then
     # 全部还原成功 → 备份没用了，一起删（真正卸载干净）
-    rm -rf "$LIB/.orig" 2>/dev/null
+    rm -rf "$BACKUPDIR/orig" 2>/dev/null
   fi
-  if [ -s "$LIB/.restore.failed" ]; then
+  if [ -s "$STATEDIR/restore.failed" ]; then
     {
-      echo "以下主题字体没能还原（备份还在 $LIB/.orig/）："
-      cat "$LIB/.restore.failed"
+      echo "以下主题字体没能还原（备份还在 $BACKUPDIR/orig/）："
+      cat "$STATEDIR/restore.failed"
       echo
-      echo "手动恢复：把 $LIB/.orig/ 里对应文件拷回上面的路径，或重装一次模块再卸载。"
+      echo "手动恢复：把 $BACKUPDIR/orig/ 里对应文件拷回上面的路径，或重装一次模块再卸载。"
       echo "更省事：运行 /sdcard/Download/CFS-restore-theme.sh（root 终端执行 sh 该文件）"
     } > /sdcard/Download/CFS-卸载残留提醒.txt 2>/dev/null
 
-  if [ -s "$LIB/.restore.failed" ]; then
+  if [ -s "$STATEDIR/restore.failed" ]; then
     # ★ 2026-11-06：给用户留一个「一键恢复」脚本（模块卸载后也能跑）
-    _fx="$LIB/restore-theme.sh"
+    _fx="$LIBROOT/restore-theme.sh"
     {
       echo '#!/system/bin/sh'
       echo '# CFS restore-theme（模块已卸载也能用；需要 root）'
-      echo 'LIB=/data/adb/custom_font_lib'
-      echo 'MAN="$LIB/.orig/manifest.txt"'
+      echo 'LIBROOT=/data/adb/custom_font_lib'
+echo 'LIB="$LIBROOT/fonts"'
+echo 'BACKUPDIR="$LIBROOT/backup"'
+echo 'STATEDIR="$LIBROOT/state"'
+      echo 'MAN="$BACKUPDIR/orig/manifest.txt"'
       echo '[ -s "$MAN" ] || { echo "没有找到备份（$MAN）"; exit 1; }'
       echo 'n=0; f=0'
       echo 'while IFS= read -r p; do'
       echo '  [ -n "$p" ] || continue'
       echo '  k=$(printf "%s" "$p" | tr "/" "_" | tr -d " ")'
-      echo '  b="$LIB/.orig/$k"'
+      echo '  b="$BACKUPDIR/orig/$k"'
       echo '  [ -s "$b" ] || continue'
       echo '  if cp -f "$b" "$p" 2>/dev/null; then n=$((n+1)); else f=$((f+1)); echo "失败: $p" >> /sdcard/Download/CFS-恢复结果.txt; fi'
       echo 'done < "$MAN"'
@@ -88,9 +104,9 @@ _restore_theme_fonts() {
       echo 'echo "已恢复 $n 个，失败 $f 个" >> /sdcard/Download/CFS-恢复结果.txt'
       echo 'if [ "$f" = 0 ]; then'
       echo '  echo "全部恢复成功，正在清理备份与提示文件…"'
-      echo '  rm -rf "$LIB/.orig" "$LIB/.restore.failed" "$LIB/restore-theme.sh" 2>/dev/null'
+      echo '  rm -rf "$BACKUPDIR/orig" "$STATEDIR/restore.failed" "$LIBROOT/restore-theme.sh" 2>/dev/null'
       echo '  rm -f /sdcard/Download/CFS-restore-theme.sh /sdcard/Download/CFS-卸载残留提醒.txt /sdcard/Download/CFS-卸载提醒.txt 2>/dev/null'
-      echo '  rmdir "$LIB" 2>/dev/null'
+      echo '  rmdir "$LIBROOT" 2>/dev/null'
       echo 'else'
       echo '  echo "还有 $f 个没恢复：备份和本脚本会保留，可以再跑一次。"'
       echo 'fi'
@@ -107,31 +123,33 @@ _restore_theme_fonts() {
 rm -f "$MODDIR/webroot/bg.jpg" "$MODDIR/webroot/bg.b64" 2>/dev/null
 
 # ★ 2026-10-26 卸载：壁纸存在用户数据目录，无条件物理删除
-rm -f "$LIB/bg.jpg" "$LIB/bg.b64" 2>/dev/null
+rm -f "$LIBROOT/bg.jpg" "$LIBROOT/bg.b64" 2>/dev/null
 
-LIB=/data/adb/custom_font_lib
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
 
 # ★ 2026-11-06：卸载时**保留 .orig 备份**（主题字体原件），只清其它文件。
 #   原因：用户卸载后想恢复主题字体，只能靠这份备份；以前整个 LIB 被删，
 #   重装也救不回来。备份不大（只含被物理替换过的那几个主题字体）。
 _clean_lib() {
-  [ -d "$LIB" ] || return 0
-  # 有还原失败 → 保留 .orig / 失败清单；全部成功 → 全删（不留任何残留）
+  [ -d "$LIBROOT" ] || return 0
+  # 有还原失败 → 只保留 backup/还原脚本/失败清单；全部成功 → 整个字库根目录删掉
   _keep_bak=0
-  [ -s "$LIB/.restore.failed" ] && _keep_bak=1
-  for _e in "$LIB"/* "$LIB"/.[!.]*; do
+  [ -s "$STATEDIR/restore.failed" ] && _keep_bak=1
+  if [ "$_keep_bak" = 0 ]; then
+    rm -rf "$LIBROOT" 2>/dev/null
+    return 0
+  fi
+  for _e in "$LIBROOT"/* "$LIBROOT"/.[!.]*; do
     [ -e "$_e" ] || continue
-    if [ "$_keep_bak" = 1 ]; then
-      case "${_e##*/}" in
-        .orig|.restore.failed|CFS-卸载残留提醒.txt|restore-theme.sh) continue ;;
-      esac
-    fi
+    case "${_e##*/}" in
+      backup|restore-theme.sh|.layout_version|.layout_manifest|.layout_committed) continue ;;
+      state)
+        find "$_e" -mindepth 1 -maxdepth 1 ! -name 'restore.failed' -exec rm -rf {} + 2>/dev/null
+        continue ;;
+    esac
     rm -rf "$_e" 2>/dev/null
   done
-  # 全部还原成功：连目录本身也删掉
-  if [ "$_keep_bak" = 0 ]; then
-    rmdir "$LIB" 2>/dev/null
-  fi
   return 0
 }
 
@@ -151,27 +169,27 @@ _clean_lib() {
 #   规则：只要还有别的字体模块处于"已安装且未被卸载"状态，就保留字库。
 # ---------------------------------------------------------------------------
 _other_module_present() {
-  for _d in /data/adb/modules/custom_font_switcher /data/adb/modules/porsche_font_multi \
-            /data/adb/modules/porsche_font_718 /data/adb/modules/porsche_font_911 \
-            /data/adb/modules/porsche_font_gt3 \
-            /data/adb/modules_update/custom_font_switcher /data/adb/modules_update/porsche_font_multi \
-            /data/adb/modules_update/porsche_font_718 /data/adb/modules_update/porsche_font_911 \
-            /data/adb/modules_update/porsche_font_gt3; do
-    [ -d "$_d" ] || continue
-    [ -f "$_d/remove" ] && continue
-    return 0
+  _self="${MODDIR##*/}"
+  for _root in /data/adb/modules /data/adb/modules_update; do
+    [ -d "$_root" ] || continue
+    for _d in "$_root"/custom_font_switcher "$_root"/porsche_font_*; do
+      [ -d "$_d" ] || continue
+      [ "${_d##*/}" = "$_self" ] && continue
+      [ -f "$_d/remove" ] && continue
+      return 0
+    done
   done
   return 1
 }
 
 _umount_ours() {
   _n=0
-  [ -f "$LIB/.mounted" ] && {
+  [ -f "$STATEDIR/mounted" ] && {
     while IFS= read -r _d; do
       [ -n "$_d" ] || continue
       umount -l "$_d" 2>/dev/null && _n=$((_n+1)) && continue
       umount "$_d" 2>/dev/null && _n=$((_n+1))
-    done < "$LIB/.mounted"
+    done < "$STATEDIR/mounted"
   }
   # 兜底：把源在我们的字体库上的挂载全部摘掉（账本可能不全）
   if [ -r /proc/mounts ]; then
@@ -199,7 +217,7 @@ _clean_tmp() {
   #   正常路径它们随 $LIB 整体删除（都在 $LIB 内）；这里是显式兜底。
   #   ⚠ 只在"没有其它字体模块共存"时才删 —— 兄弟模块（主/子项目）共用字库与缓存，
   #   卸载其中一个时绝不能把另一个的缓存端掉。
-  _other_module_present || rm -rf "$LIB/.plancache" "$LIB/.ttc.cache" 2>/dev/null
+  _other_module_present || rm -rf "$CACHEDIR/plan" "$CACHEDIR/ttc" 2>/dev/null
   return 0
 }
 
@@ -211,8 +229,8 @@ _umount_ours
 
 # ★ 卸载就是"模块要没了"，主题字体的原件该还回去（详见上面函数说明）
 _restore_theme_fonts
-JOURNAL="$LIB/.gms_journal.conf"
-LEGACY="$LIB/.gms_owned"
+JOURNAL="$STATEDIR/gms_journal.conf"
+LEGACY="$STATEDIR/gms_owned"
 C="com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider"
 NOTE="/data/media/0/Download/谷歌兼容未恢复-请看这里.txt"
 
@@ -261,7 +279,7 @@ if [ -f "$JOURNAL" ] || [ -f "$LEGACY" ]; then
 
     if [ "$ok" = 1 ]; then
       rm -f "$JOURNAL" "$LEGACY" 2>/dev/null
-      if _other_module_present; then echo "[cfs] 检测到还有其它字体模块，保留字库 $LIB" >> "$LIB/.uninstall.log" 2>/dev/null; else [ -f "$LIB/.restore.failed" ] || _clean_lib; fi
+      if _other_module_present; then echo "[cfs] 检测到还有其它字体模块，保留字库 $LIB" >> "$STATEDIR/uninstall.log" 2>/dev/null; else [ -f "$STATEDIR/restore.failed" ] || _clean_lib; fi
     else
       # 失败：把恢复记录单独留下（重装模块后会自动重试），其余字体库照常清掉
       mkdir -p "$LIB" 2>/dev/null
@@ -295,13 +313,13 @@ else
   if [ -d /data/adb/modules_update/custom_font_switcher ]      && [ ! -f /data/adb/modules_update/custom_font_switcher/remove ]; then
     _reinstalled=1
   fi
-  [ "$_reinstalled" = "1" ] || if _other_module_present; then echo "[cfs] 检测到还有其它字体模块，保留字库 $LIB" >> "$LIB/.uninstall.log" 2>/dev/null; else [ -f "$LIB/.restore.failed" ] || _clean_lib; fi
+  [ "$_reinstalled" = "1" ] || if _other_module_present; then echo "[cfs] 检测到还有其它字体模块，保留字库 $LIB" >> "$STATEDIR/uninstall.log" 2>/dev/null; else [ -f "$STATEDIR/restore.failed" ] || _clean_lib; fi
 fi
 
 # ---------------------------------------------------------------------------
 # 自检：确认字体库真的删干净了
 #
-# ★ 2026-10-18（作者问「多了几个目录，卸载删干净了吗」）：
+# ★ 2026-10-18（注意「多了几个目录，卸载删干净了吗」）：
 #   这一版在 $LIB 下新增了这些（都随 `
 #       scanned/       刷入时扫一次的清单（device.list / slots.*.list / ttc.list /
 #                      lockscreen.list / env.list / slots.meta / device.all）
@@ -325,7 +343,7 @@ _need_check=1
 if [ "$_need_check" = "1" ] && [ -e "$LIB" ]; then
   _left=$(find "$LIB" -mindepth 1 2>/dev/null | head -n 20)
   if [ -n "$_left" ]; then
-    if _other_module_present; then echo "[cfs] 检测到还有其它字体模块，保留字库 $LIB" >> "$LIB/.uninstall.log" 2>/dev/null; else [ -f "$LIB/.restore.failed" ] || _clean_lib; fi 2>/dev/null
+    if _other_module_present; then echo "[cfs] 检测到还有其它字体模块，保留字库 $LIB" >> "$STATEDIR/uninstall.log" 2>/dev/null; else [ -f "$STATEDIR/restore.failed" ] || _clean_lib; fi 2>/dev/null
   fi
 fi
 if [ "$_need_check" = "1" ] && [ -e "$LIB" ]; then

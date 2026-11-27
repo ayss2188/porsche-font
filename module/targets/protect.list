@@ -23,3 +23,13 @@ RobotoFlex-Regular.ttf
 SamsungColorEmoji.ttf
 NotoSansSymbols-Regular-Subsetted2.ttf
 NotoSansSymbols-Regular-Subsetted.ttf
+HONORSansVFCN.ttf
+HONORSansVFItalic.ttf
+HONORSansVFNormal.ttf
+HONORSansVFTC.ttf
+# HyperOS 4 新增的特定文字 VF：用户字体通常没有这些字形，避免变方框
+MiSansMyanmarVF.ttf
+MiSansTamilVF.ttf
+MiSansTeluguVF.ttf
+MiSansThaiVF.ttf
+MiSansTibetanVF.ttf

@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 诊断脚本构建戳（报告头部会写出来，便于分辨装的是哪一版）
-DIAG_BUILD="2026-10-23.19"
+DIAG_BUILD="2026-11-27.1"
 # diag.sh - 一键体检
 #
 # 目的：把「重启了也不生效 / 字体没变化」的可能原因一次跑完，并给出大白话结论。
@@ -17,7 +17,7 @@ DIAG_BUILD="2026-10-23.19"
 #   sh diag.sh install   生成完整报告并写入 Download，同时打印结论（「操作」按钮用）
 #   sh diag.sh save      生成完整报告并写入 Download，只输出 OK:<路径>
 #   sh diag.sh bg [force]         后台生成（WebUI 用；force = 强制重来）
-# ★ 1.0.9 起**只有一种口径 = 完整报告**：「快速体检」已删除（作者只有小米机器，
+# ★ 1.0.9 起**只有一种口径 = 完整报告**：「快速体检」已删除（开发者只有小米机器，
 #   适配别的机型完全靠别人发的报告，半份报告不够定位问题）。
 #   sh diag.sh state     输出状态文件内容（写着 running 但进程已死/心跳停了会明确报出来）
 #   sh diag.sh text      输出上一次生成好的报告正文（小文件用）
@@ -55,8 +55,9 @@ unset _df
 # ttcwrap.sh 是可选的（只影响 .ttc 合集那一块）；缺了不能把整个诊断带走
 [ -f "$MODDIR/ttcwrap.sh" ] && . "$MODDIR/ttcwrap.sh"
 
-LIB=${LIB:-/data/adb/custom_font_lib}
-SETTINGS=${SETTINGS:-$LIB/settings.conf}
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+SETTINGS=${SETTINGS:-$LIBROOT/settings.conf}
 
 ID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
 [ -n "$ID" ] || ID=custom_font_switcher
@@ -93,7 +94,7 @@ done
 [ "${CFS_DIAG_FULLSPEED:-0}" = 1 ] && DIAG_SPEED=full
 export DIAG_SPEED
 # 1.0.9：**只有一种口径 = 完整报告**。"快速体检"已删除 ——
-#   作者只有小米机器，适配别的机型完全靠别人发的报告，半份报告不够定位问题。
+#   开发者只有小米机器，适配别的机型完全靠别人发的报告，半份报告不够定位问题。
 # 指纹（1.0.9.2）：改用**稀疏指纹** —— 大小 + 修改时间 + 头尾各 64KB 的 sha256。
 #   目的只是判断"这个槽位的字体有没有被换过"（内容变没变），不是加密校验。
 #   1.0.9.1 的全量 sha256 在真机上让第 6 步花了 391 秒（字体目录约 700MB），现在降到十几秒。
@@ -119,8 +120,8 @@ WEB_PART="$WEB/part.txt"        # 正在生成的内容（只镜像开头一段�
 WEB_HEAD="$WEB/head.txt"        # 生成完成后报告的预览（只镜像开头一段）
 WEB_META="$WEB/meta.txt"        # 报告体积等信息
 PART_MIRROR_BYTES=40000         # 镜像/预览只取开头这么多字节（textarea 塞太多会卡死 WebView）
-MT_LOCK="$LIB/.mt.lock"
-TIMING="$LIB/.diag.timing"
+MT_LOCK="$STATEDIR/mt.lock"
+TIMING="$STATEDIR/diag.timing"
 
 # ---------------------------------------------------------------------------
 # 小工具
@@ -437,7 +438,7 @@ HASH_KEY=""; HASH_MAP=""
 # 单个文件的指纹（1.0.9.2 起：**稀疏指纹**，不再全量读盘）
 #
 # 为什么改（真机实测数据）：
-#   截至 1.0.9.1 这里用 `sha256sum` 全量读文件。作者机器上字体目录里躺着
+#   截至 1.0.9.1 这里用 `sha256sum` 全量读文件。开发者机器上字体目录里躺着
 #   63 个 44.8MB 的大文件（去重后仍有约 700MB），全量 sha256 让"第 6 步"花了 **391 秒**。
 #   而这一步的**唯一目的**是回答"这个槽位的字体有没有被换过"——
 #   也就是"内容有没有变"，不是做加密校验、也不是防碰撞。
@@ -457,7 +458,7 @@ HASH_KEY=""; HASH_MAP=""
 #   所以用「路径+大小+修改时间」作为键做缓存，命中就直接复用。
 #   缓存是**可丢弃的加速层**：删掉它只会让下次慢一点，不影响任何结论。
 # ---------------------------------------------------------------------------
-FP_CACHE_FILE="$LIB/.fp.cache"
+FP_CACHE_FILE="$STATEDIR/fp.cache"
 FP_CACHE=""
 FP_CACHE_SP=""
 FP_TAB='	'          # 直接写字面 Tab：$(printf '\\t') 在部分设备上会返回空
@@ -555,7 +556,7 @@ fp_cache_put() {   # $1=路径 $2=大小 $3=mtime $4=hash
 #     · 有任何一条对不上 → 清空缓存并写进报告（说明这次数据不可信）
 #   统计口径也一起暴露：新算多少、复用多少。
 # ---------------------------------------------------------------------------
-FP_STAT_FILE="$LIB/.fp.stat.$$"
+FP_STAT_FILE="$STATEDIR/fp.stat.$$"
 : > "$FP_STAT_FILE" 2>/dev/null
 FP_STAT_NEW=0
 FP_STAT_HIT=0
@@ -656,7 +657,7 @@ fp_cache_compact_if_big() {
 
 fp_of() {
   local f="$1" sz mt
-  # ★ 2026-11-06（作者要求：报告要快，哈希没用）：
+  # ★ 2026-11-06（设计：报告要快，哈希没用）：
   #   指纹改成「大小 + 修改时间」，不再读头尾 64KB 算 sha256。
   #   报告里每个字体仍有：大小、修改时间、魔数、表标签、是否可变、字形数…
   #   只是不再提供“内容级哈希”。这样几百个字体省掉几百次 sha256。
@@ -828,7 +829,7 @@ MS_FAIL=$(sed -n 's/^fail=//p' "$M/mount.state" 2>/dev/null)
 MS_SKIP=$(sed -n 's/^skip=//p' "$M/mount.state" 2>/dev/null)
 MS_SAME=$(sed -n 's/^same=//p' "$M/mount.state" 2>/dev/null)
 MS_STAGE=$(sed -n 's/^stage=//p' "$M/mount.state" 2>/dev/null)
-BEAT="$LIB/boot_events.log"
+BEAT="$LOGDIR/boot_events.log"
 MODE_FILE=$(tr -d '[:space:]' < "$M/payload.mode" 2>/dev/null)
 
 PFD_THIS=0
@@ -882,7 +883,7 @@ TTC_ON=$(ttc_effective 2>/dev/null); [ -n "$TTC_ON" ] || TTC_ON=0
 #   刷入时已经把结论算好了：scanned/ttc.list 就是中文 TTC 的 (目录, 文件名) 清单。
 #   有缓存就用缓存；没有（老版本装的、或清单缺失）才退回读 XML。
 ZH_TTC=0
-_TTL="${LIB:-/data/adb/custom_font_lib}/scanned/ttc.list"
+_TTL="${STATEDIR}/scan/ttc.list"
 if [ -f "$_TTL" ]; then
   # 文件存在就够了：ttc.list 只装"中文 TTC"，空文件表示这台设备没有
   [ -s "$_TTL" ] && ZH_TTC=1
@@ -967,7 +968,7 @@ fi
 SEL_FONT="$PEND"; export CJK_GUARD SEL_FONT
 _ct0=$(now_s)    # 分段计时：C4 算槽位计划
 subnote "计算槽位计划"
-# ★ 2026-10-18（诊断报告提速，作者要求「既要详细又要快」）：
+# ★ 2026-10-18（诊断报告提速，设计「既要详细又要快」）：
 #   原来这里是 300 项 × 2 次的纯 shell 循环去调 _role_wanted，实测被调 **606 次**，
 #   完整报告 19964 条命令里光这一项就占 600 条。
 #   而且它甚至没看 keep_lockscreen（参数顺序把 kl 当 keep_lang 传了），
@@ -1196,13 +1197,13 @@ printf '%s\n' "$VDIR_TABLE" | while IFS='|' read -r _lbl _dir; do
     *)          _tag="未覆盖" ;;
   esac
   printf '%s\n' "    [$_tag] $_lbl  $_dir  —— $_n 个字体（普通文件 $_rg / 链接 $_ln）"
-done > "$LIB/.vdir.tmp.$$" 2>/dev/null
-if [ -s "$LIB/.vdir.tmp.$$" ]; then
-  VDIR_REPORT=$(cat "$LIB/.vdir.tmp.$$" 2>/dev/null)
+done > "$STATEDIR/vdir.tmp.$$" 2>/dev/null
+if [ -s "$STATEDIR/vdir.tmp.$$" ]; then
+  VDIR_REPORT=$(cat "$STATEDIR/vdir.tmp.$$" 2>/dev/null)
   VDIR_UNCOVERED=$(printf '%s\n' "$VDIR_REPORT" | grep -c '\[未覆盖\]' 2>/dev/null)
   [ -n "$VDIR_UNCOVERED" ] || VDIR_UNCOVERED=0
 fi
-rm -f "$LIB/.vdir.tmp.$$" 2>/dev/null
+rm -f "$STATEDIR/vdir.tmp.$$" 2>/dev/null
 
 # MIUI / HyperOS 个性字体（主题字体）：由主题机制接管，优先级高于 /system/fonts，
 # 同名文件会顶替系统字体 —— 这就是"旧版必须手动切一次字体才生效"的根源。
@@ -1423,7 +1424,7 @@ AS_KREL=""; AS_FEATURE=""; AS_FEATURE_HINT=""; AS_DOTUM=""; AS_METAUM=""
 # 关键文件完整性：缺哪个就列出来。
 #   缺 common/slots/mount = 整个模块不可用（fontctl.sh 会明确报错退出）；
 #   缺 ttcwrap.sh = 只是"合集替换"不可用 —— 但现象是"开关亮着、中文没变"，
-#   所以必须在报告里点名，否则作者和用户都会往挂载上找。
+#   所以必须在报告里点名，否则开发者和用户都会往挂载上找。
 # 用法：modfiles_check <目录>（输出"（齐全）"或" 缺xxx 缺yyy"）
 modfiles_check() {
   local _d="$1" _f _miss=""
@@ -1462,7 +1463,7 @@ app_side_probe() {
   if [ "$_asmaj" -gt 5 ] || { [ "$_asmaj" -eq 5 ] && [ "$_asmin" -ge 10 ]; }; then
     [ "$RM" = ksu ] && AS_RISK=1
   fi
-  # 管理器侧"卸载模块"的现场：原样列出（不猜文件格式，作者一眼就能看懂）
+  # 管理器侧"卸载模块"的现场：原样列出（不猜文件格式，开发者一眼就能看懂）
   if [ -f /data/adb/ksu/.feature_config ]; then
     # ★ 2026-10-15：这个文件里那一行就是**全局一次搞定**的开关 ——
     #   `kernel_umount=0` 一写，所有 App 都不再被卸载模块（不用逐个 App 点）。
@@ -1504,7 +1505,7 @@ app_side_probe() {
   # 用 /proc/* 而不是 /proc/[0-9]*：文件名通配里的方括号不是所有 sh 都支持
   # （busybox-w32 就不支持，沙盒测试会走到字面量上），数字判断交给 case。
   # ★ 1.0.9.2 定稿：**加 12 秒硬上限 + 修一个统计 bug**。
-  #   为什么又加上限：作者实测"第 1 步要 5 分钟"，而唯一"进程越多越慢"的地方就是这里 ——
+  #   为什么又加上限：开发者实测"第 1 步要 5 分钟"，而唯一"进程越多越慢"的地方就是这里 ——
   #   真机 /proc 有一两千个条目，要**逐个**读 status 才能找到 uid 10000~19999 的普通 App。
   #   而它的目的只是"抽样 3 个 App 看看能不能看到挂载"：抽 1 个和抽 3 个结论一样，
   #   **不值得为它等几分钟**。超时会写进报告开头的「完整性声明」，不会静默。
@@ -1632,15 +1633,15 @@ if [ -f "$MODDIR/google_font.sh" ]; then
   timing_add 'C6 应用侧可见性' "$_ct0"
   _ct0=$(now_s)    # 分段计时：C7 谷歌字体兼容
   subnote "检查谷歌字体兼容状态"
-  # ★★ 1.0.9.2：**这一节的重活全部删掉了**（作者实测"第一步的谷歌那里最慢"）。
+  # ★★ 1.0.9.2：**这一节的重活全部删掉了**（开发者实测"第一步的谷歌那里最慢"）。
   #   删掉了什么、为什么：
   #     · `google_font.sh status fresh` —— 内部跑 `dumpsys package com.google.android.gms`，
-  #       在 Android 17 / HyperOS 上要**几分钟**（作者机器实测）。报告不需要实时值。
+  #       在 Android 17 / HyperOS 上要**几分钟**（开发者机器实测）。报告不需要实时值。
   #     · `google_font.sh diag` —— 要 find GMS 字体缓存目录并对每个文件查账本+挂载，
   #       商店下过字体时是几百次 I/O。
   #   这两个"现场明细"对**判断字体为什么没换**几乎没有帮助（字体没换的原因在第 0/6 节），
   #   却能把报告拖到半小时。所以报告里改成**只读一个本地小文件**（毫秒级、零进程）：
-  #     $LIB/.gms_status   —— 由"开启/关闭兼容"和界面的「重新检测」按钮维护
+  #     $STATEDIR/gms_status   —— 由"开启/关闭兼容"和界面的「重新检测」按钮维护
   #   要看实时状态，界面上的「重新检测」按钮照旧走完整检测（那条路没动）。
   # 【1.0.9.2 定稿】内容与 1.0.9.1 完全一致，只是每一步都限时：
   #   实测这两条在你机器上各只要 0~1 秒，所以限时根本不影响结果 ——
@@ -1663,7 +1664,7 @@ if [ -f "$MODDIR/google_font.sh" ]; then
   [ -z "$GF_DIAG" ] && skip_note "谷歌字体兼容现场明细" "扫描超时（20 秒）或没取到" "稍后重新生成一次报告"
 fi
 case "$GF_STATE" in on|off|foreign|unknown|nogms) ;; *) GF_STATE=unknown ;; esac
-[ -f "$LIB/.gms_journal.conf" ] && GF_OWNED=1
+[ -f "$STATEDIR/gms_journal.conf" ] && GF_OWNED=1
 # 有我们的记录、但组件已经不是"停用"了 = 被 GMS 更新顶回去了（用户看到的就是"又变回谷歌字体"）
 [ "$GF_OWNED" = 1 ] && [ "$GF_STATE" = off ] && GF_RESET=1
 }    # collect() 到此结束：这些采集只允许在真正生成报告时跑（见 collect_once）
@@ -1671,11 +1672,11 @@ case "$GF_STATE" in on|off|foreign|unknown|nogms) ;; *) GF_STATE=unknown ;; esac
 # ===========================================================================
 # 【1.0.9.2 新增】批量采集 + 两节新报告内容
 #
-# 为什么加这个（作者要求）：
-#   诊断报告只有一个用途 —— 用户说"没全局生效" → 他传一份报告 → 作者照它修/加适配。
+# 为什么加这个（设计）：
+#   诊断报告只有一个用途 —— 用户说"没全局生效" → 他传一份报告 → 开发者照它修/加适配。
 #   所以报告必须能回答两件事：
 #     ① 这台系统"靠什么生效"（哪种语言 → 哪个字体文件）
-#     ② 哪些字体**没被适配清单覆盖**（作者据此加进 targets/*.list）
+#     ② 哪些字体**没被适配清单覆盖**（开发者据此加进 targets/*.list）
 #
 # 为什么快：
 #   旧写法对每个文件起一次进程（stat/grep/awk），293 个文件就是上千个进程。
@@ -1690,7 +1691,7 @@ case "$GF_STATE" in on|off|foreign|unknown|nogms) ;; *) GF_STATE=unknown ;; esac
 D2_TMP=""
 d2_init_tmp() {
   D2_TMP="${TMPDIR:-/data/local/tmp}/.diag2.$$"
-  mkdir -p "$D2_TMP" 2>/dev/null || D2_TMP="$LIB/.diag2.$$"
+  mkdir -p "$D2_TMP" 2>/dev/null || D2_TMP="$STATEDIR/diag2.$$"
   mkdir -p "$D2_TMP" 2>/dev/null
   return 0
 }
@@ -1799,9 +1800,9 @@ d2_build_lookup() {
   D2_EXIST_NAMES=$(
     awk -F'\t' '{ printf "|%s|", $1 }' "$D2_TMP/fontfiles" 2>/dev/null
   )
-  # ★★ 1.0.9.2 真机修（作者机器报告："设备上字体 24 个 / 查了 0 个"）：
+  # ★★ 1.0.9.2 真机修（开发者机器报告："设备上字体 24 个 / 查了 0 个"）：
   #   「设备上存在的字体」这张表是**直接从字体目录 glob 出来**的，不用 fontfiles 那张表 ——
-  #   因为 fontfiles 是解析 `ls -l` 出来的，在真机上只装进了一部分（作者机器 293 个里只进 24 个），
+  #   因为 fontfiles 是解析 `ls -l` 出来的，在真机上只装进了一部分（开发者机器 293 个里只进 24 个），
   #   导致后面所有比对都落空、【5】输出"查了 0 个"。
   #   直接 glob 既准确又便宜（每个目录一次 ls），而且**和 fontfiles 那个环节解耦** ——
   #   以后 fontfiles 就算出问题，也不会再把【5】整节带塌。
@@ -1874,7 +1875,7 @@ sec_adapted() {
 }
 
 # ---------------------------------------------------------------------------
-# 【5】★ 没适配的字体 —— 作者据此修适配
+# 【5】★ 没适配的字体 —— 开发者据此修适配
 #
 # 判据为什么这样定（1.0.9.2 真机报告后修正）：
 #   第一版判据是"在不在 targets/*.list 里"，结果在真机上输出"没有没适配的" ——
@@ -1883,16 +1884,16 @@ sec_adapted() {
 #   真正的门槛是"角色判定 + 计划"。
 #
 #   所以现在按"真正会不会被换"分类，并且把**本该换却没进计划**的单独标出来 ——
-#   那才是作者要修的东西。其它文字的字体（阿拉伯文/梵文/楔形文字…）被排除是**正确行为**，
+#   那才是开发者要修的东西。其它文字的字体（阿拉伯文/梵文/楔形文字…）被排除是**正确行为**，
 #   不能混进来当"没适配"，否则这份清单会被几百个无关字体淹没。
 # ---------------------------------------------------------------------------
 sec_unadapted() {
   echo
   echo "【摘要5】★ 没被替换的字体（配置引用了，但本次不会换）"
   hr
-  echo "  给作者看的：这台设备上**真实存在、且被字体配置引用**、但**本次计划里没有**的字体。"
+  echo "  给开发者看的：这台设备上**真实存在、且被字体配置引用**、但**本次计划里没有**的字体。"
   echo "  已按「该不该换」分成两类，看第一类就行："
-  echo "    [★要修]   = 本该参与替换（主字体/拉丁/中文/日韩），却没进计划 → **作者要修的**"
+  echo "    [★要修]   = 本该参与替换（主字体/拉丁/中文/日韩），却没进计划 → **开发者要修的**"
   echo "    [正常排除] = 其它文字体系（阿拉伯文、梵文、楔形文字…）或符号/emoji → 换了反而出问题"
   echo
   [ -d "${D2_TMP:-/nonexistent}" ] || { echo "  （临时目录不可用，跳过这一节 —— 不影响其它节）"; hr; return 0; }
@@ -1924,7 +1925,7 @@ sec_unadapted() {
   _un=0; _nx=0; _nref=0; _nplan=0
   while IFS='	' read -r _lg _fl; do
     [ -n "$_fl" ] || continue
-    # 这一层是"设备上真有这个文件吗"的**辅助过滤**（作者机器上就是这里导致"查了 0 个"）。
+    # 这一层是"设备上真有这个文件吗"的**辅助过滤**（开发者机器上就是这里导致"查了 0 个"）。
     # 为了不再被任何一张表带塌，这里做成**三级兜底**：
     #   ① 查内存表；② 表里没有就直接问文件系统（几个候选目录试一遍）；③ 都没有才跳过。
     # 注意：第 ② 步只在"表里没查到"时才起进程，正常情况下不增加开销。
@@ -1958,7 +1959,7 @@ sec_unadapted() {
       esac
     fi
     # ★ 1.0.9.2 真机补：**还要看"它属于哪个 family"**。
-    #   作者机器上的 DelaGothicOne.otf / DelaGothicOne-HZ.otf 文件名里没有 clock 字样，
+    #   开发者机器上的 DelaGothicOne.otf / DelaGothicOne-HZ.otf 文件名里没有 clock 字样，
     #   但它们在配置里属于 `miclock-dela-gothic-one` —— 那是**锁屏时钟**的专属字体，
     #   模块刻意不换（换了锁屏时钟会出问题）。只看文件名会把它们误报成"★要修"。
     #   D2_FAMFILE 由 d2_collect_langmap 建好："文件名|所在 family 名（含 <> 里的名字）"。
@@ -1991,7 +1992,7 @@ sec_unadapted() {
     #   以前这里不查跳过名单，于是 RobotoFlex-Regular.ttf 被误报成 [★要修]。
     if [ "$_should" = 1 ]; then
       _lf2=$(printf '%s' "$_fl" | tr 'A-Z' 'a-z')
-      _skl="${LIB:-/data/adb/custom_font_lib}/scanned/skip.list"
+      _skl="${STATEDIR}/scan/skip.list"
       if [ -s "$_skl" ] && grep -qx "$_lf2" "$_skl" 2>/dev/null; then
         _should=0
       fi
@@ -2012,7 +2013,7 @@ sec_unadapted() {
   if [ "$_un" = 0 ]; then
     echo "  ✅ 上面这 $((_un + _nx)) 个里面，没有「本该换却没进计划」的。"
   else
-    echo "  ★ 共 $_un 个字体**本该参与替换、却没进计划**（作者据此修适配）："
+    echo "  ★ 共 $_un 个字体**本该参与替换、却没进计划**（开发者据此修适配）："
     sed 's/^/     /' "$D2_TMP/unadapted" 2>/dev/null
   fi
   if [ "$_nx" -gt 0 ] 2>/dev/null; then
@@ -2063,7 +2064,7 @@ d2_suggest_targets() {
   echo
 }
 
-  d2_suggest_targets   # ★ 2026-10-16：建议补进清单的字体（作者看）
+  d2_suggest_targets   # ★ 2026-10-16：建议补进清单的字体（开发者看）
 }
 
 
@@ -2161,14 +2162,14 @@ conclusion() {
   if [ "$(mount_mode 2>/dev/null)" = manager ] && [ "$(cfg_get theme_fonts 0 2>/dev/null)" = 1 ]; then
     echo "ℹ 当前是「交给管理器挂载」：系统分区由管理器挂，"
     echo "   /data 上的主题字体由模块补挂（混合挂载）。"
-    echo "   若主题字体没变，看 $LIB/mount.log 里有没有「混合挂载」这一行（成功/失败数）。"
+    echo "   若主题字体没变，看 $LOGDIR/mount.log 里有没有「混合挂载」这一行（成功/失败数）。"
   fi
 
     fi
   elif [ "$PFD_THIS" != 0 ] && [ -z "$MS_BOOT" ]; then
     echo "❌ 结论：开机脚本跑了，但「挂载阶段」没有留下任何记录。"
     echo "   结合第 3 节的实测结果一起看（实测${MT_RESULT}）。"
-    echo "   → 需要模块改用其它挂载时机，请把报告发给作者。"
+    echo "   → 需要模块改用其它挂载时机，请把报告发给开发者。"
   elif [ -n "$MS_BOOT" ] && [ "$MS_BOOT" != "$BOOTID" ]; then
     echo "⚠ 结论：有挂载记录，但不是本次开机的（也就是本次开机没挂上）。"
     echo "   → 重启一次，重启后什么都别点，再看这份报告。"
@@ -2204,7 +2205,7 @@ conclusion() {
     echo "   这种情况挂载全成功、报告也看不出问题，按第 11 节的 ① 关掉「默认卸载模块」再试。"
   fi
   # 包不完整（缺 ttcwrap.sh = 合集生成器）：现象是"开关亮着、中文没变"，
-  # 报告里如果只字不提，用户和作者都会往挂载上找。这里直接点名 + 给动作。
+  # 报告里如果只字不提，用户和开发者都会往挂载上找。这里直接点名 + 给动作。
   _mfmiss=$(modfiles_check "$M")
   case "$_mfmiss" in
     *ttcwrap.sh*)
@@ -2398,7 +2399,7 @@ printf '%s\n' $DATAFONT_LIST | while IFS= read -r _df; do
     if [ "${DISC_NEW_DIRS:-0}" -gt 0 ] 2>/dev/null; then
   echo "  ★ 自动发现：${DISC_NEW_DIRS} 个目录有字体、但不在已知清单里"
   printf '%s\n' "$DISCOVERED"
-  echo "    （请把这段连同报告一起发作者 —— 这就是"该补哪些目录"的直接依据）"
+  echo "    （请把这段连同报告一起发开发者 —— 这就是"该补哪些目录"的直接依据）"
 fi
 if [ -n "${DISC_NEW_NAMES:-}" ]; then
   echo "  ★ 设备上有、targets 名单里没有的字体名："
@@ -2413,8 +2414,9 @@ fi
         _p1m=$(printf '%s\n' "$_p1" | sed 's/^PID1 \([0-9]*\) \([0-9]*\).*/\2/')
         _p1s=$(printf '%s\n' "$_p1" | sed 's/^PID1 [0-9]* [0-9]*//')
         echo "  PID 1 视角校验：计划里 $((_p1v + _p1m)) 个槽位中，$((_p1v)) 个在 PID 1 的挂载表里可见，$((_p1m)) 个看不到"
+        echo "  （仅代表 PID 1 命名空间；KernelSU 可能对应用卸载，最终以第 3 节实际生效验证为准）"
         if [ "${_p1m:-0}" -gt 0 ] 2>/dev/null; then
-          echo "    看不到的（框架可能读不到我们的字体）：$_p1s"
+          echo "    不可见的槽位（只是 PID 1 视角，不代表所有 App）：$_p1s"
           echo "    → 若同时有条目显示「生效」，就说明挂载对当前 shell 可见、对框架不可见。"
         fi
         ;;
@@ -2457,14 +2459,14 @@ if [ -d "${OPS_BRIDGE:-}" ]; then
   echo "  说明: 符号链接指向 /system/fonts 的，本模块替换系统字体时已覆盖；"
   echo "        普通文件是独立副本，本模块**没有**替换（设置里选的字体优先）。"
 fi
-  echo "===== 结论结束，下面是原始数据（给作者看）====="
+  echo "===== 结论结束，下面是原始数据（给开发者看）====="
 }
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # 【0】这台系统的字体靠什么生效（1.0.9 新增，报告里最该先看的一段）
 #
-# 为什么放最前面：作者只有小米机器，适配别的机型**完全靠别人发来的这份报告**。
+# 为什么放最前面：开发者只有小米机器，适配别的机型**完全靠别人发来的这份报告**。
 #   所以报告第一件要说清的事就是"你这台系统的字体是怎么生效的" ——
 #   哪种语言用哪个字体文件、那个文件我们这次到底换没换、没换是因为什么。
 #   以前这些信息散在第 5/6 节的原始 XML 里，得人肉读；现在直接列成表。
@@ -2588,7 +2590,7 @@ sec2() {
   echo "  设置 settings.conf:"
   sed -n 'p' "$SETTINGS" 2>/dev/null | while IFS= read -r L; do echo "      $L"; done
   echo "  关键文件时间线（旧→新）:"
-  for f in "$M/disable" "$M/update" "$M/pending_font" "$M/slots.applied" "$M/payload.mode" "$M/.booting" "$M/mount.state" "$M/mount_missed" "$M/active_font" "$M/rescued" "$LIB/last_selection" "$BEAT" "$LIB/mount.log"; do
+  for f in "$M/disable" "$M/update" "$M/pending_font" "$M/slots.applied" "$M/payload.mode" "$M/.booting" "$M/mount.state" "$M/mount_missed" "$M/active_font" "$M/rescued" "$STATEDIR/last_selection" "$BEAT" "$LOGDIR/mount.log"; do
     [ -f "$f" ] || continue
     echo "      $(mstamp "$f")  $(since_txt "$f")  ${f#/data/adb/}"
   done
@@ -2647,9 +2649,9 @@ sec3() {
   [ -n "$MT_TARGET" ] && echo "      目标槽位 : $MT_TARGET  ($(size_kb "$MT_TARGET"))"
   [ -n "$MT_DETAIL" ] && echo "      详情     : $MT_DETAIL"
   echo "  SELinux 当前模式: $(getenforce 2>/dev/null)"
-  echo "  挂载日志 $LIB/mount.log:"
-  if [ -f "$LIB/mount.log" ]; then
-    tail -n 25 "$LIB/mount.log" 2>/dev/null | while IFS= read -r L; do echo "      $L"; done
+  echo "  挂载日志 $LOGDIR/mount.log:"
+  if [ -f "$LOGDIR/mount.log" ]; then
+    tail -n 25 "$LOGDIR/mount.log" 2>/dev/null | while IFS= read -r L; do echo "      $L"; done
   else
     echo "      (没有：挂载从没被尝试过)"
   fi
@@ -2782,9 +2784,9 @@ sec6() {
   }
   # 模块自己判的合集替换方案（换了哪几号 face、凭什么）。上面那份 fonts.xml 在报告里被截断过，
   # 光看它看不出判断结果 —— 这一段是"现场结论"，出问题先看这里。
-  if [ -f "$LIB/ttc.log" ]; then
+  if [ -f "$LOGDIR/ttc.log" ]; then
     echo "  ---- 合集替换决策（模块实际怎么判的）----"
-    sed 's/^/      /' "$LIB/ttc.log" 2>/dev/null | head -n 20
+    sed 's/^/      /' "$LOGDIR/ttc.log" 2>/dev/null | head -n 20
     echo "      （via=xml = 按字体配置判的；via=fallback = 配置里没找到中文引用、按惯例兜底）"
   fi
   # ---- 原合集 vs 我们生成的：每号 face 的 PostScript 名 ----
@@ -3166,11 +3168,11 @@ pack_extra() {
         _ino=$(stat -L -c '%d:%i' "$_s" 2>/dev/null)
         [ -n "$_ino" ] || continue
         printf '%s\n' "$_ino"
-      done > "$LIB/.ours.ino.$$" 2>/dev/null
-      if [ -s "$LIB/.ours.ino.$$" ]; then
-        OUR_INO="$OUR_INO$(sed 's/^/|/;s/$/=map/' "$LIB/.ours.ino.$$" 2>/dev/null)"
+      done > "$STATEDIR/ours.ino.$$" 2>/dev/null
+      if [ -s "$STATEDIR/ours.ino.$$" ]; then
+        OUR_INO="$OUR_INO$(sed 's/^/|/;s/$/=map/' "$STATEDIR/ours.ino.$$" 2>/dev/null)"
       fi
-      rm -f "$LIB/.ours.ino.$$" 2>/dev/null
+      rm -f "$STATEDIR/ours.ino.$$" 2>/dev/null
     fi
   }
   # 抽样核对：源文件与目标槽位的 inode 必须一致（bind 挂载语义）
@@ -3229,7 +3231,7 @@ pack_extra() {
     "")    FP_FAST=0 ;;
     *)     FP_FAST=1; FP_SAMPLE_OK=$(printf '%s' "$_smp" | grep -c OK) ;;
   esac
-  echo "@@FPFAST fast=$FP_FAST ok=$FP_SAMPLE_OK bad=$FP_SAMPLE_BAD" >> "$LIB/.perf.log" 2>/dev/null
+  echo "@@FPFAST fast=$FP_FAST ok=$FP_SAMPLE_OK bad=$FP_SAMPLE_BAD" >> "$STATEDIR/perf.log" 2>/dev/null
 
   HASH_MAP=""          # "|dev:inode=指纹|..."（去重后的唯一文件）
   HASH_KEY=""; HASH_SEEN=""; HASH_DONE=0; HASH_TOTAL=0
@@ -3599,7 +3601,7 @@ sec13() {
 
   echo "  ---- 我们生成的合集产物 ----"
   _m=0
-  for _f in "$LIB"/*.ttc[0-9]*; do
+  for _f in "$CACHEDIR/ttc"/*.ttc[0-9]* "$LIB"/*.ttc[0-9]*; do
     [ -e "$_f" ] || continue
     _m=$(( _m + 1 ))
     _sz=$(wc -c < "$_f" 2>/dev/null | tr -d ' ')
@@ -3614,8 +3616,8 @@ sec13() {
   [ "$_m" = 0 ] && echo "    （本机没有生成过合集产物）"
 
   echo "  ---- ttc.log 最近记录 ----"
-  if [ -s "$LIB/ttc.log" ]; then
-    tail -n 12 "$LIB/ttc.log" 2>/dev/null | sed 's/^/    /'
+  if [ -s "$LOGDIR/ttc.log" ]; then
+    tail -n 12 "$LOGDIR/ttc.log" 2>/dev/null | sed 's/^/    /'
   else
     echo "    （没有 ttc.log）"
   fi
@@ -3628,7 +3630,7 @@ sec14() {
   echo
   echo "【14】中文字形覆盖率与跳过原因（排查方块）"
   hr
-  _sel=$(tr -d '[:space:]' < "$LIB/last_selection" 2>/dev/null)
+  _sel=$(tr -d '[:space:]' < "$STATEDIR/last_selection" 2>/dev/null)
   echo "  当前选择：${_sel:-none}"
   if [ -n "$_sel" ] && [ -f "$LIB/$_sel.meta" ]; then
     for _k in rate_latin rate_cjk rate_hant rate_kana rate_hangul rate_punct rate_symbols; do
@@ -3649,7 +3651,10 @@ sec14() {
   fi
 
   echo "  ---- 计划里的槽位统计 ----"
-  _plan="$LIB/.plan.latest"
+  _plan="$STATEDIR/plan.latest"
+  # 新布局的计划缓存在 cache/plan；旧的 state/plan.latest 通常不存在。
+  [ -s "$_plan" ] || _plan=$(ls -1t "$CACHEDIR"/plan/*.map 2>/dev/null | head -n1)
+  [ -s "$_plan" ] || _plan="$MODDIR/slots.map"
   if [ -s "$_plan" ]; then
     _tot=$(grep -c . "$_plan" 2>/dev/null)
     _cjk=$(awk '$1=="cjk"' "$_plan" 2>/dev/null | grep -c .)
@@ -3657,8 +3662,8 @@ sec14() {
   else
     echo "    （没有留存的计划文件）"
   fi
-  if [ -s "$LIB/scanned/skip.list" ]; then
-    echo "    跳过清单条数：$(grep -c . "$LIB/scanned/skip.list" 2>/dev/null)"
+  if [ -s "$STATEDIR/scan/skip.list" ]; then
+    echo "    跳过清单条数：$(grep -c . "$STATEDIR/scan/skip.list" 2>/dev/null)"
   fi
   hr
   echo "  说明：方块 = 被替换的字体里缺这些字。覆盖率不足 98% 时模块不再替换中文槽位，"
@@ -3684,7 +3689,7 @@ sec15() {
   fi
   hr
   echo "  说明：若某应用「打开就闪退」而别的应用正常，多半是它读的某个字体文件结构有问题。"
-  echo "        把这份报告发给作者，配合【13】的合集校验结果即可定位。"
+  echo "        把这份报告发给开发者，配合【13】的合集校验结果即可定位。"
   echo
 }
 
@@ -3695,8 +3700,8 @@ sec16() {
   echo "【16】字重组应用情况（哪个槽位用了组里哪一档）"
   hr
   local sel grp members id w src tgt wtg
-  sel=$(tr -d '[:space:]' < "$LIB/last_selection" 2>/dev/null)
-  [ -n "$sel" ] || sel=$(tr -d '[:space:]' < "$LIB/active_font" 2>/dev/null)
+  sel=$(tr -d '[:space:]' < "$STATEDIR/last_selection" 2>/dev/null)
+  [ -n "$sel" ] || sel=$(tr -d '[:space:]' < "$MODDIR/active_font" 2>/dev/null)
   echo "  当前选择：${sel:-none}"
 
   grp=""
@@ -3749,14 +3754,14 @@ sec16() {
   fi
 
   echo "  ---- 被跳过的槽位（合集/结构校验）----"
-  if [ -s "$LIB/ttc.log" ]; then
-    grep -E 'ttcbad|跳过' "$LIB/ttc.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
+  if [ -s "$LOGDIR/ttc.log" ]; then
+    grep -E 'ttcbad|跳过' "$LOGDIR/ttc.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
   else
     echo "    （没有跳过记录）"
   fi
   hr
   echo "  说明：如果某个槽位本该吃 Bold 却显示用了常规字重，或整段没有中文槽位，"
-  echo "        就是这里的映射问题；把这份报告发给作者即可定位。"
+  echo "        就是这里的映射问题；把这份报告发给开发者即可定位。"
   echo
 }
 
@@ -3765,9 +3770,9 @@ sec17() {
   echo
   echo "【17】模块账本快照（.index）—— 模块自己认为的状态"
   hr
-  if [ -s "$LIB/.index" ]; then
-    sed -n '1,60p' "$LIB/.index" 2>/dev/null | sed 's/^/  /'
-    _ln=$(wc -l < "$LIB/.index" 2>/dev/null | tr -d ' ')
+  if [ -s "$STATEDIR/index" ]; then
+    sed -n '1,60p' "$STATEDIR/index" 2>/dev/null | sed 's/^/  /'
+    _ln=$(wc -l < "$STATEDIR/index" 2>/dev/null | tr -d ' ')
     case "${_ln:-0}" in ''|*[!0-9]*) _ln=0 ;; esac
     [ "$_ln" -gt 60 ] && echo "  …（共 $_ln 行，其余略）"
   else
@@ -3775,7 +3780,7 @@ sec17() {
   fi
   hr
   echo "  说明：这一节是模块**自己记录的**结果；若与下面几节的实测不一致，"
-  echo "        说明索引过期或有外部改动 —— 把报告发作者，按这个对照即可定位。"
+  echo "        说明索引过期或有外部改动 —— 把报告发开发者，按这个对照即可定位。"
   echo
 }
 
@@ -3805,15 +3810,15 @@ sec18() {
 
   echo
   echo "  ---- 未替换 / 跳过记录 ----"
-  if [ -s "$LIB/ttc.log" ]; then
+  if [ -s "$LOGDIR/ttc.log" ]; then
     echo "  合集相关（最近 8 条）："
-    grep -E 'via=|跳过' "$LIB/ttc.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
+    grep -E 'via=|跳过' "$LOGDIR/ttc.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
   fi
-  if [ -s "$LIB/mount.log" ]; then
+  if [ -s "$LOGDIR/mount.log" ]; then
     echo "  挂载相关（最近 8 条）："
-    grep -E '失败|跳过|异常' "$LIB/mount.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
+    grep -E '失败|跳过|异常' "$LOGDIR/mount.log" 2>/dev/null | tail -n 8 | sed 's/^/    /'
   fi
-  [ -s "$LIB/ttc.log" ] || [ -s "$LIB/mount.log" ] || echo "    （没有跳过/失败记录）"
+  [ -s "$LOGDIR/ttc.log" ] || [ -s "$LOGDIR/mount.log" ] || echo "    （没有跳过/失败记录）"
 
   echo
   echo "  ---- 门牌号核对（前 12 个槽位：目标 inode 是否等于源文件）----"
@@ -3884,10 +3889,10 @@ now_ms() {
 slots_map_path() {
   if [ -n "${MODDIR:-}" ] && [ -s "$MODDIR/slots.map" ]; then
     printf '%s' "$MODDIR/slots.map"
-  elif [ -s "$LIB/slots.map" ]; then
-    printf '%s' "$LIB/slots.map"
+  elif [ -s "$MODDIR/slots.map" ]; then
+    printf '%s' "$MODDIR/slots.map"
   else
-    printf '%s' "$LIB/slots.map"
+    printf '%s' "$MODDIR/slots.map"
   fi
 }
 
@@ -3917,7 +3922,7 @@ report_full() {
   hr
   printf '%b' "$_perf"
   hr
-  printf '%b' "$_perf" > "$LIB/.perf.log" 2>/dev/null
+  printf '%b' "$_perf" > "$STATEDIR/perf.log" 2>/dev/null
   echo "  字体指纹一节有缓存（.fp.cache）：同一台机器第二次生成会明显更快。"
   echo
   echo "【加速说明】门牌号快判（dev:inode 相同 ⇒ 就是模块挂上去的那份文件）"
@@ -3952,16 +3957,16 @@ set_out_now() {
 }
 
 # 把完整报告（结论 + 11 节 + 原始配置与哈希清单）写到 Download，成功时 SAVED=路径
-# ★ 1.0.9：**只产出 1 个文件**（以前每次生成会冒出 3 个，作者反馈"很奇怪"）：
+# ★ 1.0.9：**只产出 1 个文件**（以前每次生成会冒出 3 个，实测"很奇怪"）：
 #   · /sdcard/Download/完整体检报告.txt   ← 唯一对外的那份
 #   · 以前的 font_diag.txt 备用名、未完成的体检报告.txt、/data/local/tmp 那份，全部取消
 #   生成过程中也直接覆盖这一个文件（内容是"已写好的部分"），所以不会再有"未完成"另开一份。
 # ---------------------------------------------------------------------------
 # 【报告完整性声明】（1.0.9.2 新增）
 #
-# 为什么需要它：作者担心"改来改去，最后检测少东西、分析不了"。这个担心完全合理 ——
+# 为什么需要它：开发者担心"改来改去，最后检测少东西、分析不了"。这个担心完全合理 ——
 #   为了把"半小时"压下来，我给几处加了时间上限/跳过了重活。但**如果报告不主动说明
-#   "哪一节没做、为什么"，看报告的人（包括作者自己）就分不清"没问题"和"没检查"** ——
+#   "哪一节没做、为什么"，看报告的人（包括开发者自己）就分不清"没问题"和"没检查"** ——
 #   那才是最危险的（比慢得多危险）。
 #
 # 所以：任何一节被**超时、跳过、取不到**，都必须在这里记一笔，并写在报告最前面。
@@ -3997,19 +4002,19 @@ write_kit() {
     chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
     SAVED="$OUTFILE_FULL"
   fi
-  cp -f "$tmpf" "$LIB/font_diag.txt" 2>/dev/null
-  [ -n "$SAVED" ] || SAVED="$LIB/font_diag.txt"
+  cp -f "$tmpf" "$LIBROOT/font_diag.txt" 2>/dev/null
+  [ -n "$SAVED" ] || SAVED="$LIBROOT/font_diag.txt"
   return 0
 }
 
 # 统一的进度状态写入（BG_* 由 build 设置）
 # state_write <state> <phase> <sub> [额外行...]
-# 一次写入两个文件：$LIB/.diag.state（脚本自己读）+ webroot 镜像（界面 fetch 直接读，不起进程）
+# 一次写入两个文件：$STATEDIR/diag.state（脚本自己读）+ webroot 镜像（界面 fetch 直接读，不起进程）
 # 数值字符串拼接后一次 redirect，除了 date 之外不多起进程
 state_write() {
   # 「已中止」是终态：正在收尾的 build 不允许再用 running 把它盖掉
   # （不然中止后马上再看，状态会变回 running + 一个已经死掉的 pid，界面就误报"进程已退出"）
-  if [ "$1" = "running" ] && [ -f "$LIB/.diag.cancel" ]; then return 0; fi
+  if [ "$1" = "running" ] && [ -f "$STATEDIR/diag.cancel" ]; then return 0; fi
   _SW_T=$(date +%s 2>/dev/null)
   _SW_BODY="state=$1
 phase=$2
@@ -4026,7 +4031,7 @@ sub=${3:-}"
 $_l"
   done
   mkdir -p "$LIB" 2>/dev/null
-  printf '%s\n' "$_SW_BODY" > "$LIB/.diag.state" 2>/dev/null
+  printf '%s\n' "$_SW_BODY" > "$STATEDIR/diag.state" 2>/dev/null
   [ -d "$WEB" ] && printf '%s\n' "$_SW_BODY" > "$WEB_STATE" 2>/dev/null
   return 0
 }
@@ -4047,7 +4052,7 @@ timing_add() {   # timing_add <名称> <开始秒>
   [ "$_d" -lt 0 ] && _d=0
   TIMING_LIST="${TIMING_LIST}$1|${_d}s
 "
-  [ "${BG_STATE:-0}" = 1 ] && printf '%s|%s\n' "$1" "$_d" >> "$LIB/.diag.timing" 2>/dev/null
+  [ "${BG_STATE:-0}" = 1 ] && printf '%s|%s\n' "$1" "$_d" >> "$STATEDIR/diag.timing" 2>/dev/null
   return 0
 }
 
@@ -4128,13 +4133,13 @@ calc_eta_pct() {
 ABORTED=0
 abort_now() {   # abort_now <原因>
   ABORTED=1
-  if [ "$BG_STATE" = 1 ] && [ -s "$LIB/font_diag.part" ]; then
-    cp -f "$LIB/font_diag.part" "$LIB/font_diag.txt" 2>/dev/null
-cp -f "$LIB/font_diag.part" "$OUTFILE_FULL" 2>/dev/null
+  if [ "$BG_STATE" = 1 ] && [ -s "$LIBROOT/font_diag.part" ]; then
+    cp -f "$LIBROOT/font_diag.part" "$LIBROOT/font_diag.txt" 2>/dev/null
+cp -f "$LIBROOT/font_diag.part" "$OUTFILE_FULL" 2>/dev/null
 chmod 666 "$OUTFILE_FULL" 2>/dev/null
 chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
     SAVED=""
-    write_kit "$LIB/font_diag.part"
+    write_kit "$LIBROOT/font_diag.part"
     mirror_result
   fi
   state_write "partial" "已保存（未完成）" "" \
@@ -4146,7 +4151,7 @@ chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
 # 取消标记是纯 shell 判断（很便宜，每次都查）；关机和超时要起进程，隔几次查一次就够灵敏
 _CK_N=0
 _ck() {
-  [ -f "$LIB/.diag.cancel" ] && exit 0
+  [ -f "$STATEDIR/diag.cancel" ] && exit 0
   _CK_N=$(( _CK_N + 1 ))
   if [ $(( _CK_N % 15 )) -eq 1 ]; then
     if shutting_down; then
@@ -4166,19 +4171,19 @@ _ck() {
 # 把"正在生成的内容"开头一段镜像进 webroot：界面 fetch 就能边生成边看，不用起 shell
 mirror_part() {
   [ -d "$WEB" ] || return 0
-  [ -s "$LIB/font_diag.part" ] || return 0
-  head -c "$PART_MIRROR_BYTES" "$LIB/font_diag.part" 2>/dev/null > "$WEB_PART" 2>/dev/null
+  [ -s "$LIBROOT/font_diag.part" ] || return 0
+  head -c "$PART_MIRROR_BYTES" "$LIBROOT/font_diag.part" 2>/dev/null > "$WEB_PART" 2>/dev/null
   return 0
 }
 
 # 生成完成后镜像"报告预览 + 体积信息"
 mirror_result() {
   [ -d "$WEB" ] || mkdir -p "$WEB" 2>/dev/null
-  [ -s "$LIB/font_diag.txt" ] || return 0
-  head -c 60000 "$LIB/font_diag.txt" 2>/dev/null > "$WEB_HEAD" 2>/dev/null
-  _MR_SZ=$(wc -c < "$LIB/font_diag.txt" 2>/dev/null | tr -d ' ')
+  [ -s "$LIBROOT/font_diag.txt" ] || return 0
+  head -c 60000 "$LIBROOT/font_diag.txt" 2>/dev/null > "$WEB_HEAD" 2>/dev/null
+  _MR_SZ=$(wc -c < "$LIBROOT/font_diag.txt" 2>/dev/null | tr -d ' ')
   isnum "$_MR_SZ" || _MR_SZ=0
-  _MR_LN=$(wc -l < "$LIB/font_diag.txt" 2>/dev/null | tr -d ' ')
+  _MR_LN=$(wc -l < "$LIBROOT/font_diag.txt" 2>/dev/null | tr -d ' ')
   isnum "$_MR_LN" || _MR_LN=0
   { printf 'size=%s\nlines=%s\nsaved=%s\n' "$_MR_SZ" "$_MR_LN" "${SAVED:-}"; } > "$WEB_META" 2>/dev/null
   return 0
@@ -4217,7 +4222,7 @@ breathe() {
     "step=${BG_STEP:-0}" "steps=${BG_STEPS:-7}" \
     "pct=$CP_P" "done=$_BR_D" "total=$_BR_T" "eta=$CE_ETA"
   # ★ 1.0.9.2：原来这里 `sleep 1`（每 25 个文件睡一次）。
-  #   作者机器上字体目录 293 个文件 → 至少 12 秒白等；而且 breathe 在别处也被叫。
+  #   开发者机器上字体目录 293 个文件 → 至少 12 秒白等；而且 breathe 在别处也被叫。
   #   让路的目的已经由 lowprio_self 用 nice 达成了，这里不必用"睡"来实现。
   return 0
 }
@@ -4238,7 +4243,7 @@ subnote() {
 #
 # ★ 1.0.9.2 重要修正（真机实测）：
 #   1.0.9 这里用的是 `ionice -c 3`（I/O **空闲类**）+ `renice 19`（最低 CPU 优先级）。
-#   实测后果是灾难性的：作者机器上 `diag.sh perf` 跑采集只要 **32 秒**，
+#   实测后果是灾难性的：开发者机器上 `diag.sh perf` 跑采集只要 **32 秒**，
 #   而**同一条采集**在正式报告流程里花了 **6 分多钟**（第 1 步），整份报告半小时以上。
 #   原因：本脚本会起**几千个短命进程**（stat/grep/od/echo/sha256sum…），
 #     · `ionice -c 3` = "只要有别人要用磁盘就让路" → 手机上系统一直在读写，我们几乎排不上队；
@@ -4248,7 +4253,7 @@ subnote() {
 #   现在改成**有节制的让路**：
 #     · nice 10（中等偏低）—— 界面依然优先，但我们不会被饿死；
 #     · 不再动 ionice（保持默认 best-effort）。
-#   作者的原意是"别把系统挤死、别让手机觉得卡"，nice 10 完全够用；
+#   开发者的原意是"别把系统挤死、别让手机觉得卡"，nice 10 完全够用；
 #   而"报告要跑半小时"本身就是更严重的问题。
 lowprio_self() {
   # ★ 1.0.9.2：速度由**命令行/环境变量**决定（界面在点"全速生成 / 慢慢生成"时传进来）：
@@ -4270,14 +4275,14 @@ lowprio_self() {
 # ---------------------------------------------------------------------------
 # 分阶段计时：报告里会附带"每一步花了多少秒"
 #   给用户看：知道卡在哪一步、还要多久；
-#   给作者看：一眼看出哪一步是性能瓶颈（以前只能靠猜）
+#   给开发者看：一眼看出哪一步是性能瓶颈（以前只能靠猜）
 # ★ 定义已经**移到文件前段**（collect() 之前）—— 否则 collect 里调用时函数还不存在。
 #   这里只留一句说明，不要再重复定义。
 # ---------------------------------------------------------------------------
 
 # 生成完整报告包（体检 + 原始配置 + 哈希清单）
 # 流程优化：
-#   1) 后台模式直接增量写到 $LIB/font_diag.part —— 界面可以边生成边看；
+#   1) 后台模式直接增量写到 $LIBROOT/font_diag.part —— 界面可以边生成边看；
 #   2) 每个阶段结束都把已完成的部分导出一次（Download/未完成的体检报告.txt），
 #      所以就算中途被中止/超时/关机，也已经有一份能发出来的文件（不再"白跑一场"）；
 #   3) 全局先降到最低优先级（不只后台模式），并且每个阶段都检查取消 / 关机 / 超时。
@@ -4286,7 +4291,7 @@ kit_report() {
   lowprio_self
   tmpf=""
   if [ "$BG_STATE" = 1 ]; then
-    tmpf="$LIB/font_diag.part"
+    tmpf="$LIBROOT/font_diag.part"
   else
     # 前台模式先写临时文件，跑完再一次性搬走。
     # /data/local/tmp 在个别机器/容器里可能不存在或不可写 —— 建不出来就退回字体库目录，
@@ -4296,19 +4301,19 @@ kit_report() {
     : > "$tmpf" 2>/dev/null || tmpf=""
     if [ -z "$tmpf" ]; then
       mkdir -p "$LIB" 2>/dev/null
-      tmpf="$LIB/.font_diag.$$"
+      tmpf="$STATEDIR/font_diag.$$"
     fi
   fi
   mkdir -p "$LIB" 2>/dev/null
   : > "$tmpf" 2>/dev/null
   if [ ! -w "$tmpf" ] 2>/dev/null; then
-    tmpf="$LIB/.font_diag.$$"
+    tmpf="$STATEDIR/font_diag.$$"
     : > "$tmpf" 2>/dev/null
   fi
   TIMING_LIST=""
   _KR_T0=$(now_s)
   { echo "诊断脚本构建: ${DIAG_BUILD:-?}   小节: 0~18"; } >> "$tmpf" 2>&1
-  [ "$BG_STATE" = 1 ] && : > "$LIB/.diag.timing" 2>/dev/null
+  [ "$BG_STATE" = 1 ] && : > "$STATEDIR/diag.timing" 2>/dev/null
   # ★ 1.0.9：阶段从 6 步改成 7 步，把"写报告文件"单独作为最后一步。
   #   以前"6/6 打包哈希清单"是最重的一步（要算全量指纹），而报告正文打印和写盘
   #   都发生在它之后 —— 界面停在 6/6 不动，看着就像"卡住了/还在偷偷干活"。
@@ -4391,7 +4396,7 @@ kit_report() {
     echo "合计|$(( $(now_s) - ${_KR_T0:-$(now_s)} ))"
     echo
   # ★ 2026-11-06：新增【19】新功能现状 —— 用户反馈"某个新功能不好用"时，
-  #   作者一眼能看到：导入格式模块在不在、最近备份、OTA 适配记录、挂载方式、主题时钟。
+  #   开发者一眼能看到：导入格式模块在不在、最近备份、OTA 适配记录、挂载方式、主题时钟。
   echo "【19】新功能现状（导入格式 / 备份 / OTA / 挂载方式）"
   hr
   echo "  挂载方式：$(mount_mode 2>/dev/null)（self=自带挂载；manager=交给管理器/元模块）"
@@ -4406,9 +4411,9 @@ kit_report() {
   else
     echo "  最近备份：没有（Download 里没有 fontlib-*.tar.gz）"
   fi
-  if [ -s "$LIB/ota.log" ]; then
+  if [ -s "$LOGDIR/ota.log" ]; then
     echo "  OTA 适配记录（最近 3 行）："
-    tail -n 3 "$LIB/ota.log" 2>/dev/null | sed 's/^/    /'
+    tail -n 3 "$LOGDIR/ota.log" 2>/dev/null | sed 's/^/    /'
   else
     echo "  OTA 适配记录：无（还没遇到过系统更新，或没触发）"
   fi
@@ -4434,19 +4439,19 @@ kit_report() {
   hr
 
 
-  # ★ 2026-11-06（作者要求）：完整报告加【20】模块全量快照 —— 一看就知道这台机器上
+  # ★ 2026-11-06（设计）：完整报告加【20】模块全量快照 —— 一看就知道这台机器上
   #   模块的全部设置、字体库、计划、日志、Root 管理器与已装模块。全部只读现成文件，不读字体内容。
   echo "【20】模块全量快照（设置 / 字体库 / 计划 / 日志 / Root 管理器）"
   hr
   echo "  ── 当前状态 ──"
   echo "  当前生效: $(cur_active 2>/dev/null)   待生效: $(cur_pending 2>/dev/null)"
-  echo "  上次选择: $(cat "$LIB/last_selection" 2>/dev/null | tr -d '[:space:]')"
+  echo "  上次选择: $(cat "$STATEDIR/last_selection" 2>/dev/null | tr -d '[:space:]')"
   echo "  挂载方式: $(mount_mode 2>/dev/null)   实际挂载: $(cat "$MODDIR/payload.mode" 2>/dev/null | tr -d '[:space:]')"
   echo "  识别系统: $(cat "$MODDIR/current_rom" 2>/dev/null | tr -d '[:space:]')   Root: $(root_manager 2>/dev/null)"
   echo "  模块版本: $(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1) ($(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1))"
   echo
   echo "  ── 全部设置（settings.conf 原样）──"
-  sed 's/^/    /' "$LIB/settings.conf" 2>/dev/null | head -n 120
+  sed 's/^/    /' "$LIBROOT/settings.conf" 2>/dev/null | head -n 120
   echo
   echo "  ── 模块目录文件 ──"
   ls -l "$MODDIR" 2>/dev/null | sed 's/^/    /' | head -n 80
@@ -4488,12 +4493,12 @@ kit_report() {
   echo
   echo "  ── 关键文件 ──"
   for _k20 in "$MODDIR/active_font" "$MODDIR/pending_font" "$MODDIR/payload.mode" "$MODDIR/current_rom" \
-              "$LIB/.mounted" "$LIB/.boot.mark" "$LIB/.sysfp"; do
+              "$STATEDIR/mounted" "$STATEDIR/boot.mark" "$STATEDIR/sysfp"; do
     [ -e "$_k20" ] && echo "    $_k20: $(head -n 3 "$_k20" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
   done
   echo
   echo "  ── 日志尾部 ──"
-  for _l20 in "$LIB/mount.log" "$LIB/ota.log" "$LIB/ttc.log" "$LIB/boot_events.log" "$LIB/update.log"; do
+  for _l20 in "$LOGDIR/mount.log" "$LOGDIR/ota.log" "$LOGDIR/ttc.log" "$LOGDIR/boot_events.log" "$LIB/update.log"; do
     [ -s "$_l20" ] || continue
     echo "    [${_l20##*/} 最后 12 行]"
     tail -n 12 "$_l20" 2>/dev/null | sed 's/^/      /'
@@ -4521,7 +4526,7 @@ kit_report() {
   hr
 
 
-  # ★ 2026-11-06（作者要求：齐全优先）：【21】槽位 / targets 差异 + 本地全量记录
+  # ★ 2026-11-06（设计：齐全优先）：【21】槽位 / targets 差异 + 本地全量记录
   echo "【21】槽位与 targets 差异 + 本地全量记录"
   hr
   echo "  ── 字体目录（全量）──"
@@ -4547,7 +4552,7 @@ kit_report() {
   fi
   echo
   echo "  ── 槽位来源统计（targets / 本机扫描 / 主题 / ttc）──"
-  for _sf21 in "$MODDIR/slots.sources" "$MODDIR/slots.marks" "$MODDIR/scanned/slots.meta"; do
+  for _sf21 in "$MODDIR/slots.sources" "$MODDIR/slots.marks" "$STATEDIR/scan/slots.meta"; do
     [ -s "$_sf21" ] || continue
     echo "    [${_sf21##*/}]"
     head -n 200 "$_sf21" 2>/dev/null | sed 's/^/      /'
@@ -4558,34 +4563,34 @@ kit_report() {
   echo
   echo "  ── 扫描缓存（scanned/）──"
   for _s21 in device.list slots.list slots.meta skip.list ttc.list env.list; do
-    _p21="$LIB/scanned/$_s21"
+    _p21="$STATEDIR/scan/$_s21"
     [ -s "$_p21" ] || continue
     echo "    [$_s21] $(grep -c . "$_p21" 2>/dev/null) 行"
   done
   echo
   echo "  ── 计划缓存 ──"
-  if [ -d "$LIB/.plancache" ]; then
-    echo "    条目数: $(ls -1 "$LIB/.plancache" 2>/dev/null | grep -c . )"
-    ls -lt "$LIB/.plancache" 2>/dev/null | head -n 15 | sed 's/^/    /'
+  if [ -d "$CACHEDIR/plan" ]; then
+    echo "    条目数: $(ls -1 "$CACHEDIR/plan" 2>/dev/null | grep -c . )"
+    ls -lt "$CACHEDIR/plan" 2>/dev/null | head -n 15 | sed 's/^/    /'
   else
     echo "    （无 .plancache）"
   fi
   echo
   echo "  ── 更新 / OTA 状态 ──"
-  for _u21 in "$LIB/.update/state" "$LIB/.update/worker.log" "$LIB/.ota.adapted" "$LIB/.sysfp"; do
+  for _u21 in "$STATEDIR/update/state" "$STATEDIR/update/worker.log" "$STATEDIR/ota.adapted" "$STATEDIR/sysfp"; do
     [ -e "$_u21" ] || continue
     echo "    [${_u21##*/}]"
     tail -n 15 "$_u21" 2>/dev/null | sed 's/^/      /'
   done
   echo
   echo "  ── 最近切换痕迹（ttc.log 尾部已在【20】，这里补 active/pending 链）──"
-  for _c21 in "$MODDIR/active_font" "$MODDIR/pending_font" "$LIB/last_selection" "$MODDIR/last_good_font"; do
+  for _c21 in "$MODDIR/active_font" "$MODDIR/pending_font" "$STATEDIR/last_selection" "$MODDIR/last_good_font"; do
     [ -f "$_c21" ] && echo "    ${_c21##*/}: $(tr -d '\n' < "$_c21" 2>/dev/null)"
   done
   hr
 
 
-  # ★ 2026-11-06（作者要求补全）：【22】运行环境与历史
+  # ★ 2026-11-06（设计补全）：【22】运行环境与历史
   echo "【22】运行环境与历史（App 字体 / SELinux / Root 名单 / 备份 / 切换记录）"
   hr
   echo "  ── 运行中 App 实际加载的字体（前 25 个进程，每进程最多 6 个文件）──"
@@ -4634,8 +4639,8 @@ kit_report() {
     echo "    ${_i22##*/}  inode=links=size: $_l22"
   done
   echo
-  echo "  ── 切换历史（$LIB/switch.log 最近 30 行）──"
-  if [ -s "$LIB/switch.log" ]; then tail -n 30 "$LIB/switch.log" 2>/dev/null | sed 's/^/    /'
+  echo "  ── 切换历史（$LOGDIR/switch.log 最近 30 行）──"
+  if [ -s "$LOGDIR/switch.log" ]; then tail -n 30 "$LOGDIR/switch.log" 2>/dev/null | sed 's/^/    /'
   else echo "    （还没有记录；从本版开始，每次应用会写一行）"; fi
   hr
 
@@ -4656,6 +4661,74 @@ kit_report() {
     else
       echo "  本次未启用（没有可核对的槽位，或记录为空）—— 按逐文件计算处理"
     fi
+  # ★ 2026-11-14：【23】真实路径 / 链接 / 时钟族（与主项目同步）
+  echo "【23】字体真实路径与链接（bind 会跟随符号链接，这里看最终落点）"
+  hr
+  echo "  ── 字体配置来源 ──"
+  for _c23 in /system/etc/fonts.xml /system_ext/etc/hyper_fonts.xml /product/etc/mi_fonts_customization.xml /product/etc/misans_variable_fonts.xml; do
+    [ -e "$_c23" ] || continue
+    _r23=$(readlink -f "$_c23" 2>/dev/null)
+    _s23=$(stat -Lc '%s' "$_c23" 2>/dev/null)
+    echo "    $_c23"
+    echo "      real: ${_r23:-?}  size: ${_s23:-?}"
+  done
+  echo
+  echo "  ── /system/fonts 里的符号链接（前 40 个）──"
+  _n23=0
+  for _f23 in /system/fonts/*; do
+    [ -L "$_f23" ] || continue
+    _n23=$((_n23 + 1))
+    [ "$_n23" -le 40 ] || break
+    _t23=$(readlink -f "$_f23" 2>/dev/null)
+    if [ -n "$_t23" ] && [ -e "$_t23" ]; then _e23="存在"; else _e23="不存在"; fi
+    _z23=$(stat -Lc '%s' "$_f23" 2>/dev/null)
+    echo "    ${_f23##*/} -> ${_t23:-?}  [$_e23 ${_z23:-?}字节]"
+  done
+  echo "    链接总数：$(find /system/fonts -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' ')"
+  echo
+  echo "  ── 主字体链实际落点 ──"
+  for _m23 in MiSansVF_Overlay.ttf MiSansVF.ttf SysSans-En-Regular.ttf SysFont-Regular.ttf OSans-Solid-Digits-VF.ttf; do
+    _f23="/system/fonts/$_m23"
+    [ -e "$_f23" ] || continue
+    _t23=$(readlink -f "$_f23" 2>/dev/null)
+    _z23=$(stat -Lc '%s' "$_f23" 2>/dev/null)
+    echo "    $_m23 -> ${_t23:-?}  ${_z23:-?}字节"
+  done
+  echo
+  echo "  ── /data 字体目录 ──"
+  for _d23 in /data/system/fonts/theme_webview /data/format_unclear/font /data/system/theme/fonts; do
+    [ -d "$_d23" ] || { echo "    $_d23  （不存在）"; continue; }
+    echo "    $_d23"
+    ls -l "$_d23" 2>/dev/null | head -n 25 | sed 's/^/      /'
+  done
+  echo
+  echo "  ── 时钟族（miclock）──"
+  if [ -f /product/etc/mi_fonts_customization.xml ]; then
+    grep -o 'name="miclock[^"]*"' /product/etc/mi_fonts_customization.xml 2>/dev/null | head -n 30 | sed 's/^/    /'
+    grep -o 'postScriptName="[^"]*"' /product/etc/mi_fonts_customization.xml 2>/dev/null | head -n 15 | sed 's/^/    /'
+  else
+    echo "    （没有 mi_fonts_customization.xml）"
+  fi
+  echo
+  echo "  ── WebView 版本（Flyme 可变字体闪退相关）──"
+  dumpsys webviewupdate 2>/dev/null | grep -E "Current WebView package|versionName|Minimum WebView version|Valid package" | head -n 12 | sed 's/^/    /'
+  echo "    package: $(dumpsys webviewupdate 2>/dev/null | sed -n 's/.*Current WebView package (name, version): (\(.*\)).*/\1/p' | head -n1)"
+  echo
+  echo "  ── 运行时时钟检测（不依赖 targets 清单）──"
+  sh "$MODDIR/fontctl.sh" clock-detect 2>/dev/null | head -n 40 | sed 's/^/    /'
+  echo
+  echo "  ── slots.map 里指向符号链接的槽位（前 25 行）──"
+  if [ -s "$MODDIR/slots.map" ]; then
+    awk 'NF >= 2 { print $1, $2, $3 }' "$MODDIR/slots.map" 2>/dev/null | head -n 25 | while read -r _id23 _rel23 _src23; do
+      _f23="/$_rel23"
+      [ -L "$_f23" ] || continue
+      _t23=$(readlink -f "$_f23" 2>/dev/null)
+      echo "    $_rel23 -> ${_t23:-?}  源=${_src23:-默认}"
+    done
+  else
+    echo "    （slots.map 为空）"
+  fi
+  hr
   } >> "$tmpf" 2>&1
   printf '== 报告结束 ==\n' >> "$tmpf"
   _PH_T0=$(now_s)
@@ -4674,7 +4747,7 @@ export_part() {
   [ -s "$1" ] || return 0
   # ★ 1.0.9.2：**不再每阶段整份复制报告到 Download**。
   #   原来这里是 `cp -f "$1" "$OUTFILE_FULL"` —— 7 个阶段就把整份报告
-  #   （作者机器上 1.9MB）复制 7 遍，而最后 write_kit 本来就会写一份完整的。
+  #   （开发者机器上 1.9MB）复制 7 遍，而最后 write_kit 本来就会写一份完整的。
   #   在"慢速存储 + I/O 让路"的情况下，这些多余复制本身就很可观。
   #   现在只更新界面用的预览镜像（60KB，很便宜），真正的落盘交给最后的 write_kit。
   mirror_part
@@ -4746,8 +4819,8 @@ kill_build() {
   local p pid pgid me mypg
   me=$$
   mypg=$(awk '{print $5}' "/proc/$$/stat" 2>/dev/null | tr -d '[:space:]')
-  pid=$(sed -n 's/^pid=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
-  pgid=$(sed -n 's/^pgid=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+  pid=$(sed -n 's/^pid=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+  pgid=$(sed -n 's/^pgid=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
   case "$pgid" in ''|*[!0-9]*) pgid="" ;; esac
   case "$pid"  in ''|*[!0-9]*) pid=""  ;; esac
   if [ -n "$pgid" ] && [ "$pgid" -gt 1 ] 2>/dev/null && [ "$pgid" != "$me" ] && [ "$pgid" != "$mypg" ]; then
@@ -4787,7 +4860,7 @@ case "$MODE" in
     conclusion
     ;;
   perf)
-    # 【隐藏模式，给作者/维护者用】只跑采集并打印各段耗时，不生成报告、不写 Download。
+    # 【隐藏模式，给开发者/开发者用】只跑采集并打印各段耗时，不生成报告、不写 Download。
     # 为什么需要它：真机反馈过"整份报告要半小时"，而报告末尾的「每一步耗时」
     # 只能看到 6 个大步（第 1 步把采集全包住了）。这个模式把 collect() 里的
     # C1~C7 分段耗时直接打出来 —— 在真机上 `sh diag.sh perf` 一条命令就能定位。
@@ -4825,9 +4898,9 @@ case "$MODE" in
       [ "$a" = fast ] && fast=0   # 1.0.9：快速口径已删，忽略该参数
     done
     st=""; age=999999
-    if [ -f "$LIB/.diag.state" ]; then
-      st=$(sed -n 's/^state=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
-      age=$(( $(now_s) - $(stat -c %Y "$LIB/.diag.state" 2>/dev/null || echo 0) ))
+    if [ -f "$STATEDIR/diag.state" ]; then
+      st=$(sed -n 's/^state=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+      age=$(( $(now_s) - $(stat -c %Y "$STATEDIR/diag.state" 2>/dev/null || echo 0) ))
     fi
     if [ "$force" = 0 ]; then
       # 判断"是不是真的在跑"：看心跳新鲜度（状态文件里有 time=），不只看 pid。
@@ -4837,16 +4910,16 @@ case "$MODE" in
         echo "OK:running"; exit 0        # 心跳很新 = 正在跑，直接接着看
       fi
       if [ "$st" = "running" ] && [ "$age" -lt 1200 ] 2>/dev/null; then
-        rpid=$(sed -n 's/^pid=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+        rpid=$(sed -n 's/^pid=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
         if [ -z "$rpid" ] || kill -0 "$rpid" 2>/dev/null; then
           echo "OK:running"; exit 0
         fi
         # 心跳旧 + 进程确实没了：往下走重新生成
       fi
-      if [ "$st" = "done" ] && [ "$age" -lt 86400 ] 2>/dev/null && [ -s "$LIB/font_diag.txt" ]; then
+      if [ "$st" = "done" ] && [ "$age" -lt 86400 ] 2>/dev/null && [ -s "$LIBROOT/font_diag.txt" ]; then
         echo "OK:done"; exit 0           # 已经生成好了：直接看现成的（不再管它是哪种口径，绝不白重算）
       fi
-      if [ "$st" = "partial" ] && [ "$age" -lt 86400 ] 2>/dev/null && [ -s "$LIB/font_diag.txt" ]; then
+      if [ "$st" = "partial" ] && [ "$age" -lt 86400 ] 2>/dev/null && [ -s "$LIBROOT/font_diag.txt" ]; then
         echo "OK:done"; exit 0           # 上次只跑出一半：也先拿出来看，界面上会标明"未完成"
       fi
     else
@@ -4857,7 +4930,7 @@ case "$MODE" in
         echo "OK:running"; exit 0
       fi
     fi
-    rm -f "$LIB/.diag.cancel" 2>/dev/null
+    rm -f "$STATEDIR/diag.cancel" 2>/dev/null
     # 新的一轮开始：把上一轮的镜像清掉，免得界面把旧内容当成"正在生成的新内容"显示
     : > "$WEB_PART" 2>/dev/null
     : > "$WEB_HEAD" 2>/dev/null
@@ -4891,7 +4964,7 @@ steps=7
 eta=0
 done=
 total="
-    printf '%s\n' "$_SW_BODY" > "$LIB/.diag.state" 2>/dev/null
+    printf '%s\n' "$_SW_BODY" > "$STATEDIR/diag.state" 2>/dev/null
     [ -d "$WEB" ] && printf '%s\n' "$_SW_BODY" > "$WEB_STATE" 2>/dev/null
     echo "OK:running"
     ;;
@@ -4900,17 +4973,17 @@ total="
     # 真正的杀进程放到后台去做（kill 要 ps/sleep，一秒钟以上，不能让它挡着）。
     # 顺手把"已经写好的部分"存一份：中止不等于白跑（界面也能马上看到这部分）
     mkdir -p "$LIB" "$WEB" 2>/dev/null
-    : > "$LIB/.diag.cancel"
+    : > "$STATEDIR/diag.cancel"
     _CA_PARTIAL=0; _CA_SZ=0
-    if [ -s "$LIB/font_diag.part" ]; then
-      _CA_SZ=$(wc -c < "$LIB/font_diag.part" 2>/dev/null | tr -d ' ')
+    if [ -s "$LIBROOT/font_diag.part" ]; then
+      _CA_SZ=$(wc -c < "$LIBROOT/font_diag.part" 2>/dev/null | tr -d ' ')
       isnum "$_CA_SZ" || _CA_SZ=0
       if [ "$_CA_SZ" -gt 0 ]; then
         _CA_PARTIAL=1
-cp -f "$LIB/font_diag.part" "$OUTFILE_FULL" 2>/dev/null
+cp -f "$LIBROOT/font_diag.part" "$OUTFILE_FULL" 2>/dev/null
 chmod 666 "$OUTFILE_FULL" 2>/dev/null
 chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
-        head -c 60000 "$LIB/font_diag.part" 2>/dev/null > "$WEB_HEAD" 2>/dev/null
+        head -c 60000 "$LIBROOT/font_diag.part" 2>/dev/null > "$WEB_HEAD" 2>/dev/null
 { printf 'size=%s\nlines=0\nsaved=%s\n' "$_CA_SZ" "$OUTFILE_FULL"; } > "$WEB_META" 2>/dev/null
       fi
     fi
@@ -4922,7 +4995,7 @@ partial=$_CA_PARTIAL
 size=$_CA_SZ
 saved=$OUTFILE_FULL
 msg=已按你的要求停止"
-    printf '%s\n' "$_SW_BODY" > "$LIB/.diag.state" 2>/dev/null
+    printf '%s\n' "$_SW_BODY" > "$STATEDIR/diag.state" 2>/dev/null
     [ -d "$WEB" ] && printf '%s\n' "$_SW_BODY" > "$WEB_STATE" 2>/dev/null
     ( kill_build ) >/dev/null 2>&1 &
     echo "OK:cancelled"
@@ -4941,29 +5014,29 @@ msg=已按你的要求停止"
     lowprio_self
     FAST=0   # 1.0.9：快速口径已删（保留这行是为了让旧参数不报错）
     kit_report
-    if [ -f "$LIB/.diag.cancel" ]; then
-      # 中止：把已经写好的部分留一份"未完成"文件，方便用户/作者拿去用
-      if [ -s "$LIB/font_diag.part" ]; then
-cp -f "$LIB/font_diag.part" "$OUTFILE_FULL" 2>/dev/null
+    if [ -f "$STATEDIR/diag.cancel" ]; then
+      # 中止：把已经写好的部分留一份"未完成"文件，方便用户/开发者拿去用
+      if [ -s "$LIBROOT/font_diag.part" ]; then
+cp -f "$LIBROOT/font_diag.part" "$OUTFILE_FULL" 2>/dev/null
 chmod 666 "$OUTFILE_FULL" 2>/dev/null
 chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
         # 界面也要能看到这部分（镜像一份开头进 webroot，fetch 直接读）
         [ -d "$WEB" ] || mkdir -p "$WEB" 2>/dev/null
-        PART_SZ=$(wc -c < "$LIB/font_diag.part" 2>/dev/null | tr -d ' ')
+        PART_SZ=$(wc -c < "$LIBROOT/font_diag.part" 2>/dev/null | tr -d ' ')
         isnum "$PART_SZ" || PART_SZ=0
-        head -c 60000 "$LIB/font_diag.part" 2>/dev/null > "$WEB_HEAD" 2>/dev/null
+        head -c 60000 "$LIBROOT/font_diag.part" 2>/dev/null > "$WEB_HEAD" 2>/dev/null
 { printf 'size=%s\nlines=0\nsaved=%s\n' "$PART_SZ" "$OUTFILE_FULL"; } > "$WEB_META" 2>/dev/null
         state_write "cancelled" "已中止" "" "partial=1" "pct=100" "size=$PART_SZ" \
 "saved=$OUTFILE_FULL" "msg=已按你的要求停止；已完成的部分已保存"
       else
         state_write "cancelled" "已中止" "" "msg=已按你的要求停止（还没写出内容）" "pct=100"
       fi
-      rm -f "$LIB/.diag.cancel" 2>/dev/null
+      rm -f "$STATEDIR/diag.cancel" 2>/dev/null
     elif [ "$ABORTED" = 1 ]; then
       :    # 超时/让路：abort_now 已经把状态和文件都处理好了，别覆盖
-    elif [ -s "$LIB/font_diag.txt" ] && \
-         [ "$(stat -c %Y "$LIB/font_diag.txt" 2>/dev/null || echo 0)" -ge "$BG_START" ]; then
-      _BSZ=$(wc -c < "$LIB/font_diag.txt" 2>/dev/null | tr -d ' ')
+    elif [ -s "$LIBROOT/font_diag.txt" ] && \
+         [ "$(stat -c %Y "$LIBROOT/font_diag.txt" 2>/dev/null || echo 0)" -ge "$BG_START" ]; then
+      _BSZ=$(wc -c < "$LIBROOT/font_diag.txt" 2>/dev/null | tr -d ' ')
       isnum "$_BSZ" || _BSZ=0
       state_write "done" "完成" "" "pct=100" "step=7" "steps=7" "eta=0" \
         "size=$_BSZ" "saved=${SAVED:-}" "msg=报告已生成并保存"
@@ -4980,14 +5053,14 @@ chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
     done
     # 顺手把"上次被强杀留下的挂载测试层"卸掉（挂载测试有锁文件记录，这里据此还原）
     mt_recover
-    rm -f "$LIB/font_diag.part" "$LIB/.diag.cancel" 2>/dev/null
+    rm -f "$LIBROOT/font_diag.part" "$STATEDIR/diag.cancel" 2>/dev/null
     : > "$WEB_PART" 2>/dev/null
     : > "$WEB_HEAD" 2>/dev/null
     rm -f "$WEB_META" 2>/dev/null
-    if [ -f "$LIB/.diag.state" ]; then
-      st=$(sed -n 's/^state=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+    if [ -f "$STATEDIR/diag.state" ]; then
+      st=$(sed -n 's/^state=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
       if [ "$st" = "running" ]; then
-        printf 'state=cancelled\nphase=已清理\ntime=%s\nmsg=已清理后台任务\n' "$(now_s)" > "$LIB/.diag.state" 2>/dev/null
+        printf 'state=cancelled\nphase=已清理\ntime=%s\nmsg=已清理后台任务\n' "$(now_s)" > "$STATEDIR/diag.state" 2>/dev/null
         [ -d "$WEB" ] && printf 'state=cancelled\nphase=已清理\ntime=%s\nmsg=已清理后台任务\n' "$(now_s)" > "$WEB_STATE" 2>/dev/null
       fi
     fi
@@ -5007,12 +5080,12 @@ chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
     # 万一上次被强杀留下了测试挂载，这里能自动卸掉（防止关机时 /data 卸不掉）。
     mt_recover
     # 如果写着 running 但心跳已经很久没更新、进程也没了（被系统回收等），直接报错，别让界面白等
-    if [ -f "$LIB/.diag.state" ]; then
-      st=$(sed -n 's/^state=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+    if [ -f "$STATEDIR/diag.state" ]; then
+      st=$(sed -n 's/^state=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
       if [ "$st" = "running" ]; then
-        rpid=$(sed -n 's/^pid=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
-        rt=$(sed -n 's/^time=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
-        if [ -f "$LIB/.diag.cancel" ]; then
+        rpid=$(sed -n 's/^pid=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+        rt=$(sed -n 's/^time=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+        if [ -f "$STATEDIR/diag.cancel" ]; then
           # 已经点过中止：这是"正在退出"，不是"跑着"
           printf 'state=cancelled\nphase=正在退出\nmsg=已按你的要求停止，后台进程正在退出\n'
           exit 0
@@ -5029,14 +5102,14 @@ chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
           exit 0
         fi
       fi
-      cat "$LIB/.diag.state" 2>/dev/null
+      cat "$STATEDIR/diag.state" 2>/dev/null
     else
       echo "state=none"
     fi
     ;;
   text)
     # 整份正文（界面别直接用它抓大文件：几百 KB 过桥会让 WebView 卡住）
-    cat "$LIB/font_diag.txt" 2>/dev/null
+    cat "$LIBROOT/font_diag.txt" 2>/dev/null
     ;;
   textpage)
     # textpage <字节偏移> <长度>：只取一段正文。界面"看更多"用它，避免一次搬运几百 KB
@@ -5044,10 +5117,10 @@ chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
     isnum "$_TP_OFF" || _TP_OFF=0
     isnum "$_TP_LEN" || _TP_LEN=60000
     [ "$_TP_LEN" -gt 200000 ] && _TP_LEN=200000
-    if [ -s "$LIB/font_diag.txt" ]; then
-      _TP_ALL=$(wc -c < "$LIB/font_diag.txt" 2>/dev/null | tr -d ' ')
+    if [ -s "$LIBROOT/font_diag.txt" ]; then
+      _TP_ALL=$(wc -c < "$LIBROOT/font_diag.txt" 2>/dev/null | tr -d ' ')
       isnum "$_TP_ALL" || _TP_ALL=0
-      _TP_BODY=$(tail -c +$(( _TP_OFF + 1 )) "$LIB/font_diag.txt" 2>/dev/null | head -c "$_TP_LEN")
+      _TP_BODY=$(tail -c +$(( _TP_OFF + 1 )) "$LIBROOT/font_diag.txt" 2>/dev/null | head -c "$_TP_LEN")
       _TP_GOT=$(printf '%s' "$_TP_BODY" | wc -c 2>/dev/null | tr -d ' ')
       isnum "$_TP_GOT" || _TP_GOT=0
       echo "@@OFFSET:$_TP_OFF"
@@ -5065,11 +5138,11 @@ chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
   partinfo)
     # 生成中：只回报"已经写了多少字节 / 当前阶段"，让界面显示进度而不用搬运正文
     _PI_SZ=0
-    [ -s "$LIB/font_diag.part" ] && _PI_SZ=$(wc -c < "$LIB/font_diag.part" 2>/dev/null | tr -d ' ')
+    [ -s "$LIBROOT/font_diag.part" ] && _PI_SZ=$(wc -c < "$LIBROOT/font_diag.part" 2>/dev/null | tr -d ' ')
     isnum "$_PI_SZ" || _PI_SZ=0
     echo "part_size=$_PI_SZ"
-    if [ -s "$LIB/.diag.state" ]; then
-      sed -n 's/^\(state\|phase\|sub\|pct\|done\|total\|eta\|step\|fast\)=/&/p' "$LIB/.diag.state" 2>/dev/null
+    if [ -s "$STATEDIR/diag.state" ]; then
+      sed -n 's/^\(state\|phase\|sub\|pct\|done\|total\|eta\|step\|fast\)=/&/p' "$STATEDIR/diag.state" 2>/dev/null
     fi
     ;;
   savenow)
@@ -5078,12 +5151,12 @@ chown media_rw:media_rw "$OUTFILE_FULL" 2>/dev/null
     # 这个模式是给"想马上拿到手上这一份"用的（界面按钮已去掉，保留给控制台/脚本调用）
     mkdir -p "$LIB" "$DL" 2>/dev/null
     _SN_SRC=""; _SN_NOTE=""; _SN_OUT=""
-    if [ -s "$LIB/font_diag.txt" ]; then
-      _SN_SRC="$LIB/font_diag.txt"
-      _SN_FAST=$(sed -n 's/^fast=//p' "$LIB/.diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
+    if [ -s "$LIBROOT/font_diag.txt" ]; then
+      _SN_SRC="$LIBROOT/font_diag.txt"
+      _SN_FAST=$(sed -n 's/^fast=//p' "$STATEDIR/diag.state" 2>/dev/null | head -n1 | tr -d '[:space:]')
       _SN_OUT="$OUTFILE_FULL"; _SN_NOTE="完整报告"   # 1.0.9：只有这一种
-    elif [ -s "$LIB/font_diag.part" ]; then
-      _SN_SRC="$LIB/font_diag.part"
+    elif [ -s "$LIBROOT/font_diag.part" ]; then
+      _SN_SRC="$LIBROOT/font_diag.part"
 _SN_OUT="$OUTFILE_FULL"   # 1.0.9：生成中也覆盖同一个文件
       _SN_NOTE="未完成（只包含已经生成好的部分）"
     fi
@@ -5095,10 +5168,10 @@ _SN_OUT="$OUTFILE_FULL"   # 1.0.9：生成中也覆盖同一个文件
       chmod 666 "$_SN_OUT" 2>/dev/null
       chown media_rw:media_rw "$_SN_OUT" 2>/dev/null
       SAVED="$_SN_OUT"
-elif cp -f "$_SN_SRC" "$LIB/font_diag.txt" 2>/dev/null; then
+elif cp -f "$_SN_SRC" "$LIBROOT/font_diag.txt" 2>/dev/null; then
 
 
-SAVED="$LIB/font_diag.txt"
+SAVED="$LIBROOT/font_diag.txt"
     else
       SAVED=""
     fi
@@ -5166,10 +5239,10 @@ SAVED="$LIB/font_diag.txt"
     if [ -n "$SAVED" ]; then
       echo "报告已保存到: $SAVED"
       echo "（另有一份同内容的 font_diag.txt 备用；"
-      echo "  文件管理 → 内部存储 → Download → 把这一个 txt 发回给作者即可，"
+      echo "  文件管理 → 内部存储 → Download → 把这一个 txt 发回给开发者即可，"
       echo "  里面已经包含结论、槽位、系统字体配置原文、每个字体的 sha256 与目录映射）"
     else
-      echo "报告保存失败，请把上面这段截图发回给作者。"
+      echo "报告保存失败，请把上面这段截图发回给开发者。"
     fi
     ;;
   *)
@@ -5179,7 +5252,7 @@ esac
 exit 0
 
 # ---------------------------------------------------------------------------
-# ★ 2026-10-16 新增（作者要求）：**建议补进清单的字体**
+# ★ 2026-10-16 新增（设计）：**建议补进清单的字体**
 #
 #   背景：`targets/<rom>.list` 是"每个 ROM 手工核过的额外要换的白名单"。
 #   它的特殊价值在于**绕过 slot_dir_names 的文件名过滤** ——
@@ -5192,5 +5265,5 @@ exit 0
 #   这一节用**差集**把候选挑出来：
 #     目录里有 + 角色放行 + 不在计划里
 #     → 只可能是被文件名过滤挡住的 → 补进清单就能换
-#   然后由作者判断"是不是机型级"（别的同 ROM 机器也有 → 补；只这台有 → 不补）。
+#   然后由开发者判断"是不是机型级"（别的同 ROM 机器也有 → 补；只这台有 → 不补）。
 # ---------------------------------------------------------------------------

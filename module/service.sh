@@ -1,4 +1,31 @@
 #!/system/bin/sh
+
+
+# ★ 2026-10-26 开机时无条件清掉上一轮的更新状态
+#   开机意味着"上一轮更新流程已经结束"（装好或失败），状态留着只会让界面误报"待重启"。
+if [ -d "$STATEDIR/update" ]; then
+  echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 开机清理更新状态目录" >> "$LOGDIR/mount.log" 2>/dev/null
+  rm -rf "$STATEDIR/update" 2>/dev/null
+fi
+
+
+# ★ 2026-10-26 清掉过期的"更新待重启"状态：
+#   更新已经装好（本机 versionCode >= state 记录的目标版本）时，
+#   .update/state 里残留的 done/pending 会让界面一直亮"立即重启生效"。
+#   这里在开机早期直接删掉这份过期状态，界面读不到就不会再提示。
+_cfs_clear_stale_update_state() {
+  _st="$STATEDIR/update/state"
+  [ -s "$_st" ] || return 0
+  _cur=$(sed -n 's/^versionCode=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r ')
+  [ -n "$_cur" ] || return 0
+  _tgt=$(grep -oE '(140[0-9][0-9]|14[0-9][0-9][0-9])' "$_st" 2>/dev/null | sort -n | tail -n1)
+  if [ -n "$_tgt" ] && [ "$_cur" -ge "$_tgt" ] 2>/dev/null; then
+    rm -rf "$STATEDIR/update" 2>/dev/null
+    echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 清理过期更新状态（本机 $_cur >= 目标 $_tgt）" >> "$LOGDIR/mount.log" 2>/dev/null
+  fi
+  return 0
+}
+_cfs_clear_stale_update_state
 # 开机完成后：撤掉开机保护标记，把 pending_font 确认为 active_font，并检查挂载是否执行
 #
 # 【这里有一条最关键的规则】只有在真的「开机完成」时才撤掉 .booting 保护标记：
@@ -9,7 +36,7 @@
 
 MODDIR=${0%/*}
 
-# ★ 2026-10-31：壁纸正本在 $LIB/bg.jpg（永久目录），模块更新会换掉 webroot ——
+# ★ 2026-10-31：壁纸正本在 $LIBROOT/bg.jpg（永久目录），模块更新会换掉 webroot ——
 #   开机把副本补还原回去（跟 customize.sh 的还原互为兜底，幂等）。
 if [ ! -s "$MODDIR/webroot/bg.jpg" ] && [ -s "/data/adb/custom_font_lib/bg.jpg" ]; then
   cp -f "/data/adb/custom_font_lib/bg.jpg" "$MODDIR/webroot/bg.jpg" 2>/dev/null
@@ -21,7 +48,7 @@ fi
 #   只在这个小文件缺失时才动手，正常开机零开销。
 # ---------------------------------------------------------------------------
 _LIB="${LIB:-/data/adb/custom_font_lib}"
-if [ ! -s "$_LIB/scanned/slots.meta" ]; then
+if [ ! -s "$STATEDIR/scan/slots.meta" ]; then
   sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1
 fi
 
@@ -61,16 +88,30 @@ rm -f "$MODDIR/mount_missed"
 [ "$(getprop sys.boot_completed)" = "1" ] && rm -f "$MODDIR/.booting"
 # ★ 2026-11-01：**开机标记**（内容 = 本次 boot_id，mtime = 开机完成时刻）——
 #   quick/status 用它和 slots.map 的 mtime 比对，判定"计划是否比本次开机新"：
-#   新 = 用户改了开关/换了字体但还没重启 → 界面挂持久横幅「重启后生效」；
+#   新 = 用户刷入后改了开关/换了字体但还没重启 → 界面挂持久横幅「重启后生效」；
 #   重启后本文件被重写（mtime 更新）→ 横幅自动消失，无需手动关。
-printf '%s\n' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" > "$LIB/.boot.mark" 2>/dev/null
-# ★ 2026-11-01（作者要求，与主项目同版）：**开机生效快照** ——
-#   这次开机真正挂载的计划存一份；之后改开关/换字体只重写 slots.map 不动快照，
-#   界面的「当前实际生效」（BN=）在重启前保持开机数字，不会跟着新计划一起变。
+printf '%s\n' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" > "$STATEDIR/boot.mark" 2>/dev/null
+# ★ 2026-11-01（设计）：**开机生效快照** —— 这次开机真正挂载的计划存一份。
+#   service.sh 跑在管理器/自带挂载之后，此刻的 slots.map 正是"这次开机挂了什么"；
+#   之后用户改开关/换字体只会重写 slots.map，不动这个快照 →
+#   界面的「当前实际生效」在重启前保持开机数字，不会跟着新计划一起变
+#   （quick/status 的 BN= 行读它；重启后本快照随之更新）。
 cp -f "$MODDIR/slots.map" "$MODDIR/slots.boot.map" 2>/dev/null
 # 开机真的完成了 -> 把"连续失败"计数清零：说明这个字体在这台机器上是能用的。
 # （计数只在 post-fs-data 的救援分支里加，两次就会写 disable 停用模块，宁可保守。）
-[ "$(getprop sys.boot_completed)" = "1" ] && rm -f "$LIB/rescue_count" 2>/dev/null
+[ "$(getprop sys.boot_completed)" = "1" ] && rm -f "$STATEDIR/rescue_count" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+# 开机后按缓存策略清理一次：先 touch 当前在用的文件（让“最近使用”有依据），
+# 再按预设删除旧 TTC / 旧时钟配套。used 同时参考本次开机快照。
+# ---------------------------------------------------------------------------
+if [ -f "$MODDIR/fontctl.sh" ]; then
+  sh "$MODDIR/fontctl.sh" ttc-touch >/dev/null 2>&1
+  sh "$MODDIR/fontctl.sh" clock-touch >/dev/null 2>&1
+  sh "$MODDIR/fontctl.sh" ttc-mode-clean >/dev/null 2>&1
+  sh "$MODDIR/fontctl.sh" clock-prune >/dev/null 2>&1
+  echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 开机缓存清理完成（TTC/时钟）" >> "$LOGDIR/mount.log" 2>/dev/null
+fi
 
 # ---------------------------------------------------------------------------
 # 开机完成后补一次完整计划（含 .ttc 合集合成）。
@@ -83,7 +124,7 @@ if [ "$(cfg_get mount_in_service 0 2>/dev/null)" = 1 ] && [ -f "$MODDIR/mount.sh
   _p3=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
   case "$_p3" in ""|none) ;; *)
     beat service "B5：改为开机完成后挂载（service 阶段）"
-    ( . "$MODDIR/mount.sh"; payload_mount "$MODDIR" service ) >> "$LIB/mount.log" 2>&1
+    ( . "$MODDIR/mount.sh"; payload_mount "$MODDIR" service ) >> "$LOGDIR/mount.log" 2>&1
     ;;
   esac
 fi
@@ -102,7 +143,7 @@ if [ -f "$MODDIR/fontctl.sh" ] && [ ! -s "$MODDIR/slots.map" ]; then
         _svc_n=$(grep -c . "$MODDIR/slots.map" 2>/dev/null)
         beat service "补做结果：计划 ${_svc_n:-0} 个槽位（退出码 ${_svc_rc}，下次开机生效）"
         if [ "${_svc_n:-0}" = 0 ]; then
-          echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] service 补计划失败（rc=${_svc_rc}）：$(tail -n 3 "$_svc_ap" 2>/dev/null | tr '\n' ' ')" >> "$LIB/mount.log" 2>/dev/null
+          echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] service 补计划失败（rc=${_svc_rc}）：$(tail -n 3 "$_svc_ap" 2>/dev/null | tr '\n' ' ')" >> "$LOGDIR/mount.log" 2>/dev/null
         fi
         rm -f "$_svc_ap" 2>/dev/null
       fi
@@ -112,20 +153,21 @@ fi
 
 # ---------------------------------------------------------------------------
 # ★ 2026-10-16：**升级后清掉陈旧的状态缓存**。
-#   为什么需要：谷歌兼容的状态缓存（$LIB/.gms_status）有效期 6 小时，
+#   为什么需要：谷歌兼容的状态缓存（$STATEDIR/gms_status）有效期 6 小时，
 #   旧版本写下的"已被其它工具停用（foreign）"会被新版本继续沿用，
 #   用户升级后打开界面看到的还是错的，得点「重新检测」才刷新
-#   （作者真机实测："开关一次就正常了" —— 正是那次开关把缓存覆盖了）。
+#   （开发者真机实测："开关一次就正常了" —— 正是那次开关把缓存覆盖了）。
 #   这里比对模块版本，变了（= 刚升级/重装）就删掉缓存，让界面重算。
 if [ -f "$MODDIR/module.prop" ]; then
   _MV=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
-  _LV=$(cat "$LIB/.seen_version" 2>/dev/null | tr -d '\r\n')
+  _LV=$(cat "$STATEDIR/seen_version" 2>/dev/null | tr -d '\r\n')
   if [ -n "$_MV" ] && [ "$_MV" != "$_LV" ]; then
-    rm -f "$LIB/.gms_status" "$LIB/.verify.cache" 2>/dev/null
-    printf '%s' "$_MV" > "$LIB/.seen_version" 2>/dev/null
+    rm -f "$STATEDIR/gms_status" "$STATEDIR/verify.cache" 2>/dev/null
+    rm -rf "$CACHEDIR/plan" 2>/dev/null
+    printf '%s' "$_MV" > "$STATEDIR/seen_version" 2>/dev/null
     printf '%s %s\n' "$(date '+%m-%d %H:%M' 2>/dev/null)" \
       "模块版本变化：${_LV:-（首次）} → $_MV，已清状态缓存（谷歌兼容/挂载校验）" \
-      >> "$LIB/boot_events.log" 2>/dev/null
+      >> "$LOGDIR/boot_events.log" 2>/dev/null
   fi
 fi
 
@@ -141,9 +183,9 @@ if [ -f "$MODDIR/common.sh" ] && [ -f "$MODDIR/current_rom" ]; then
   if [ -n "$_R2" ] && [ "$_R2" != "$_R1" ]; then
     printf '%s' "$_R2" > "$MODDIR/current_rom" 2>/dev/null
     printf '%s %s\n' "$(date '+%m-%d %H:%M' 2>/dev/null)" \
-      "识别系统已修正：$_R1 → $_R2（开机完成后复算）" >> "$LIB/boot_events.log" 2>/dev/null
+      "识别系统已修正：$_R1 → $_R2（开机完成后复算）" >> "$LOGDIR/boot_events.log" 2>/dev/null
     # 识别变了 → 替换计划要按新识别重建（否则还会用旧清单的槽位）
-    rm -f "$LIB/.verify.cache" 2>/dev/null
+    rm -f "$STATEDIR/verify.cache" 2>/dev/null
   fi
 fi
 
@@ -156,7 +198,7 @@ fi
 #     才重新停用 —— 用户自己手动关掉的，我们不去跟他抢；
 #   · 让路：renice/ionice + 90 秒上限，绝不拖住开机（这个阶段开机已经完成了）。
 # ---------------------------------------------------------------------------
-if [ -f "$LIB/.gms_journal.conf" ] && [ -f "$MODDIR/google_font.sh" ]; then
+if [ -f "$STATEDIR/gms_journal.conf" ] && [ -f "$MODDIR/google_font.sh" ]; then
   beat service "谷歌字体兼容：检查是否被 GMS 更新重置"
   command -v renice >/dev/null 2>&1 && renice 10 $$ >/dev/null 2>&1
   [ -x /system/bin/ionice ] && /system/bin/ionice -c2 -n7 $$ >/dev/null 2>&1
@@ -249,6 +291,22 @@ prune_dead_slots() {
   done
 }
 prune_dead_slots
+# TTC 永久登记：升级后保留以前的缓存；开机计划里的字体也登记
+_ttc_reg="$STATEDIR/ttc.committed"
+if [ ! -f "$_ttc_reg" ]; then
+  : > "$_ttc_reg.tmp" 2>/dev/null
+  for _tf in "$CACHEDIR/ttc"/*; do
+    [ -f "$_tf" ] || continue
+    _ti=${_tf##*/}; _ti=${_ti%%.ttc*}
+    printf '%s\n' "$_ti" >> "$_ttc_reg.tmp" 2>/dev/null
+  done
+  sort -u "$_ttc_reg.tmp" > "$_ttc_reg" 2>/dev/null
+  rm -f "$_ttc_reg.tmp" 2>/dev/null
+else
+  awk 'NF >= 3 && $3 ~ /\/cache\/ttc\// { print $1 }' "$MODDIR/slots.boot.map" 2>/dev/null >> "$_ttc_reg"
+  sort -u "$_ttc_reg" > "$_ttc_reg.tmp" 2>/dev/null && mv -f "$_ttc_reg.tmp" "$_ttc_reg" 2>/dev/null
+fi
+sh "$MODDIR/fontctl.sh" ttc-mode-clean >/dev/null 2>&1
 
 # 关机中就别再动模块目录了（sync/relink 会写文件，正好撞上 init 卸载 /data）
 shutting_down && exit 0
@@ -259,7 +317,7 @@ sh "$MODDIR/fontctl.sh" relink >/dev/null 2>&1
 # ---------------------------------------------------------------------------
 # ★ 2026-10-31：后台**预热全部字体的计划缓存**（prewarm-all）
 #   解决"字体是以前导入的，第一次切换永远未命中"：开机 30 秒后把字体库里每份
-#   字体的最终计划都提前算好存进 $LIB/.plancache，之后**第一次**切换就是命中。
+#   字体的最终计划都提前算好存进 $CACHEDIR/plan，之后**第一次**切换就是命中。
 #   完全不和开机抢资源（开机完成 + 延迟 30 秒 + 降优先级）；失败无感，下次开机再试。
 # ---------------------------------------------------------------------------
 if [ -f "$MODDIR/fontctl.sh" ]; then
@@ -282,7 +340,7 @@ beat service "finish active=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_fo
 #
 #   安全设计（防止自己变成新的死循环）：
 #     · 最多 90 轮（约 15 分钟）→ 自己退出，不常驻
-#     · 锁文件保证单实例；$LIB/.no_watchdog 存在则完全不跑
+#     · 锁文件保证单实例；$STATEDIR/no_watchdog 存在则完全不跑
 #     · 系统稳定 12 轮（约 3 分钟）→ 清零计数并退出
 #     · killall system_server 全程**只执行一次**（标记文件守护）
 #     · 循环里每条命令都 `|| true`，出错就安静退出，不自我重启
@@ -360,7 +418,7 @@ _wd_start() {
 _wd_start
 
 # ★ 2026-10-24：上次开着抓日志（开机前没来得及关）→ 这次开机自动续抓
-if [ -f "${LIB:-/data/adb/custom_font_lib}/logs/.on" ] && [ -f "$MODDIR/logcatch.sh" ]; then
+if [ -f "$LOGDIR/.on" ] && [ -f "$MODDIR/logcatch.sh" ]; then
   sh "$MODDIR/logcatch.sh" resume >/dev/null 2>&1
 fi
 
@@ -404,19 +462,21 @@ _ota_guard() {
   LIB="${LIB:-/data/adb/custom_font_lib}"
   _fp=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n')
   [ -n "$_fp" ] || return 0
-  _old=$(cat "$LIB/.sysfp" 2>/dev/null | tr -d '\r\n')
+  _old=$(cat "$STATEDIR/sysfp" 2>/dev/null | tr -d '\r\n')
   [ "$_fp" = "$_old" ] && return 0
-  printf '%s' "$_fp" > "$LIB/.sysfp" 2>/dev/null
+  printf '%s' "$_fp" > "$STATEDIR/sysfp" 2>/dev/null
   # 第一次记录（老用户升级上来）不算系统更新
   [ -z "$_old" ] && return 0
   _pf=$(cat "$MODDIR/pending_font" 2>/dev/null | tr -d '[:space:]')
-  [ -n "$_pf" ] || _pf=$(cat "$LIB/pending_font" 2>/dev/null | tr -d '[:space:]')
-  [ -n "$_pf" ] || _pf=$(cat "$LIB/last_selection" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$_pf" ] || _pf=$(cat "$MODDIR/pending_font" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$_pf" ] || _pf=$(cat "$STATEDIR/last_selection" 2>/dev/null | tr -d '[:space:]')
   case "$_pf" in ""|none) _pf="" ;; esac
   {
     printf '[%s] 系统更新：%s → %s\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null)" "$_old" "$_fp"
-    rm -f "$MODDIR/current_rom" "$LIB/.plan.cache" "$LIB/.cand.cache" \
-          "$LIB/.device_fonts" "$LIB/.xmlnames.cache" "$LIB/.skipscan.cache" 2>/dev/null
+    rm -f "$MODDIR/current_rom" "$STATEDIR/plan.cache" "$STATEDIR/cand.cache" \
+          "$STATEDIR/device_fonts" "$STATEDIR/xmlnames.cache" "$STATEDIR/skipscan.cache" 2>/dev/null
+    rm -rf "$CACHEDIR/plan" 2>/dev/null
+    rm -rf "$CACHEDIR/plan" 2>/dev/null
     if sh "$MODDIR/fontctl.sh" rescan >/dev/null 2>&1; then
       printf '  ✓ 槽位已重扫\n'
     else
@@ -429,8 +489,8 @@ _ota_guard() {
         printf '  ! 重新应用失败（可在界面重新切一次）\n'
       fi
     fi
-  } >> "$LIB/ota.log" 2>&1
-  : > "$LIB/.ota.adapted" 2>/dev/null
+  } >> "$LOGDIR/ota.log" 2>&1
+  : > "$STATEDIR/ota.adapted" 2>/dev/null
 }
 # 后台跑，别拖慢开机
 ( _ota_guard ) >/dev/null 2>&1 &

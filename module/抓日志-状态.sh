@@ -7,7 +7,7 @@ D=${0%/*}
 cd "$D" 2>/dev/null
 if [ -f "$D/logcatch.sh" ]; then
   sh "$D/logcatch.sh" status
-  F="/data/adb/custom_font_lib/logs/catch.log"
+  F="/data/adb/custom_font_lib/state/logs/catch.log"
   if [ -s "$F" ]; then
     echo "文件：$F  $(wc -c < "$F" 2>/dev/null) 字节"
   fi

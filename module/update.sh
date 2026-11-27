@@ -14,7 +14,7 @@
 
 MODDIR=$(cd "$(dirname "$0")" && pwd)
 . "$MODDIR/common.sh"
-TMP="$LIB/.update"
+TMP="$STATEDIR/update"
 mkdir -p "$TMP" 2>/dev/null
 STATE="$TMP/state"      # 进度状态文件，WebUI 会轮询它画进度条
 
@@ -95,11 +95,11 @@ jnum() { tr -d '\r\n' < "$2" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9
 # 为什么必须这么干：module.prop 里的 updateJson 是**随模块发出去的** ——
 #   已经装了旧版的人，那份文件永远指着老地址。只改 module.prop 救不了他们。
 #   而且 jsDelivr 的 @main 别名缓存 purge 不掉：v1.2.5 发布 3 小时后
-#   它仍返回 v1.2.0，用户看到"已是最新"（真机实测，作者手动 purge 才跳过去）。
+#   它仍返回 v1.2.0，用户看到"已是最新"（真机实测，开发者手动 purge 才跳过去）。
 #
 # 顺序：先快后稳 ——
-#   ① module.prop 配的（v1.2.6 起 = 作者 Worker，一改就生效）
-#   ② 作者 Worker 固定地址（老 module.prop 没有这条，靠它兜底）
+#   ① module.prop 配的（v1.2.6 起 = 开发者 Worker，一改就生效）
+#   ② 开发者 Worker 固定地址（老 module.prop 没有这条，靠它兜底）
 #   ③ jsDelivr（老地址，缓存慢但一般能通）
 #   ④ raw.githubusercontent.com（最权威，国内常连不上，放最后）
 # 只要有一条返回了**更大的 versionCode**，就用它的整份数据。
@@ -111,17 +111,19 @@ UPD_REPO="ayss2188/custom-font-switcher"
 #   结果子项目检查/下载到的是主项目的包。
 _MID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
 case "$_MID" in
-  porsche_font_718)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-718.json" ;;
-  porsche_font_911)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-911.json" ;;
-  porsche_font_gt3)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-gt3.json" ;;
-  porsche_font_*)    UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update.json" ;;
+  porsche_font_718)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-718.json"; UPD_ALI_VER="718" ;;
+  porsche_font_911)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-911.json"; UPD_ALI_VER="911" ;;
+  porsche_font_gt3)  UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update-gt3.json"; UPD_ALI_VER="gt3" ;;
+  porsche_font_*)    UPD_REPO="ayss2188/porsche-font"; UPD_JSON="update.json"; UPD_ALI_VER="multi" ;;
 esac
 UPD_JSON="${UPD_JSON:-update.json}"          # 在 case 里按仓库替换
+UPD_ALI="https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/${UPD_ALI_VER:-}/manager-update.json"
 
 _read_json() {   # $1=json 文件；把五个字段填进全局
   NEW_VER=$(jstr version "$1")
   NEW_CODE=$(jnum versionCode "$1")
-  ZIP_URL=$(jstr zipUrl "$1")
+  ZIP_URL=$(jstr aliyunZipUrl "$1")
+  [ -n "$ZIP_URL" ] || ZIP_URL=$(jstr zipUrl "$1")
   LOG_URL=$(jstr changelog "$1")
   SHA=$(jstr sha256 "$1")
 }
@@ -161,6 +163,7 @@ load_json() {
   _BUST=$(date +%s 2>/dev/null)
   case "${_BUST:-}" in ''|*[!0-9]*) _BUST=0 ;; esac
   for base in \
+      "$([ -n "$UPD_ALI_VER" ] && printf '%s?t=%s' "$UPD_ALI" "$_BUST")" \
       "$([ -n "$repo" ] && printf 'https://raw.githubusercontent.com/%s/main/%s?t=%s' "$repo" "$UPD_JSON" "$_BUST")" \
       "$([ -n "$repo" ] && printf 'https://cdn.jsdelivr.net/gh/%s@main/%s?t=%s' "$repo" "$UPD_JSON" "$_BUST")" \
       "$([ -n "$repo" ] && printf '%s/update?repo=%s&t=%s' "$UPD_WORKER" "$repo" "$_BUST")" \
@@ -178,7 +181,7 @@ load_json() {
         SHA=$(jstr sha256 "$TMP/update.json")
       fi
       # ★ 2026-10-16：**够新就停**。
-      #   每个不可达地址要等满 fetch 的超时（20 秒），而作者自己的 Worker
+      #   每个不可达地址要等满 fetch 的超时（20 秒），而开发者自己的 Worker
       #   （workers.dev 域名）在部分网络下完全连不上 —— 依次全试最坏 4×20=80 秒，
       #   用户会以为界面卡死。
       #   一旦某个地址给出的版本**已经比本地新**，"有更新"这个结论就拿到了，
@@ -289,7 +292,7 @@ case "${1:-check}" in
       if [ "$_mt" -gt 0 ] && [ "$_st_mt" -gt 0 ] && [ $((_mt - _st_mt)) -gt 300 ]; then
         case "$_ps" in ''|*[!0-9]*) ;; *) kill -9 "$_ps" 2>/dev/null ;; esac
         rm -f "$STATE" "$TMP/dl.rc" "$TMP/worker.rc" "$TMP/install.log" 2>/dev/null
-        echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 清理陈旧 worker（state 已 ${_mt}-${_st_mt} 秒未更新）" >> "$LIB/mount.log" 2>/dev/null
+        echo "[$(date '+%m-%d %H:%M:%S' 2>/dev/null)] 清理陈旧 worker（state 已 ${_mt}-${_st_mt} 秒未更新）" >> "$LOGDIR/mount.log" 2>/dev/null
       fi
     fi
     case "$_st" in
@@ -397,13 +400,13 @@ case "${1:-check}" in
     prog verify 0 0 "正在校验刷机包"
 
     # -------------------------------------------------------------------------
-    # 校验：**只看版本，不看指纹**（2026-10-12 按作者决定）
+    # 校验：**只看版本，不看指纹**（2026-10-12 按开发者决定）
     #
     # 为什么不再校验 sha256：v1.0.6 那次事故里**包从头到尾都是好的**，被拒是因为我们手上
     #   那份账本来自 CDN 缓存、里面的 sha256 是上一版的 —— 等于我们自己拿旧指纹否掉了好包，
     #   用户看到"sha256 不一致，已取消安装"，只会以为我们发的包坏了。
     #   真正落地安装的是 Root 管理器自己（它会用账本里的 sha256 比对下载到的包），
-    #   作者实测管理器里点更新直接就能刷进去 —— 所以这一层是多余的误伤点，去掉。
+    #   开发者实测管理器里点更新直接就能刷进去 —— 所以这一层是多余的误伤点，去掉。
     #
     # 留下的两个检查都是版本层面的：
     #   · 包里的模块 ID 必须还是我们这个模块
@@ -438,7 +441,7 @@ case "${1:-check}" in
     _ILOG="$TMP/install.log"
     # ★ 2026-10-16（C1）：把上一份日志轮转走，别直接删 ——
     #   真机上排查"升级后状态不对"时，最需要的恰恰是**上一次**安装的输出，
-    #   而原来每次 install 都 rm 掉，证据就没了（作者实测踩过）。
+    #   而原来每次 install 都 rm 掉，证据就没了（开发者实测踩过）。
     [ -s "$_ILOG" ] && mv -f "$_ILOG" "$TMP/install-prev.log" 2>/dev/null
     rm -f "$_ILOG" "$TMP/install.rc" 2>/dev/null
     case "$(root_manager)" in
@@ -458,7 +461,7 @@ case "${1:-check}" in
     _PREVVER=$(prop version)          # 安装前的版本：要求"变了"才算装好
     _iok=0
     while [ ! -f "$TMP/install.rc" ]; do
-      # ★ 2026-10-23（作者实测"卡在正在安装"）：管理器**装完不返回**，install.rc 永远不写。
+      # ★ 2026-10-23（开发者实测"卡在正在安装"）：管理器**装完不返回**，install.rc 永远不写。
       #   所以除了退出码，再加"版本判据"：已装好的模块版本 == 目标版本，
       #   或出现了 modules_update/<id>（管理器已接管待生效），都算装好了。
       _iv=$(sed -n 's/^version=//p' "/data/adb/modules/$_MID/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
@@ -496,7 +499,7 @@ case "${1:-check}" in
       fi
       # 进度条按耗时稳着爬：0% → 97%（最多 300 秒爬满），
       #   宁可"慢慢爬"也不要"跳一下停住"——后者看着像死机。
-      # ★ 2026-10-18（作者反馈「进度条一秒到头」）：
+      # ★ 2026-10-18（实测「进度条一秒到头」）：
       #   原来是线性爬：`waited * 97 / 300` —— 300 秒才爬满。
       #   而真机安装只要 20~60 秒，于是进度条才走到 6%~19% 就"突然完成"，
       #   看着像"根本没动"。反过来网慢下载时又瞬间冲到 97% 然后不动。
@@ -533,7 +536,7 @@ case "${1:-check}" in
     else
       # ★ 2026-10-16（C2）：把**完整**安装日志复制到 Download ——
       #   原来只把末 3 行拼成一行塞进进度条，ksud 的多行报错常被截掉关键原因，
-      #   用户只能重来、作者也拿不到证据。现在留一份完整文件，界面能提示去哪看。
+      #   用户只能重来、开发者也拿不到证据。现在留一份完整文件，界面能提示去哪看。
       #   顺手（C4）：区分"存储空间不足"和"网络/其他"——子项目的包有 63MB，
       #   低存储设备上会撞上，而原来的提示只会说"下载或安装失败"。
       _LOGOUT="/data/media/0/Download/安装日志.txt"
@@ -566,7 +569,7 @@ case "${1:-check}" in
       prog error 0 0 "安装失败：$_why"
       echo "ERROR:安装失败：$_why"
       echo "      完整日志已存到：$_LOGOUT"
-      echo "      （把它发给作者就能定位）"
+      echo "      （把它发给开发者就能定位）"
       exit 1
     fi
     ;;

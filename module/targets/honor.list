@@ -1,7 +1,17 @@
 # honor 机型清单（荣耀 MagicOS）
 #
-# 来源：参考模块（洛书/字域）里的厂商字体名 + 荣耀/华为共用 HarmonyOS Sans 的公开信息
+# 来源：公开字体资料里的厂商字体名 + 荣耀/华为共用 HarmonyOS Sans 的公开信息
 # 说明：AOSP 通用字体由 aosp.list 兜底，这里只列厂商专有。
+
+# 实测 Honor Magic8 Pro / MagicOS 10.0.0.195：
+#   主字体 HONORSansVFNormal.ttf，upem 1000，wght 100-900 默认 400，另有 opsz 轴。
+#   时钟字体两类：
+#     Honor-digit-{Regular,light,medium}.otf  静态，digit 宽 512
+#     HonorDigits_*.ttf                       可变，wght 100-900 默认 100
+#       例：Round 576 / Serif 608 / Fashion 378 / Long 368 / ZYRainbow 538
+#     HONORSans_Digit_Condensed.ttf           可变，wght 100-900，digit 523
+#   Honor 的 fonts.xml 已标记 deprecated，时钟字体不一定出现在 XML 里，
+#   所以运行时要按 family 名 + 文件名双重检测，不能只靠这份清单。
 
 [main]
 HarmonyOS_Sans_SC_Regular.ttf
@@ -15,5 +25,36 @@ HONORSans-Light.ttf
 HihonorSans-Regular.ttf
 HihonorSans-Bold.ttf
 
+HONORSansVFNormal.ttf
+HONORSansVFCN.ttf
+HONORSansVFTC.ttf
+HONORSansVFItalic.ttf
+HONORSansVFCondensed.ttf
+HONORSansVFConItalic.ttf
+HONORSansVFArabic.ttf
+HONORSansVFArabicUI.ttf
+HonorSansIconPNG.ttf
+HonorSansIconSVG.ttf
 [clock]
 HONORClock.ttf
+HONORSans_Digit_Condensed.ttf
+Honor-digit-Regular.otf
+Honor-digit-light.otf
+Honor-digit-medium.otf
+HonorDigits_Cartoon.ttf
+HonorDigits_DecoVF.ttf
+HonorDigits_Energy.ttf
+HonorDigits_Fashion.ttf
+HonorDigits_Future.ttf
+HonorDigits_HY_SerifVF.ttf
+HonorDigits_Handwriting.ttf
+HonorDigits_InlineVF.ttf
+HonorDigits_ItalicVF.ttf
+HonorDigits_Long.ttf
+HonorDigits_LongSerif.ttf
+HonorDigits_Modern.ttf
+HonorDigits_RoundVF.ttf
+HonorDigits_SerifVF.ttf
+HonorDigits_Speedy.ttf
+HonorDigits_Trendy.ttf
+HonorDigits_ZYRainbowVF.ttf

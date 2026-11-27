@@ -177,11 +177,11 @@ builtin_import() {
 # ⚠️ 安装时 $MODDIR 是**暂存目录**（/data/adb/modules_update/<id>），zip 里不带状态文件，
 #    所以在 $MODDIR 里读 pending_font / active_font 永远读不到 —— 必须读：
 #      $OLD=/data/adb/modules/<id>  已安装模块目录（升级前用户的选择就在这里）
-#      $LIB/last_selection          字体库记录的选择（姊妹项目 custom_font_switcher 也写它）
+#      $STATEDIR/last_selection          字体库记录的选择（旧版实现 custom_font_switcher 也写它）
 # ---------------------------------------------------------------------------
 builtin_in_use() {
   local id="$1" s v
-  for s in "$OLD/pending_font" "$OLD/active_font" "$LIB/last_selection" \
+  for s in "$OLD/pending_font" "$OLD/active_font" "$STATEDIR/last_selection" \
            "$MODDIR/pending_font" "$MODDIR/active_font"; do
     [ -f "$s" ] || continue
     v=$(tr -d '[:space:]' 2>/dev/null < "$s")
@@ -200,7 +200,7 @@ builtin_in_use() {
 #              （老包把字体硬链接进 module/system/fonts，根本不进字体库，
 #                所以升级上来字体库里没有旧字体，不用迁移）
 #   新模板   ：<已安装模块目录>/active_font 或 pending_font，内容是字体库 id
-#   字体库   ：$LIB/last_selection，内容是字体库 id
+#   字体库   ：$STATEDIR/last_selection，内容是字体库 id
 #
 # ⚠️ 读的必须是**已安装**目录（$OLD = /data/adb/modules/<id>）：
 #    安装时 $MODPATH 是暂存目录 /data/adb/modules_update/<id>，zip 里没有状态文件，
@@ -225,7 +225,7 @@ builtin_last_choice() {
   done
   # 2) 字体库 id（builtin_none 之类）
   if [ -z "$want" ]; then
-    v=$(tr -d '[:space:]' 2>/dev/null < "$LIB/last_selection")
+    v=$(tr -d '[:space:]' 2>/dev/null < "$STATEDIR/last_selection")
     [ -n "$v" ] || v=$(tr -d '[:space:]' 2>/dev/null < "$OLD/active_font")
     [ -n "$v" ] || v=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font")
     case "$v" in
@@ -248,14 +248,14 @@ builtin_last_choice() {
 # 清掉字体库里"没人用"的旧字体（f<时间戳>.ttf，一个就几十 MB）
 #
 # ⚠️ 只删**孤儿**：正在生效 / 待生效 / 上次选择 指向的一律保留。
-#    为什么这么保守：字体库是**和姊妹项目 custom_font_switcher 共用**的
+#    为什么这么保守：字体库是**和旧版实现 custom_font_switcher 共用**的
 #    （它也把用户导入的字体存在同一个 /data/adb/custom_font_lib）。
 #    删掉它正在用的字体 = 那个模块下次开机挂载失效、字体静默变回默认。
 #    省空间是次要目标，绝不值得冒这个险。
 #
 # 另外：老包 v2.0 从来不往字体库放东西（它把字体硬链接进 module/system/fonts，
 # 状态写 active_profile/pending_profile），所以"老包升级上来库里有旧字体"并不成立；
-# 这个函数实际只服务于"用户同时用过姊妹项目"的边缘情况。
+# 这个函数实际只服务于"用户同时用过旧版实现"的边缘情况。
 # ---------------------------------------------------------------------------
 builtin_clean_legacy() {
   local f id kept=0 removed=0 kb=0 n
@@ -294,7 +294,7 @@ builtin_clean_legacy() {
 #     · 内置的被用户删了 → builtin_import 已经按包里的原件重新链回来
 #     · 选中的正好是被删掉的那个 → 清掉记录，自动回落内置配色
 #
-#   ⚠️ 字体库是**和姊妹项目 custom_font_switcher 共用**的。
+#   ⚠️ 字体库是**和旧版实现 custom_font_switcher 共用**的。
 #      那个模块在装（且没被标记删除）时，库里的 f<数字> 一个都不能动 ——
 #      否则它下次开机会挂载失败、字体静默变回默认。
 # ---------------------------------------------------------------------------
@@ -305,7 +305,7 @@ builtin_prune_imported() {
     [ -d "$d" ] && [ ! -f "$d/remove" ] && sib=1
   done
   if [ "$sib" = "1" ]; then
-    ui_print "- 检测到姊妹项目「自定义字体切换模块」也在用字体库 → 已导入的字体保留不动"
+    ui_print "- 检测到旧版实现「自定义字体切换模块」也在用字体库 → 字体库里已有的字体保留不动"
     return 0
   fi
   [ -d "$LIB" ] || return 0
@@ -340,7 +340,7 @@ builtin_prune_imported() {
   fi
 
   # 选中项如果指向已经不存在的字体 → 清掉，回落内置配色
-  for f2 in "$LIB/last_selection" "$LIB/.last_good" "$OLD/active_font" "$OLD/pending_font"; do
+  for f2 in "$STATEDIR/last_selection" "$STATEDIR/last_good" "$OLD/active_font" "$OLD/pending_font"; do
     [ -f "$f2" ] || continue
     v=$(tr -d '[:space:]' 2>/dev/null < "$f2")
     case "$v" in ""|none) continue ;; esac
@@ -384,7 +384,7 @@ builtin_menu() {
 
     #   「没找到你上次选的 X」+「沿用你上次的配色选择」
 
-    #   这种自相矛盾（作者本人吐槽过）。
+    #   这种自相矛盾（开发者本人吐槽过）。
     #   调用方在进菜单之前设 BUILTIN_MENU_NOTE=... 就能覆盖这句话。
     if [ -n "${BUILTIN_MENU_NOTE:-}" ]; then
       ui_print "- $BUILTIN_MENU_NOTE"
@@ -499,7 +499,7 @@ builtin_menu() {
 # ---------------------------------------------------------------------------
 # ★ 关键：把「用户上次选的那份字体」认成**内置的哪一套**
 #
-# 为什么需要（作者一句话点破）：
+# 为什么需要（开发者一句话点破）：
 #   从老版本升上来时，**字体原文件换了**（旧版的字体库 id 跟新版的 builtin_* 不是一回事），
 #   所以 `apply $LAST` 必然找不到 —— 这**不是 bug，是必然**。
 #   但既然"没找到就能自动改用一套"，那就该改用到**用户原来那套**，
@@ -514,7 +514,7 @@ builtin_menu() {
 # ---------------------------------------------------------------------------
 # ★★ 最可靠的一招：**读已安装模块的 module.prop 描述**
 #
-# 为什么这个最优先（作者点破的，比按文件大小猜干净得多）：
+# 为什么这个最优先（开发者点破的，比按文件大小猜干净得多）：
 #   老版本是**正常在用**的，而 refresh_prop 每次切换都会把"当前生效的是哪套"
 #   写进 module.prop 的描述里：
 #       description=[系统：自动识别 | 当前生效：718素装版（无色版）] 内置配色版：…

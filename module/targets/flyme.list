@@ -10,7 +10,23 @@
 # 分区列表：
 #
 # 分区（开关只决定读不读某个分区，不用扫描）：
-#   [main]    主力字体（中/英/数字）—— 永远读
+#   # 实测 Flyme 12.7.0.0A（魅族 22，2026-11-12）：
+#   主字体 FlymeSansVF.ttf，upem 1000，wght 250-900 默认 400，digit 615。
+#   fonts.xml 的 sans-serif 仍写 Roboto；FlymeSans 在 font_fallback.xml。
+#   系统字体目录里只有 AndroidClock.ttf，没有独立 Flyme 时钟字体，
+#   锁屏时钟样式在主题资源里，需要运行时检测 + 主题目录。
+
+# 实测 Flyme 11.2.1.0（魅族 21 Note，Android 14）：
+#   主字体 SourceHanSansSC-VF.ttf，upem 1000，glyph 65502，wght 250-900 默认 250。
+#   Inter_VF.ttf upem 2816，wght 100-900 + slnt。
+#   Qimiao_VF.ttf upem 1000，wght 100-900。
+#   时钟仍只有 AndroidClock.ttf，没有 Flyme 自家时钟字体。
+#   Flyme 12 才改成 FlymeSansVF（glyph 65534）。
+
+[main]
+Qimiao_VF.ttf
+Inter_VF.ttf
+SourceHanSansSC-VF.ttf    主力字体（中/英/数字）—— 永远读
 #   [clock]   时钟字体 —— 「保留锁屏时钟」开着时不读
 #   [theme]   主题字体（圆体/方体/衬线/斜体/等宽/装饰）
 #   [cjk]     中文（繁中/兰亭）
@@ -78,3 +94,6 @@ SourceSansPro-SemiBoldItalic.ttf
 DroidSans.ttf
 DroidSans-Bold.ttf
 DroidSansMono.ttf
+[cjk]
+NotoSansCJK-Regular.ttc
+NotoSerifCJK-Regular.ttc

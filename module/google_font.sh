@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # 谷歌字体兼容（停用 GMS 的 FontsProvider）—— 开关 + 记录 + 开机复查
 #
-# ★ 状态判据**照搬已经在真机上跑通的那份实现**（姊妹项目 D:\ds2 的 google_font.sh），
+# ★ 状态判据**照搬已经在真机上跑通的那份实现**（旧版实现 D:\ds2 的 google_font.sh），
 #   就一行：
 #     dumpsys package com.google.android.gms | grep -i -A60 "disabledComponents" | grep -q "$PROVIDER"
 #   不做"声明检查"、不猜 dumpsys 排版、不去 APK 里捞类名、不读 package-restrictions.xml。
@@ -14,16 +14,19 @@
 #
 # 用法：sh google_font.sh status [fresh] | enable | restore | reconcile | diag | uninstall
 
-LIB=${LIB:-/data/adb/custom_font_lib}
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
+STATEDIR="$LIBROOT/state"
+mkdir -p "$STATEDIR" 2>/dev/null
 # ★ 2026-10-16 修：这里原来没有 MODDIR，而 do_diag 里用 [ -f "$MODDIR/gms_cache.sh" ]
 #   判断"有没有 gms_cache.sh"—— MODDIR 为空时变成查 /gms_cache.sh，
 #   必然不存在 → 报告里永远打印"没有 gms_cache.sh（装的还是旧版包）"，
 #   跟同一份报告的文件列表自相矛盾（文件明明在）。
 MODDIR=${MODDIR:-${0%/*}}
-JOURNAL="$LIB/.gms_journal.conf"      # user= / original= / changedAt=
-STATUS_CACHE="$LIB/.gms_status"       # 状态缓存（dumpsys 慢，界面每次打开不能都跑）
-CACHE_ON_FLAG="$LIB/.gms_cache_on"    # ★ 缓存桥接的启用标志（gms_cache.sh 开机时看它）
-GFLOG="$LIB/.gms_log"                 # 做过什么
+JOURNAL="$STATEDIR/gms_journal.conf"      # user= / original= / changedAt=
+STATUS_CACHE="$STATEDIR/gms_status"       # 状态缓存（dumpsys 慢，界面每次打开不能都跑）
+CACHE_ON_FLAG="$STATEDIR/gms_cache_on"    # ★ 缓存桥接的启用标志（gms_cache.sh 开机时看它）
+GFLOG="$STATEDIR/gms_log"                 # 做过什么
 CACHE_TTL=${CACHE_TTL:-21600}         # 缓存 6 小时；「重新检测」= status fresh 强制刷新
 BOOTID_FILE=${CFS_BOOTID_FILE:-/proc/sys/kernel/random/boot_id}
 
@@ -120,7 +123,7 @@ is_disabled() {
   #   小米/HyperOS 的停用清单很长，FontsProvider 排在窗口外就找不到
   #   → 判成"没停用" → do_status 去问账本 → 账本没有
   #   → 显示"已被其它工具停用（本模块不接管）"，跟同一份报告里
-  #      「组件状态=已停用」自相矛盾（作者反馈的就是这个）。
+  #      「组件状态=已停用」自相矛盾（实测的就是这个）。
   #   试过 -A400：1200 行时仍漏。又试过"按小节边界"：真实 dumpsys 缩进不规则，
   #   会把段内的行判成段外。所以最后用**最不容易错**的写法：
   #     有 `disabledComponents:` 段头 + 段头之后出现过 provider 名 = 已停用。
@@ -129,7 +132,7 @@ is_disabled() {
   #   输出几十万字节 → /system/bin/printf: Argument list too long（单参数 128KB 上限）
   #   → awk 拿不到输入 → 永远判成"没停用"（界面显示未开启，其实早就停用了）。
   #   现在直接写临时文件，awk 读文件，不经过参数传递。
-  local _tf="$LIB/.gms_dump.$$"
+  local _tf="$STATEDIR/gms_dump.$$"
   tmo 12 "$DUMP" package "$GMS" 2>/dev/null > "$_tf"
   if [ ! -s "$_tf" ]; then rm -f "$_tf" 2>/dev/null; return 1; fi
   # ★ 2026-10-18：只认 disabledComponents 段内的匹配。
@@ -223,7 +226,7 @@ cur_user() {
 kill_consumers() {
   local u="$1" stamp n
   [ -n "$AM" ] || return 0
-  stamp="$LIB/.gms_lastkill"
+  stamp="$STATEDIR/gms_lastkill"
   if [ -f "$stamp" ]; then
     n=$(sed -n 's/^count=//p' "$stamp" 2>/dev/null); n=${n:-0}
     local last boot now bootnow

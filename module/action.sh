@@ -4,7 +4,7 @@
 #   KernelSU / APatch：只做一件事 —— 抓崩溃日志（开始 / 停止并导出）
 #   Magisk：只做一件事 —— 打开 WebUI（Magisk 没有自带的 WebUI 入口）
 #
-# ★ 2026-10-24（作者要求"纯粹一点"）：
+# ★ 2026-10-24（设计"纯粹一点"）：
 #   以前这里还会顺手生成诊断报告、检查更新 —— 点一下要等 1~2 分钟，
 #   而且和"抓日志"这件事混在一起。现在两件事彻底分开：
 #     · 要完整诊断报告 → 进 WebUI 里点
@@ -13,7 +13,8 @@
 
 MODDIR=${0%/*}
 . "$MODDIR/common.sh" 2>/dev/null
-LIB="${LIB:-/data/adb/custom_font_lib}"
+LIBROOT="${LIBROOT:-/data/adb/custom_font_lib}"
+LIB="$LIBROOT/fonts"
 MODID=$(sed -n 's/^id=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
 MODNAME=$(sed -n 's/^name=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r')
 
@@ -43,9 +44,9 @@ if [ ! -f "$MODDIR/logcatch.sh" ]; then
 fi
 
 echo "—— 抓崩溃日志 ——"
-if [ -f "$LIB/logs/.on" ]; then
+if [ -f "$LOGDIR/.on" ]; then
   echo "状态：正在抓"
-  _sz=$(wc -c < "$LIB/logs/catch.log" 2>/dev/null | tr -d ' ')
+  _sz=$(wc -c < "$LOGDIR/catch.log" 2>/dev/null | tr -d ' ')
   [ -n "$_sz" ] && echo "已抓：$(( _sz / 1024 )) KB"
   echo " "
   echo "现在停止并导出…"
