@@ -1760,7 +1760,10 @@ try {
   <div class="btn-row fade">
     <button class="g-btn" id="porscheCheckBtn" onclick="porscheClockCheck()">检测更新</button>
     <button class="g-btn" id="porscheLogBtn" onclick="porscheClockChangelog()">更新日志</button>
-    <button class="g-btn" onclick="porscheClockInstallMenu()">安装插件</button>
+    <button class="g-btn" id="porscheInstallBtn" onclick="porscheClockInstallMenu()">安装插件</button>
+    <button class="g-btn" id="porscheDownloadBtn" onclick="porscheClockUpdate()" style="display:none">下载并安装</button>
+    <button class="g-btn" id="porscheLocalBtn" onclick="porscheClockPickZip()" style="display:none">从本地安装</button>
+    <button class="g-btn" id="porscheUninstallBtn" onclick="porscheClockUninstall()" style="display:none">卸载</button>
   </div>
 
   <div class="section-title fade" id="porscheToolsSection" style="margin-top:18px;display:none"><span>字体工具箱</span></div>
@@ -1784,7 +1787,7 @@ try {
   <div class="btn-row fade">
     <button class="g-btn" onclick="fontPackCheck(true)">检查字体更新</button>
     <button class="g-btn" onclick="fontPackChangelog()">字体更新日志</button>
-    <button class="g-btn" onclick="fontPackInstallMenu()">安装字体</button>
+    <button class="g-btn" id="fontPackInstallBtn" onclick="fontPackInstallMenu()">安装字体</button>
   </div>
   <div id="fontPackPanel" style="display:none;margin:12px 0 2px">
     <div id="fontPackPanelText" class="g-hint" style="margin:0 0 8px"></div>
@@ -9125,12 +9128,12 @@ function porscheApplyCachedStatus() {
     if (toolsTitle) toolsTitle.style.display = "";
     if (toolsEntry) toolsEntry.style.display = "";
     if (toolsCheck) toolsCheck.style.display = "";
-    const unb = document.getElementById("porscheUninstallBtn");
-    if (unb) unb.style.display = "";
-    for (const id of ["porscheCheckBtn", "porscheLogBtn"]) {
+    for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn", "porscheLocalBtn", "porscheUninstallBtn"]) {
       const b = document.getElementById(id);
       if (b) b.style.display = "";
     }
+    const ib = document.getElementById("porscheInstallBtn");
+    if (ib) ib.style.display = "none";
   } catch (e) {}
 }
 
@@ -9153,12 +9156,12 @@ async function porscheRefreshStatus() {
   if (toolsTitle) toolsTitle.style.display = ins ? "" : "none";
   if (toolsEntry) toolsEntry.style.display = ins ? "" : "none";
   if (toolsCheck) toolsCheck.style.display = ins ? "" : "none";
-  const unb = document.getElementById("porscheUninstallBtn");
-  if (unb) unb.style.display = ins ? "" : "none";
-  const cb = document.getElementById("porscheCheckBtn");
-  const lb = document.getElementById("porscheLogBtn");
-  if (cb) cb.style.display = "";
-  if (lb) lb.style.display = "";
+  for (const id of ["porscheCheckBtn", "porscheLogBtn", "porscheDownloadBtn", "porscheLocalBtn", "porscheUninstallBtn"]) {
+    const b = document.getElementById(id);
+    if (b) b.style.display = ins ? "" : "none";
+  }
+  const ib = document.getElementById("porscheInstallBtn");
+  if (ib) ib.style.display = ins ? "none" : "";
   return { ins, ver };
 }
 async function porscheClockRender() {
@@ -9461,9 +9464,15 @@ async function fontPackAfterInstall(version) {
   await fontPackState().catch(() => {});
   try { await refreshAll(true); } catch (e) {}
   try { await fontPackCheck(false); } catch (e) {}
-  fontPackPanel("字体包 " + version + " 已安装，已切换到无字体。请重新选择字体。", 1, false);
-  showToast("字体包已更新，已切换到无字体，请重新选择字体", false, 6000);
-  setTimeout(fontPackPanelHide, 2600);
+  fontPackPanel("字体包 " + version + " 已安装，已切换到无字体。请重启后重新选择字体。", 1, false);
+  const btn = document.getElementById("fontPackInstallBtn");
+  if (btn) {
+    btn.textContent = "立即重启生效";
+    btn.className = "g-btn urgent";
+    btn.onclick = () => { try { doReboot(); } catch (e) {} };
+  }
+  showToast("字体包已更新，已切换到无字体，请重启后重新选择字体", false, 7000);
+  setTimeout(fontPackPanelHide, 3200);
 }
 async function fontPackInstallGitHub() {
   if (!FONT_PACK_LATEST) await fontPackCheck(false);
@@ -9504,28 +9513,6 @@ async function fontPackInstallGitHub() {
   }
 }
 
-async function fontPackInstallGitHub() {
-  if (!FONT_PACK_LATEST) await fontPackCheck(false);
-  const j = FONT_PACK_LATEST;
-  if (!j || !j.zipUrl) { showToast("先检查字体更新", false, 5000); return; }
-  if (!(await dialog({
-    title: "安装字体包 " + (j.version || ""),
-    msg: "将从 GitHub 下载签名字体包，校验后替换内置字体。\n\n安装后会清空 TTC、时钟和计划缓存，并提示重新应用。",
-    okText: "下载并安装"
-  }))) return;
-  const name = String(j.zipUrl).split("/").pop().split("?")[0] || ("porsche-fonts-" + fontPackVariant() + ".zip");
-  const path = "/sdcard/Download/" + name;
-  showToast("正在下载字体包…", true);
-  try {
-    const out = String(await ksuExecTO(`mkdir -p /sdcard/Download; curl -L --connect-timeout 10 -m 300 -o ${shq(path)} ${shq(j.zipUrl)} 2>&1`, 330000) || "");
-    if (out && /error|failed|Could not/i.test(out) && !/100\s+100/i.test(out)) throw new Error(out.slice(-200));
-    clearToast();
-    await fontPackInstallFile(path);
-  } catch (e) {
-    clearToast();
-    showToast("字体包下载失败：" + errText(e), false, 8000);
-  }
-}
 async function fontPackInstallFile(path) {
   if (!path) return;
   fontPackPanel("正在校验并安装字体包…", 1, true);
