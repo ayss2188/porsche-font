@@ -1786,6 +1786,15 @@ try {
     <button class="g-btn" onclick="fontPackChangelog()">字体更新日志</button>
     <button class="g-btn" onclick="fontPackInstallMenu()">安装字体</button>
   </div>
+  <div id="fontPackPanel" style="display:none;margin:12px 0 2px">
+    <div id="fontPackPanelText" class="g-hint" style="margin:0 0 8px"></div>
+    <div id="fontPackBarWrap" style="height:8px;border-radius:6px;overflow:hidden;background:rgba(128,128,128,.25)">
+      <div id="fontPackBar" style="height:100%;width:0%;background:#3b82f6;transition:width .25s ease"></div>
+    </div>
+    <div id="fontPackSpin" style="display:none;align-items:center;gap:8px;padding:6px 0">
+      <span class="spin"></span><span id="fontPackSpinText" class="g-hint" style="margin:0">正在安装…</span>
+    </div>
+  </div>
 
   <div class="divider"></div>
 
@@ -9344,11 +9353,50 @@ async function fontPackCheck(manual) {
     if (manual) showToast("字体包检查失败：" + errText(e), false, 6000);
   }
 }
+async function showUpdateLogModal(title, text, onlineUrl) {
+  const mask = document.getElementById("logMask");
+  const h = mask && mask.querySelector("h3");
+  const box = document.getElementById("logText");
+  const ld = document.getElementById("logLoading");
+  const btn = document.getElementById("logOnlineBtn");
+  if (!mask || !box) return;
+  if (h) h.textContent = title || "更新日志";
+  box.dataset.local = String(text || "");
+  box.textContent = String(text || "").trim() || "（空）";
+  box.scrollTop = 0;
+  if (ld) ld.style.display = "none";
+  if (btn) {
+    btn.style.display = onlineUrl ? "" : "none";
+    btn.disabled = false;
+    btn.textContent = "看线上最新";
+    btn.onclick = async () => {
+      if (!onlineUrl) return;
+      btn.disabled = true; btn.textContent = "联网中…";
+      if (ld) ld.style.display = "flex";
+      try {
+        const r = await withTimeout(fetch(onlineUrl + (onlineUrl.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), 8000);
+        if (!r || !r.ok) throw new Error("HTTP " + (r ? r.status : "?"));
+        const t = String(await r.text() || "");
+        box.dataset.local = t;
+        box.textContent = t.trim() || "（空）";
+        box.scrollTop = 0;
+      } catch (e) {
+        showToast("读取失败：" + errText(e), false, 6000);
+      } finally {
+        if (ld) ld.style.display = "none";
+        btn.disabled = false; btn.textContent = "看线上最新";
+      }
+    };
+  }
+  mask.classList.add("show");
+}
+
 async function fontPackChangelog(online) {
   let txt = "";
+  let ali = fontPackMetaBase() + "/FONT-CHANGELOG.md";
   try {
     const j = FONT_PACK_LATEST || {};
-    const ali = j.changelog || (fontPackMetaBase() + "/FONT-CHANGELOG.md");
+    ali = j.changelog || ali;
     const gh = "https://raw.githubusercontent.com/ayss2188/porsche-font/main/FONT-CHANGELOG.md";
     for (const [u, to] of [[ali, 3000], [gh, 5000]]) {
       try {
@@ -9357,8 +9405,7 @@ async function fontPackChangelog(online) {
       } catch (e) {}
     }
   } catch (e) {}
-  const ans = await dialog({ title: "字体更新日志", msg: txt.trim().slice(0, 16000) || "还没有字体更新日志。", okText: "关闭", altText: online ? "" : "看线上最新", order: "cancel-ok-alt" });
-  if (ans === "alt") return fontPackChangelog(true);
+  try { await showUpdateLogModal("字体更新日志", txt, ali); } catch (e) {}
 }
 async function fontPackInstallMenu() {
   const ans = await dialog({
@@ -9392,6 +9439,71 @@ async function fontPackInstallLocal() {
   if (!p) return;
   await fontPackInstallFile(String(p).trim());
 }
+function fontPackPanel(text, ratio, spin) {
+  const p = document.getElementById("fontPackPanel");
+  const t = document.getElementById("fontPackPanelText");
+  const bar = document.getElementById("fontPackBar");
+  const spinEl = document.getElementById("fontPackSpin");
+  if (p) p.style.display = "block";
+  if (t) t.textContent = text || "";
+  if (bar) bar.style.width = Math.round(Math.max(0, Math.min(1, ratio || 0)) * 100) + "%";
+  const wrap = document.getElementById("fontPackBarWrap");
+  if (wrap) wrap.style.display = spin ? "none" : "block";
+  if (spinEl) spinEl.style.display = spin ? "flex" : "none";
+}
+function fontPackPanelHide() {
+  const p = document.getElementById("fontPackPanel");
+  if (p) p.style.display = "none";
+}
+async function fontPackAfterInstall(version) {
+  fontPackPanel("字体包 " + version + " 已安装，正在重置字体选择…", 1, true);
+  try { await ksuExec(`sh ${MODDIR}/fontctl.sh apply none 2>&1`); } catch (e) {}
+  await fontPackState().catch(() => {});
+  try { await refreshAll(true); } catch (e) {}
+  try { await fontPackCheck(false); } catch (e) {}
+  fontPackPanel("字体包 " + version + " 已安装，已切换到无字体。请重新选择字体。", 1, false);
+  showToast("字体包已更新，已切换到无字体，请重新选择字体", false, 6000);
+  setTimeout(fontPackPanelHide, 2600);
+}
+async function fontPackInstallGitHub() {
+  if (!FONT_PACK_LATEST) await fontPackCheck(false);
+  const j = FONT_PACK_LATEST;
+  if (!j || !j.zipUrl) { showToast("先检查字体更新", false, 5000); return; }
+  const name = String(j.zipUrl).split("/").pop().split("?")[0] || ("porsche-fontpack-" + fontPackVariant() + ".zip");
+  const path = "/sdcard/Download/" + name;
+  const total = parseInt(j.size || "0", 10) || 0;
+  fontPackPanel("正在连接 GitHub…", 0.02, false);
+  try {
+    const rc = "/sdcard/Download/.fontpack.dl.rc";
+    const log = "/sdcard/Download/.fontpack.dl.log";
+    try { await ksuExec(`rm -f ${shq(rc)} ${shq(log)}`); } catch (e) {}
+    await ksuExec(`mkdir -p /sdcard/Download; sh -c 'curl -L --connect-timeout 10 -m 300 -o ${shq(path)} ${shq(j.zipUrl)} >${shq(log)} 2>&1; echo $? > ${shq(rc)}' >/dev/null 2>&1 &`);
+    let last = 0;
+    while (true) {
+      await new Promise(r => setTimeout(r, 700));
+      let sz = 0;
+      try { sz = parseInt(String(await ksuExec(`stat -c %s ${shq(path)} 2>/dev/null || echo 0`) || "0").trim(), 10) || 0; } catch (e) {}
+      const hasRc = String(await ksuExec(`test -f ${shq(rc)} && echo 1 || echo 0`) || "").trim() === "1";
+      if (total > 0) {
+        const r = Math.min(1, sz / total);
+        fontPackPanel("正在下载 " + u2fmt(sz) + " / " + u2fmt(total) + "（" + Math.round(r * 100) + "%）", r, false);
+      } else {
+        fontPackPanel("正在下载 " + u2fmt(sz) + "…", sz > last ? 0.2 : 0.05, false);
+      }
+      last = sz;
+      if (hasRc) break;
+    }
+    let code = "0";
+    try { code = String(await ksuExec(`cat ${shq(rc)} 2>/dev/null`) || "0").trim(); } catch (e) {}
+    if (code !== "0") throw new Error("curl 返回 " + code);
+    fontPackPanel("正在校验并安装字体包…", 1, true);
+    await fontPackInstallFile(path);
+  } catch (e) {
+    fontPackPanel("字体包下载失败：" + errText(e), 0, false);
+    setTimeout(fontPackPanelHide, 5000);
+  }
+}
+
 async function fontPackInstallGitHub() {
   if (!FONT_PACK_LATEST) await fontPackCheck(false);
   const j = FONT_PACK_LATEST;
@@ -9416,23 +9528,16 @@ async function fontPackInstallGitHub() {
 }
 async function fontPackInstallFile(path) {
   if (!path) return;
-  if (!(await dialog({
-    title: "安装字体包",
-    msg: "将校验并安装：\n" + path + "\n\n只接受开发者签名的字体包。",
-    okText: "安装"
-  }))) return;
-  showToast("正在校验并安装字体包…", true);
+  fontPackPanel("正在校验并安装字体包…", 1, true);
   let raw = "";
   try { raw = String(await ksuExecTO(`sh ${MODDIR}/fontpack.sh install ${shq(path)} 2>&1`, 180000) || ""); } catch (e) { raw = "ERROR:" + errText(e); }
-  clearToast();
   const m = raw.match(/OK:([^\s:]+):(\d+)/);
-  if (!m) { await dialog({ title: "字体包安装失败", msg: raw.trim().slice(0, 12000) || "没有返回结果", okText: "知道了" }); return; }
-  await fontPackState();
-  await dialog({
-    title: "字体包已安装",
-    msg: "字体包 " + m[1] + " 已安装。\n\nTTC、锁屏时钟和计划缓存已清空。\n请重新应用字体或重启后再生效。",
-    okText: "知道了"
-  });
+  if (!m) {
+    fontPackPanel("字体包安装失败：" + raw.trim().slice(0, 300), 0, false);
+    setTimeout(fontPackPanelHide, 6000);
+    return;
+  }
+  await fontPackAfterInstall(m[1]);
 }
 
 async function porscheToolsUI() {
@@ -9640,8 +9745,8 @@ async function porscheCheckFont() {
 
 async function porscheClockChangelog(online) {
   let txt = "";
+  const ali = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/ENGINE-CHANGELOG.md";
   try {
-    const ali = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/ENGINE-CHANGELOG.md";
     const gh = "https://raw.githubusercontent.com/ayss2188/porsche-font/main/ENGINE-CHANGELOG.md";
     for (const [u, to] of [[ali, 3000], [gh, 5000]]) {
       try {
@@ -9653,8 +9758,7 @@ async function porscheClockChangelog(online) {
   if (!txt.trim()) {
     try { txt = String(await ksuExec(`cat ${LIBROOT}/state/engine/CHANGELOG.md 2>/dev/null`) || ""); } catch (e) {}
   }
-  const ans = await dialog({ title: "字体工具箱更新日志", msg: txt.trim().slice(0, 16000) || "还没有安装插件。", okText: "关闭", altText: online ? "" : "看线上最新", order: "cancel-ok-alt" });
-  if (ans === "alt") return porscheClockChangelog(true);
+  try { await showUpdateLogModal("字体工具箱更新日志", txt, ali); } catch (e) {}
 }
 async function porscheClockUI() {
   advConFootHide();
@@ -12360,7 +12464,7 @@ function hideUpdProg() {
 //   这个标志让界面明确知道"此刻正在下载/安装"，装完之前**绝不**显示红色重启按钮。
 //   以前是根据"版本号 + 开机标识"间接推断，安装期间就会被误判成"已装完待重启"。
 let updRunning = false;
-// 轮询 update.sh 写的状态文件（/data/adb/custom_font_lib/.update/state），直到下载安装结束
+// 轮询 update.sh 写的状态文件（/data/adb/custom_font_lib/state/update/state），直到下载安装结束
 //
 // ★ 2026-10-14 重写：**这是"进度条是摆设"的根因修法**。
 //   以前这里虽然每 500ms 读一次 state，但调用方在下一行就 `await ksuExec('update.sh install')`
@@ -12380,7 +12484,7 @@ function startUpdateProgress() {
   (async function loop() {
     while (!stop) {
       let s = "";
-      try { s = await ksuExec(`cat ${LIB}/.update/state 2>/dev/null`); } catch (e) { s = ""; }
+      try { s = await ksuExec(`cat ${LIBROOT}/state/update/state 2>/dev/null`); } catch (e) { s = ""; }
       const kv = {};
       String(s || "").split("\n").forEach(l => { const m = l.match(/^(\w+)=(.*)$/); if (m) kv[m[1]] = m[2]; });
       const stage = kv.stage || "";
@@ -12805,11 +12909,11 @@ async function resumeRunningUpdate() {
   //      "看起来永远在跑"）。
   let _mt = 0;
   try {
-    _mt = parseInt((await ksuExec(`stat -c %Y ${LIB}/.update/state 2>/dev/null`)).trim(), 10) || 0;
+    _mt = parseInt((await ksuExec(`stat -c %Y ${LIBROOT}/state/update/state 2>/dev/null`)).trim(), 10) || 0;
   } catch (e) { _mt = 0; }
   const _age = _mt > 0 ? (Date.now() / 1000 - _mt) : 1e9;
   if (_age > 900) {                      // 15 分钟没更新 → 当它不存在
-    try { await ksuExec(`rm -f ${LIB}/.update/state`); } catch (e) {}
+    try { await ksuExec(`rm -f ${LIBROOT}/state/update/state`); } catch (e) {}
     return;
   }
 
@@ -12996,7 +13100,7 @@ function u2bar(ratio) {
 /* 读后端状态文件：stage / cur / total */
 async function u2readState() {
   let s = "";
-  try { s = await ksuExec(`cat ${LIB}/.update/state 2>/dev/null`); } catch (e) { s = ""; }
+  try { s = await ksuExec(`cat ${LIBROOT}/state/update/state 2>/dev/null`); } catch (e) { s = ""; }
   const kv = {};
   String(s || "").split("\n").forEach(l => {
     const m = l.match(/^([\w]+)=(.*)$/);
@@ -13120,7 +13224,7 @@ async function updInstall(source) {
   u2paint();
 
   let out = "";
-  try { await ksuExec(`rm -f ${LIB}/.update/state ${LIB}/.update/worker.rc`); } catch (e) {}
+  try { await ksuExec(`rm -f ${LIBROOT}/state/update/state ${LIBROOT}/state/update/worker.rc`); } catch (e) {}
   window.__u2SawActive = false;
   try {
     out = String(await ksuExec(`sh ${MODDIR}/update.sh installbg force ${source}`) || "");
