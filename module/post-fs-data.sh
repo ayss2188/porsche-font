@@ -148,29 +148,6 @@ case "$_NEWROM" in
      } ;;
 esac
 
-# 字体包更新事务：必须在挂载前安装，装完立刻按原选择重建计划，
-# 这样一次重启就能带着新字体开机，不会出现旧挂载 + 新文件混用。
-if [ -f "$STATEDIR/fontpack.pending.zip" ]; then
-  _fpsel=$(tr -d '[:space:]' 2>/dev/null < "$STATEDIR/fontpack.pending.sel")
-  case "$_fpsel" in ""|none) _fpsel=none ;; esac
-  beat post-fs-data "字体包事务：安装 ${_fpsel}"
-  _fplog="$LOGDIR/fontpack-boot.log"
-  if sh "$MODDIR/fontpack.sh" install "$STATEDIR/fontpack.pending.zip" >> "$_fplog" 2>&1; then
-    rm -f "$STATEDIR/fontpack.pending.zip" "$STATEDIR/fontpack.pending.sel" 2>/dev/null
-    if [ "$_fpsel" != none ]; then
-      printf '%s\n' "$_fpsel" > "$MODDIR/pending_font" 2>/dev/null
-      CFS_ALLOW_TTC=1 sh "$MODDIR/fontctl.sh" apply "$_fpsel" >> "$_fplog" 2>&1 || true
-    else
-      printf 'none\n' > "$MODDIR/pending_font" 2>/dev/null
-    fi
-    beat post-fs-data "字体包事务：完成（${_fpsel}）"
-  else
-    rm -f "$STATEDIR/fontpack.pending.zip" "$STATEDIR/fontpack.pending.sel" 2>/dev/null
-    printf 'none\n' > "$MODDIR/pending_font" 2>/dev/null
-    beat post-fs-data "字体包事务：失败，保持无字体"
-  fi
-fi
-
 P=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
 case "$P" in ""|none) exit 0 ;; esac
 # 正在关机/重启：别挂载，直接走

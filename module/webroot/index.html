@@ -6797,13 +6797,7 @@ async function clockPreflight(id) {
 
 async function selectFont(id) {
   if (busy) return;
-  try {
-    const _need = String(await ksuExec(`test -f ${LIBROOT}/state/fontpack.reboot && echo 1`) || "").trim();
-    if (_need === "1") {
-      showToast("字体包刚更新，请先点「立即重启生效」，重启后再选择字体", true, 7000);
-      return;
-    }
-  } catch (e) {}
+
   if (!(await clockPreflight(id))) return;
   const big = selIds(id).map(x => fonts.find(f => f.id === x)).filter(f => f && f.size >= HUGE_FONT);
   if (big.length) {
@@ -9626,28 +9620,44 @@ async function fontPackInstallGitHub() {
 
 async function fontPackInstallFile(path) {
   if (!path) return;
-  fontPackPanel("正在校验字体包…", 1, true);
+  let sel = "";
+  try { sel = String(await ksuExec(`cat ${MODDIR}/pending_font 2>/dev/null`) || "").trim(); } catch (e) {}
+  if (!sel || sel === "none") {
+    try { sel = String(await ksuExec(`cat ${MODDIR}/active_font 2>/dev/null`) || "").trim(); } catch (e) {}
+  }
+  if (!sel) sel = "none";
+  fontPackPanel("正在校验并安装字体包…", 0.2, true);
   let raw = "";
-  try { raw = String(await ksuExecTO(`sh ${MODDIR}/fontpack.sh stage ${shq(path)} 2>&1`, 180000) || ""); } catch (e) { raw = "ERROR:" + errText(e); }
-  const m = raw.match(/OK:staged:([^\s:]+)/);
+  try { raw = String(await ksuExecTO(`sh ${MODDIR}/fontpack.sh install ${shq(path)} 2>&1`, 600000) || ""); } catch (e) { raw = "ERROR:" + errText(e); }
+  const m = raw.match(/OK:([^\s:]+):(\d+)/);
   if (!m) {
-    fontPackPanel("字体包校验失败：" + raw.trim().slice(0, 300), 0, false);
+    fontPackPanel("字体包安装失败：" + raw.trim().slice(0, 300), 0, false);
     setTimeout(fontPackPanelHide, 6000);
     return;
   }
-  await fontPackStageDone(m[1]);
-}
-async function fontPackStageDone(sel) {
-  try { await ksuExec(`mkdir -p ${LIBROOT}/state; echo 1 > ${LIBROOT}/state/fontpack.reboot`); } catch (e) {}
-  try { await ksuExec(`sh ${MODDIR}/fontctl.sh apply none 2>&1`); } catch (e) {}
-  fontPackPanel("字体包已校验并暂存，重启后自动安装，并恢复当前字体。", 1, false);
+  if (sel && sel !== "none") {
+    fontPackPanel("字体包已安装，正在按当前字体重新生成挂载计划…", 1, true);
+    let out = "";
+    try { out = String(await ksuExecTO(`CFS_ALLOW_TTC=1 sh ${MODDIR}/fontctl.sh apply ${shq(sel)} 2>&1`, 900000) || ""); } catch (e) { out = "ERROR:" + errText(e); }
+    if (!/^OK:/m.test(out)) {
+      fontPackPanel("字体包已安装，但重新应用字体失败：" + out.trim().slice(-300), 0, false);
+      setTimeout(fontPackPanelHide, 8000);
+      return;
+    }
+  } else {
+    try { await ksuExec(`sh ${MODDIR}/fontctl.sh apply none 2>&1`); } catch (e) {}
+  }
+  try { await ksuExec(`rm -f ${LIBROOT}/state/fontpack.reboot`); } catch (e) {}
+  await fontPackState().catch(() => {});
+  try { await refreshAll(true); } catch (e) {}
+  fontPackPanel("字体包 " + m[1] + " 已安装，挂载计划已重建。点下面按钮重启生效。", 1, false);
   const btn = document.getElementById("fontPackInstallBtn");
   if (btn) {
-    btn.textContent = "立即重启安装";
+    btn.textContent = "立即重启生效";
     btn.className = "g-btn urgent";
     btn.onclick = () => { try { doReboot(); } catch (e) {} };
   }
-  showToast("字体包已准备，重启后自动安装", false, 7000);
+  showToast("字体包安装完成，请重启生效", false, 7000);
 }
 
 async function porscheToolsUI() {
