@@ -114,6 +114,24 @@ _fp_state() {
   fi
 }
 
+_fp_stage() {
+  _zip="$1"
+  [ -f "$_zip" ] || _fp_die "找不到字体包：$_zip"
+  _stage="$STATEDIR/fontpack.stage.$$"
+  rm -rf "$_stage" 2>/dev/null
+  mkdir -p "$_stage" 2>/dev/null || _fp_die "无法创建临时目录"
+  STAGE="$_stage"
+  unzip -q -o "$_zip" -d "$_stage" 2>/dev/null || _fp_die "解压失败"
+  _fp_verify "$_stage"
+  mkdir -p "$STATEDIR" 2>/dev/null
+  cp -f "$_zip" "$STATEDIR/fontpack.pending.zip" 2>/dev/null || _fp_die "暂存字体包失败"
+  _sel=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/pending_font")
+  case "$_sel" in ""|none) _sel=$(tr -d '[:space:]' 2>/dev/null < "$MODDIR/active_font") ;; esac
+  case "$_sel" in ""|none) _sel=none ;; esac
+  printf '%s\n' "$_sel" > "$STATEDIR/fontpack.pending.sel" 2>/dev/null
+  echo "OK:staged:$_sel"
+}
+
 _fp_install() {
   _zip="$1"
   [ -f "$_zip" ] || _fp_die "找不到字体包：$_zip"
@@ -183,5 +201,6 @@ case "${1:-}" in
   state) _fp_state ;;
   version) sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$STATEDIR/font.pack.json" 2>/dev/null | head -n1 ;; 
   install) shift; _fp_install "$1" ;;
-  *) echo "ERROR:用法: fontpack.sh [state|version|install <zip>]" ;;
+  stage) shift; _fp_stage "$1" ;;
+  *) echo "ERROR:用法: fontpack.sh [state|version|install|stage <zip>]" ;;
 esac

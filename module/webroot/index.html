@@ -9626,16 +9626,28 @@ async function fontPackInstallGitHub() {
 
 async function fontPackInstallFile(path) {
   if (!path) return;
-  fontPackPanel("正在校验并安装字体包…", 1, true);
+  fontPackPanel("正在校验字体包…", 1, true);
   let raw = "";
-  try { raw = String(await ksuExecTO(`sh ${MODDIR}/fontpack.sh install ${shq(path)} 2>&1`, 180000) || ""); } catch (e) { raw = "ERROR:" + errText(e); }
-  const m = raw.match(/OK:([^\s:]+):(\d+)/);
+  try { raw = String(await ksuExecTO(`sh ${MODDIR}/fontpack.sh stage ${shq(path)} 2>&1`, 180000) || ""); } catch (e) { raw = "ERROR:" + errText(e); }
+  const m = raw.match(/OK:staged:([^\s:]+)/);
   if (!m) {
-    fontPackPanel("字体包安装失败：" + raw.trim().slice(0, 300), 0, false);
+    fontPackPanel("字体包校验失败：" + raw.trim().slice(0, 300), 0, false);
     setTimeout(fontPackPanelHide, 6000);
     return;
   }
-  await fontPackAfterInstall(m[1]);
+  await fontPackStageDone(m[1]);
+}
+async function fontPackStageDone(sel) {
+  try { await ksuExec(`mkdir -p ${LIBROOT}/state; echo 1 > ${LIBROOT}/state/fontpack.reboot`); } catch (e) {}
+  try { await ksuExec(`sh ${MODDIR}/fontctl.sh apply none 2>&1`); } catch (e) {}
+  fontPackPanel("字体包已校验并暂存，重启后自动安装，并恢复当前字体。", 1, false);
+  const btn = document.getElementById("fontPackInstallBtn");
+  if (btn) {
+    btn.textContent = "立即重启安装";
+    btn.className = "g-btn urgent";
+    btn.onclick = () => { try { doReboot(); } catch (e) {} };
+  }
+  showToast("字体包已准备，重启后自动安装", false, 7000);
 }
 
 async function porscheToolsUI() {
