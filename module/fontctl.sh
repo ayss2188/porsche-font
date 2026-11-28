@@ -2294,7 +2294,15 @@ ${_oldr}
           #   新鲜度由下面的 -ot 门把守：字体或系统合集更新了才重做。
           TTC_CACHE="$CACHEDIR/ttc"
           cand="$TTC_CACHE/${id}.ttc${nf}_${tag}_${_csrc:-ttc}"
-          if [ ! -s "$cand" ] || [ "$cand" -ot "$src" ] 2>/dev/null || [ "$cand" -ot "/$rel" ] 2>/dev/null; then
+          # 缓存新鲜度不能只看 mtime：字体包安装/预合成并发时，TTC 可能是在
+          # 字体还没写完（更小）的时候生成的，之后字体变大但 mtime 反而更旧，
+          # 单看 -ot 会把这种“小号半成品 TTC”永久复用 → 开机卡死。
+          # 这里把源字体字节数写进 sidecar，字节数不一致就强制重合成。
+          _srcsz=$(stat -c %s "$src" 2>/dev/null | tr -dc '0-9')
+          _side="$cand.srcsz"
+          _side_ok=0
+          [ -s "$cand" ] && [ -s "$_side" ] && [ "$(cat "$_side" 2>/dev/null)" = "$_srcsz" ] && _side_ok=1
+          if [ "$_side_ok" != 1 ] || [ "$cand" -ot "$src" ] 2>/dev/null || [ "$cand" -ot "/$rel" ] 2>/dev/null; then
             # 先算空间：这次要合成 = 原合集大小 + 用户字体大小。宁可这一个槽位不换，
             # 也不能把 /data 写满 —— 写满之后系统会起不来（真机反馈过强制重启后黑屏）。
               # ★ 2026-10-31：wc -c 会把几十 MB 的合集整份读一遍，stat 只读元数据
@@ -2381,8 +2389,10 @@ ${_oldr}
               chcon u:object_r:system_file:s0 "$cand_tmp" 2>/dev/null
               # tmp+mv 原子落位：预热和 apply 并发合成同一产物也不会写坏
               if mv -f "$cand_tmp" "$cand" 2>/dev/null; then
-                printf '%s %s faces=%s replace=%s via=ttc-synth(已入永久缓存)\n' \
-                  "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" >> "$LOGDIR/ttc.log" 2>/dev/null
+                printf '%s\n' "$_srcsz" > "$cand.srcsz" 2>/dev/null
+                printf '%s %s faces=%s replace=%s via=ttc-synth(已入永久缓存) src=%s out=%s\n' \
+                  "$id" "$rel" "$nf" "$(printf '%s' "$cn" | tr ' ' ',')" "${_srcsz:-?}" "$(stat -c %s "$cand" 2>/dev/null)" \
+                  >> "$LOGDIR/ttc.log" 2>/dev/null
                 if [ "${CFS_PREWARM:-0}" = 1 ]; then
                   printf 'stage=ttcdone id=%s rel=%s\n' "$sel" "${rel##*/}" > "$STATEDIR/pw.$sel.state" 2>/dev/null
                 fi
