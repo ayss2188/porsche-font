@@ -9260,17 +9260,38 @@ async function porscheRefreshLatest(silent) {
   const ll = document.getElementById("porscheLatestLabel");
   if (!ll) return;
   if (!silent) { ll.textContent = "检查中…"; ll.className = "value off"; }
+  // 先让「检查中…」画出来，再联网
+  await new Promise(r => setTimeout(r, 40));
   try {
-    const o = String(await ksuExecTO(`sh ${MODDIR}/engine.sh check-update`, 15000) || "");
-    const latest = (o.match(/^LATEST=(.*)$/m) || [])[1] || "";
-    const has = /HAS_UPDATE=1/.test(o);
+    const url = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/engine.json?t=" + Date.now();
+    const r = await withTimeout(fetch(url, { cache: "no-store" }), 6000);
+    if (!r || !r.ok) throw new Error("HTTP " + (r ? r.status : "?"));
+    const meta = await r.json();
+    const latest = String(meta.version || "").trim();
     if (!latest) {
       ll.textContent = "未检查";
       ll.className = "value off";
       if (!silent) showToast("没有拿到插件版本信息", false, 6000);
       return;
     }
-    ll.textContent = vLabel(latest) + (has ? "（可更新）" : "（已是最新）");
+    let installed = false, iv = "", ic = 0;
+    try {
+      const est = String(await engineStatusRaw() || "");
+      installed = /INSTALLED=1/.test(est);
+      iv = ((est.match(/^VERSION=(.*)$/m) || [])[1] || "").trim();
+      ic = parseInt((est.match(/^CODE=(\d+)/m) || [])[1] || "0", 10) || 0;
+    } catch (e) {}
+    const lc = parseInt(meta.code || "0", 10) || 0;
+    const gtVer = (a, b) => {
+      const pa = String(a).replace(/^v/i, "").split(".").map(x => parseInt(x, 10) || 0);
+      const pb = String(b).replace(/^v/i, "").split(".").map(x => parseInt(x, 10) || 0);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+      }
+      return false;
+    };
+    const has = installed ? (gtVer(latest, iv) || (lc > ic)) : true;
+    ll.textContent = vLabel(latest) + (has ? (installed ? "（可更新）" : "（可安装）") : "（已是最新）");
     ll.className = "value " + (has ? "active" : "off");
     if (!silent) showToast(has ? ("发现插件新版 " + latest) : "插件已是最新版本", false, 5000);
   } catch (e) {
@@ -9279,6 +9300,7 @@ async function porscheRefreshLatest(silent) {
     if (!silent) showToast("检查失败：" + errText(e), false, 7000);
   }
 }
+
 async function porscheClockCheck() {
   await porscheRefreshLatest(false);
 }
@@ -9468,18 +9490,11 @@ async function showUpdateLogModal(title, text, onlineUrl) {
 
 async function fontPackChangelog(online) {
   let txt = "";
-  let ali = fontPackMetaBase() + "/FONT-CHANGELOG.md";
-  try {
-    const j = FONT_PACK_LATEST || {};
-    ali = j.changelog || ali;
-    const gh = "https://raw.githubusercontent.com/ayss2188/porsche-font/main/FONT-CHANGELOG.md";
-    for (const [u, to] of [[ali, 3000], [gh, 5000]]) {
-      try {
-        const rr = await withTimeout(fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), to);
-        if (rr && rr.ok) { txt = String(await rr.text() || ""); if (txt.trim()) break; }
-      } catch (e) {}
-    }
-  } catch (e) {}
+  const ali = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/" + fontPackVariant() + "/FONT-CHANGELOG.md";
+  try { txt = String(await ksuExec(`cat ${MODDIR}/fontpack-changelog.md 2>/dev/null`) || ""); } catch (e) {}
+  if (!txt.trim()) {
+    try { txt = String(await ksuExec(`cat ${LIBROOT}/state/font-pack-changelog.md 2>/dev/null`) || ""); } catch (e) {}
+  }
   try { await showUpdateLogModal("字体更新日志", txt, ali); } catch (e) {}
 }
 async function fontPackInstallMenu() {
@@ -9812,15 +9827,7 @@ async function porscheCheckFont() {
 async function porscheClockChangelog(online) {
   let txt = "";
   const ali = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/ENGINE-CHANGELOG.md";
-  try {
-    const gh = "https://raw.githubusercontent.com/ayss2188/porsche-font/main/ENGINE-CHANGELOG.md";
-    for (const [u, to] of [[ali, 3000], [gh, 5000]]) {
-      try {
-        const r = await withTimeout(fetch(u + "?t=" + Date.now(), { cache: "no-store" }), to);
-        if (r && r.ok) { txt = String(await r.text() || ""); if (txt.trim()) break; }
-      } catch (e) {}
-    }
-  } catch (e) {}
+  try { txt = String(await ksuExec(`cat ${LIBROOT}/state/engine/ui/CHANGELOG.md 2>/dev/null`) || ""); } catch (e) {}
   if (!txt.trim()) {
     try { txt = String(await ksuExec(`cat ${LIBROOT}/state/engine/CHANGELOG.md 2>/dev/null`) || ""); } catch (e) {}
   }
@@ -13068,8 +13075,8 @@ async function resumeRunningUpdate() {
   setTimeout(() => { refreshGoogle().catch(() => {}); }, 400);
   setTimeout(async () => {
     try {
-      const r = await porscheRefreshStatus();
-      if (r && r.ins) await porscheRefreshLatest(true);
+      await porscheRefreshStatus();
+      await porscheRefreshLatest(true);
     } catch (e) {}
   }, 1000);
   // ★ 2026-10-25：进页面读一次全部开关（之后就靠内存，不再每次开菜单都读）
