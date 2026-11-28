@@ -77,15 +77,14 @@ _CFS_CHCON=""
 # ★ 荣耀/Android 17 等：开机脚本可能跑在独立 mount namespace，
 #   直接 mount 只有当前 shell 看得见，zygote/框架读不到 → 字体不生效。
 #   这里检测 PID 1 与当前进程是否同一命名空间，不同就用 nsenter 挂进去。
+# ★ 2026-11-28：不能再靠 readlink 比较决定是否 nsenter。
+#   真机（KSU / Android 17）post-fs-data 的脚本有时读不到 /proc/1/ns/mnt，
+#   于是 _CFS_NS 为空，mount 只落在脚本自己的临时 namespace：
+#   日志写“成功”，但 PID 1 和普通 App 的 mount 表里都没有。
+#   nsenter 存在就一律从 PID 1 的 mount namespace 挂；同 namespace 时也安全。
 _CFS_NS=""
-if [ -r /proc/1/ns/mnt ] && [ -r /proc/self/ns/mnt ]; then
-  _cfs_ns1=$(readlink /proc/1/ns/mnt 2>/dev/null)
-  _cfs_ns2=$(readlink /proc/self/ns/mnt 2>/dev/null)
-  if [ -n "$_cfs_ns1" ] && [ -n "$_cfs_ns2" ] && [ "$_cfs_ns1" != "$_cfs_ns2" ]; then
-    if command -v nsenter >/dev/null 2>&1; then
-      _CFS_NS="nsenter -t 1 -m --"
-    fi
-  fi
+if command -v nsenter >/dev/null 2>&1; then
+  _CFS_NS="nsenter -t 1 -m --"
 fi
 
 _mount() {

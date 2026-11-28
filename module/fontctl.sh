@@ -1219,8 +1219,11 @@ commit_payload() {
     fi
     rm -f "$MODDIR/skip_mount"
   else
-    # 自带挂载开机时直接挂字体库里的文件，模块目录里不需要任何副本
-    touch "$MODDIR/skip_mount"
+    # 自带挂载开机时直接挂字体库里的文件，模块目录里不需要任何副本。
+    # ★ 不能 touch skip_mount：KernelSU 看到它后会把模块脚本放进隔离 namespace，
+    #   自挂载只在临时 namespace 生效，重启后 mount 表里什么都看不到（真机实测）。
+    #   模块目录本身没有 system/ 副本，保留管理器挂载不会重叠。
+    rm -f "$MODDIR/skip_mount" 2>/dev/null
   fi
   rm -rf "$stage" 2>/dev/null
 
