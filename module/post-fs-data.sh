@@ -18,6 +18,7 @@ LIB="$LIBROOT/fonts"
 # 这里还没 source common.sh，必须先自己算状态目录；否则会写到只读的 /rom_active
 STATEDIR="$LIBROOT/state"
 mkdir -p "$STATEDIR" 2>/dev/null
+rm -f "$STATEDIR/fontpack.reboot" 2>/dev/null
 # 插件目录给 WebUI 读权限（ksu.exec 可能以 shell 身份运行）
 [ -d "$STATEDIR/engine" ] && chmod -R a+rX "$STATEDIR/engine" 2>/dev/null
 if [ -x "$STATEDIR/engine/bin/run" ]; then
