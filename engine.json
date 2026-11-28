@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "code": 10001,
+  "arch": "arm64",
+  "file": "fontlab-engine-porsche-arm64-v1.0.zip",
+  "url": "https://github.com/ayss2188/porsche-font/releases/download/engine-v1.0/fontlab-engine-porsche-arm64-v1.0.zip",
+  "sha256": "bdc8ea5e6e30163838df0803b37e57513357c35cb98290fa631642fed9e76506",
+  "size": 27185518
+}

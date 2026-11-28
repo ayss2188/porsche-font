@@ -9263,10 +9263,18 @@ async function porscheRefreshLatest(silent) {
   // 先让「检查中…」画出来，再联网
   await new Promise(r => setTimeout(r, 40));
   try {
-    const url = "https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/engine.json?t=" + Date.now();
-    const r = await withTimeout(fetch(url, { cache: "no-store" }), 6000);
-    if (!r || !r.ok) throw new Error("HTTP " + (r ? r.status : "?"));
-    const meta = await r.json();
+    const sources = [
+      ["https://cfs-porsche-downloads-q2188366745.oss-cn-hangzhou.aliyuncs.com/porsche/engine.json", 3000],
+      ["https://raw.githubusercontent.com/ayss2188/porsche-font/main/engine.json", 7000]
+    ];
+    let meta = null;
+    for (const [u, to] of sources) {
+      try {
+        const r = await withTimeout(fetch(u + "?t=" + Date.now(), { cache: "no-store" }), to);
+        if (r && r.ok) { meta = await r.json(); if (meta && meta.version) break; }
+      } catch (e) {}
+    }
+    if (!meta || !meta.version) throw new Error("no meta");
     const latest = String(meta.version || "").trim();
     if (!latest) {
       ll.textContent = "未检查";
@@ -9295,9 +9303,9 @@ async function porscheRefreshLatest(silent) {
     ll.className = "value " + (has ? "active" : "off");
     if (!silent) showToast(has ? ("发现插件新版 " + latest) : "插件已是最新版本", false, 5000);
   } catch (e) {
-    ll.textContent = "检查失败（可能要梯子）";
+    ll.textContent = "检查失败（阿里云 3 秒无响应，GitHub 也没连上）";
     ll.className = "value off";
-    if (!silent) showToast("检查失败：" + errText(e), false, 7000);
+    if (!silent) showToast("插件检查失败：阿里云 3 秒无响应，GitHub 也没连上", false, 7000);
   }
 }
 
@@ -9446,20 +9454,22 @@ async function fontPackCheck(manual) {
     }
     if (manual) showToast(has ? "发现字体包新版 " + (j.version || "") : "字体包已是最新版本", false, 5000);
   } catch (e) {
-    if (lbl) { lbl.textContent = "检查失败"; lbl.className = "value off"; }
-    if (manual) showToast("字体包检查失败：" + errText(e), false, 6000);
+    const msg = "阿里云 3 秒无响应，GitHub 也没连上";
+    if (lbl) { lbl.textContent = "检查失败（" + msg + "）"; lbl.className = "value off"; }
+    if (manual) showToast("字体包检查失败：" + msg, false, 7000);
   }
 }
-async function showUpdateLogModal(title, text, onlineUrl) {
+async function showUpdateLogModal(title, text, onlineUrl, fallbackUrl) {
   const mask = document.getElementById("logMask");
   const h = mask && mask.querySelector("h3");
   const box = document.getElementById("logText");
   const ld = document.getElementById("logLoading");
   const btn = document.getElementById("logOnlineBtn");
   if (!mask || !box) return;
+  const localText = String(text || "").trim() || "（本版本没有附带更新日志）";
   if (h) h.textContent = title || "更新日志";
-  box.dataset.local = String(text || "");
-  box.textContent = String(text || "").trim() || "（空）";
+  box.dataset.local = localText;
+  box.textContent = localText;
   box.scrollTop = 0;
   if (ld) ld.style.display = "none";
   if (btn) {
@@ -9470,19 +9480,25 @@ async function showUpdateLogModal(title, text, onlineUrl) {
       if (!onlineUrl) return;
       btn.disabled = true; btn.textContent = "联网中…";
       if (ld) ld.style.display = "flex";
-      try {
-        const r = await withTimeout(fetch(onlineUrl + (onlineUrl.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), 8000);
-        if (!r || !r.ok) throw new Error("HTTP " + (r ? r.status : "?"));
-        const t = String(await r.text() || "");
-        box.dataset.local = t;
-        box.textContent = t.trim() || "（空）";
-        box.scrollTop = 0;
-      } catch (e) {
-        showToast("读取失败：" + errText(e), false, 6000);
-      } finally {
-        if (ld) ld.style.display = "none";
-        btn.disabled = false; btn.textContent = "看线上最新";
+      let got = "";
+      const sources = fallbackUrl ? [[onlineUrl, 3000], [fallbackUrl, 7000]] : [[onlineUrl, 8000]];
+      for (const [u, to] of sources) {
+        try {
+          const r = await withTimeout(fetch(u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), to);
+          if (r && r.ok) { got = String(await r.text() || ""); if (got.trim()) break; }
+        } catch (e) {}
       }
+      if (got.trim()) {
+        box.dataset.local = got;
+        box.textContent = got.trim();
+      } else {
+        const msg = "读取失败：阿里云 3 秒无响应，GitHub 也没连上";
+        box.textContent = msg + "\n\n（下面保留的是本版本自带的更新日志）\n\n" + localText;
+        showToast(msg, false, 7000);
+      }
+      box.scrollTop = 0;
+      if (ld) ld.style.display = "none";
+      btn.disabled = false; btn.textContent = "看线上最新";
     };
   }
   mask.classList.add("show");
@@ -9495,7 +9511,7 @@ async function fontPackChangelog(online) {
   if (!txt.trim()) {
     try { txt = String(await ksuExec(`cat ${LIBROOT}/state/font-pack-changelog.md 2>/dev/null`) || ""); } catch (e) {}
   }
-  try { await showUpdateLogModal("字体更新日志", txt, ali); } catch (e) {}
+  try { await showUpdateLogModal("字体更新日志", txt, ali, "https://raw.githubusercontent.com/ayss2188/porsche-font/main/FONT-CHANGELOG.md"); } catch (e) {}
 }
 async function fontPackInstallMenu() {
   const ans = await dialog({
@@ -9831,7 +9847,10 @@ async function porscheClockChangelog(online) {
   if (!txt.trim()) {
     try { txt = String(await ksuExec(`cat ${LIBROOT}/state/engine/CHANGELOG.md 2>/dev/null`) || ""); } catch (e) {}
   }
-  try { await showUpdateLogModal("字体工具箱更新日志", txt, ali); } catch (e) {}
+  if (!txt.trim()) {
+    try { txt = String(await ksuExec(`cat ${MODDIR}/engine-changelog.md 2>/dev/null`) || ""); } catch (e) {}
+  }
+  try { await showUpdateLogModal("字体工具箱更新日志", txt, ali, "https://raw.githubusercontent.com/ayss2188/porsche-font/main/ENGINE-CHANGELOG.md"); } catch (e) {}
 }
 async function porscheClockUI() {
   advConFootHide();
@@ -12726,7 +12745,7 @@ async function loadOnlineChangelog() {
         if (r && r.ok) { json = await r.json(); break; }
       } catch (e) { /* 换下一个源 */ }
     }
-    if (!json) throw new Error("连不上更新服务器");
+    if (!json) throw new Error("阿里云 3 秒无响应，GitHub 也没连上");
     const logUrl = json.changelog || json.CHANGELOG || "";
     if (!logUrl) throw new Error("更新信息里没有 changelog 地址");
     const r2 = await withTimeout(fetch(logUrl + (logUrl.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }), 12000);
