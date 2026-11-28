@@ -9586,35 +9586,52 @@ async function fontPackInstallGitHub() {
   const name = String(j.zipUrl).split("/").pop().split("?")[0] || ("porsche-fontpack-" + fontPackVariant() + ".zip");
   const path = "/sdcard/Download/" + name;
   const total = parseInt(j.size || "0", 10) || 0;
-  fontPackPanel("正在连接 GitHub…", 0.02, false);
-  try {
-    const rc = "/sdcard/Download/.fontpack.dl.rc";
-    const log = "/sdcard/Download/.fontpack.dl.log";
-    try { await ksuExec(`rm -f ${shq(rc)} ${shq(log)}`); } catch (e) {}
-    await ksuExec(`mkdir -p /sdcard/Download; sh -c 'curl -L --connect-timeout 10 -m 300 -o ${shq(path)} ${shq(j.zipUrl)} >${shq(log)} 2>&1; echo $? > ${shq(rc)}' >/dev/null 2>&1 &`);
-    let last = 0;
-    while (true) {
-      await new Promise(r => setTimeout(r, 700));
-      let sz = 0;
-      try { sz = parseInt(String(await ksuExec(`stat -c %s ${shq(path)} 2>/dev/null || echo 0`) || "0").trim(), 10) || 0; } catch (e) {}
-      const hasRc = String(await ksuExec(`test -f ${shq(rc)} && echo 1 || echo 0`) || "").trim() === "1";
-      if (total > 0) {
-        const r = Math.min(1, sz / total);
-        fontPackPanel("正在下载 " + u2fmt(sz) + " / " + u2fmt(total) + "（" + Math.round(r * 100) + "%）", r, false);
-      } else {
-        fontPackPanel("正在下载 " + u2fmt(sz) + "…", sz > last ? 0.2 : 0.05, false);
+  const urls = [j.zipUrl, j.aliyunZipUrl].filter(Boolean);
+  let ok = false, lastErr = "";
+  for (const url of urls) {
+    const src = url.indexOf("aliyuncs.com") >= 0 ? "阿里云" : "GitHub";
+    fontPackPanel("正在连接 " + src + "…", 0.02, false);
+    try {
+      const rc = "/sdcard/Download/.fontpack.dl.rc";
+      const log = "/sdcard/Download/.fontpack.dl.log";
+      try { await ksuExec(`rm -f ${shq(path)} ${shq(rc)} ${shq(log)}`); } catch (e) {}
+      await ksuExec(`mkdir -p /sdcard/Download; sh -c 'curl -fL --connect-timeout 10 -m 300 -o ${shq(path)} ${shq(url)} >${shq(log)} 2>&1; echo $? > ${shq(rc)}' >/dev/null 2>&1 &`);
+      while (true) {
+        await new Promise(r => setTimeout(r, 700));
+        let sz = 0;
+        try { sz = parseInt(String(await ksuExec(`stat -c %s ${shq(path)} 2>/dev/null || echo 0`) || "0").trim(), 10) || 0; } catch (e) {}
+        const hasRc = String(await ksuExec(`test -f ${shq(rc)} && echo 1 || echo 0`) || "").trim() === "1";
+        if (total > 0) {
+          const r = Math.min(1, sz / total);
+          fontPackPanel("正在从" + src + "下载 " + u2fmt(sz) + " / " + u2fmt(total) + "（" + Math.round(r * 100) + "%）", r, false);
+        } else {
+          fontPackPanel("正在从" + src + "下载 " + u2fmt(sz) + "…", 0.08, false);
+        }
+        if (hasRc) break;
       }
-      last = sz;
-      if (hasRc) break;
-    }
-    let code = "0";
-    try { code = String(await ksuExec(`cat ${shq(rc)} 2>/dev/null`) || "0").trim(); } catch (e) {}
-    if (code !== "0") throw new Error("curl 返回 " + code);
+      let code = "0";
+      try { code = String(await ksuExec(`cat ${shq(rc)} 2>/dev/null`) || "0").trim(); } catch (e) {}
+      if (code !== "0") throw new Error(src + " curl 返回 " + code);
+      let sz = 0;
+      try { sz = parseInt(String(await ksuExec(`stat -c %s ${shq(path)} 2>/dev/null`) || "0").trim(), 10) || 0; } catch (e) {}
+      if (total > 0 && sz !== total) throw new Error(src + " 下载不完整：" + sz + " / " + total);
+      const magic = String(await ksuExec(`od -An -tx1 -N2 ${shq(path)} 2>/dev/null`) || "").trim().replace(/\s+/g, "");
+      if (magic !== "504b") throw new Error(src + " 返回的不是 zip（magic=" + magic + "）");
+      ok = true;
+      break;
+    } catch (e) { lastErr = errText(e); }
+  }
+  if (!ok) {
+    fontPackPanel("字体包下载失败：" + (lastErr || "两个源都失败"), 0, false);
+    setTimeout(fontPackPanelHide, 6000);
+    return;
+  }
+  try {
     fontPackPanel("正在校验并安装字体包…", 1, true);
     await fontPackInstallFile(path);
   } catch (e) {
-    fontPackPanel("字体包下载失败：" + errText(e), 0, false);
-    setTimeout(fontPackPanelHide, 5000);
+    fontPackPanel("字体包安装失败：" + errText(e), 0, false);
+    setTimeout(fontPackPanelHide, 6000);
   }
 }
 
