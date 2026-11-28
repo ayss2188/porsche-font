@@ -330,6 +330,19 @@ else
   ui_print "- 挂载方式：模块自带挂载（无需元模块）"
 fi
 
+# ★ 升级不是“重装”：新模块目录里可能还带着上一版的 slots.map / payload。
+#   字体文件或布局一变，这些旧计划就可能指向已经不存在的 TTC / 时钟 / 槽位源，
+#   表现就是“挂载脚本说成功，但框架用的是旧计划 / 根本挂不上”，卸载重装反而正常。
+#   所以升级时先清掉旧挂载现场，再按 LAST 重新生成一份全新计划。
+#   字体库、用户字体、设置、备份都不动。
+if [ -f "$OLD/module.prop" ]; then
+  ui_print "- 升级：清理旧挂载计划，重新生成"
+  rm -f "$MODPATH/slots.map" "$MODPATH/slots.applied" "$MODPATH/slots.boot.map" \
+        "$MODPATH/slots.map.prev" "$MODPATH/mount.state" "$MODPATH/mount_missed" 2>/dev/null
+  rm -rf "$MODPATH/payload" 2>/dev/null
+  mkdir -p "$MODPATH/payload" 2>/dev/null
+fi
+
 RESTORED=0
 if [ "$LAST" != none ]; then
   ui_print "- 正在恢复上次的字体选择…"
