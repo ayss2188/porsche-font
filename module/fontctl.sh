@@ -2234,6 +2234,13 @@ ${_oldr}
         *.ttc|*.TTC)
           # 用户手动删过 TTC：后台 prewarm 不再自动补，等真正切字体时再生成
           [ "${CFS_NO_TTC:-0}" = "1" ] && continue
+          # 字体包/字体元数据可标记 ttc_skip=1：这类字体合成 5-face 合集在部分机型
+          # 会触发开机卡死（PICO 这类超大可变字体尤其明显），只替换普通槽位更安全。
+          if [ "$(meta_get "$id" ttc_skip 0 2>/dev/null)" = "1" ]; then
+            printf '%s %s via=ttc_skip detail=字体标记 ttc_skip=1，跳过合集替换\n' \
+              "$id" "$rel" >> "$LOGDIR/ttc.log" 2>/dev/null
+            continue
+          fi
           # 生成器不在（包不完整 / 老包）→ **明确记一笔再跳过**。
           # 不这么写的话，用户看到的是"开关亮着、中文一点没变"，而报告里也看不出为什么
           # （ttc_faces_of / isnum 都在 ttcwrap.sh 里，没它连 faces 都读不出来）。

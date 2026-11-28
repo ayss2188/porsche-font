@@ -165,6 +165,10 @@ _fp_install() {
     _vf=0
     command -v builtin_is_vf >/dev/null 2>&1 && builtin_is_vf "$LIB/builtin_$_id.ttf" >/dev/null 2>&1 && _vf=1
     command -v _builtin_meta_ensure >/dev/null 2>&1 && _builtin_meta_ensure "builtin_$_id" "$_vf" >/dev/null 2>&1
+    _skip_ttc=$(_fp_field "$_stage/font.prop" "font.$_id.ttc_skip")
+    if [ "$_skip_ttc" = "1" ] && [ -f "$LIB/builtin_$_id.meta" ]; then
+      grep -q '^ttc_skip=' "$LIB/builtin_$_id.meta" 2>/dev/null || printf 'ttc_skip=1\n' >> "$LIB/builtin_$_id.meta"
+    fi
   done
 
   _fp_clear_caches
